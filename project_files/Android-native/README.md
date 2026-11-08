@@ -20,19 +20,19 @@ On the first start the game data is unpacked to the phone's storage (a percentag
 
 ### The setup screen
 
-Three tabs along the top (Teams, Map, Rules), an Options button at the top right, and a bar along the bottom that always shows what will be played ("4 teams, 16 hedgehogs ... Default"), the data state and the Start game button. Everything you change is remembered for the next launch, including which tab you were on.
+One row along the top with the title, three tabs (Teams, Map, Rules) and a small Options button, and a bar along the bottom that always shows what will be played ("4 teams, 16 hedgehogs ... Default"), the data state and the Start game button. Everything you change is remembered for the next launch, including which tab you were on.
 
 **Teams**
 
 | Control | What it does |
 |---|---|
 | Add team, the cross on a team | Two to eight teams |
-| Randomise teams | New random names, hats, fort, grave and voice for every team (keeps colour, player and hedgehog count) |
+| Randomise (beside the Teams heading) | New random names, hats, fort, grave and voice for every team (keeps colour, player and hedgehog count) |
 | Colour square | The engine's nine team colours. Teams with the same colour play on the same side (a clan) and take turns together |
 | Name field | Team name (up to 32 characters; characters that cannot be in a file name are dropped) |
-| Player button | Human, or Computer level 1 (easiest) to 5 (hardest). A computer team plays by itself when its turn comes |
+| Player button | Human, or CPU 1 (easiest) to CPU 5 (hardest); the list has the full names. A computer team plays by itself when its turn comes |
 | Hogs stepper | One to eight hedgehogs per team (tap the number to type one) |
-| Customise | A page for one team: name, player, colour, fort, grave and voice pack, and for each hedgehog a hat (pick from the whole hat list with pictures), a name, and a button for a new random name that suits the hat |
+| Edit | A page for one team: name, player, colour, fort, grave and voice pack, and for each hedgehog a hat (pick from the whole hat list with pictures), a name, and a button for a new random name that suits the hat |
 
 New teams get a random themed name and hats the way the desktop game does it (`Names/types.ini` and the name lists in `Data/Names`). Fort, grave, hat, theme and map lists are read from the unpacked game data, so they show exactly what is installed.
 
@@ -54,7 +54,7 @@ Theme: Random, or pick one with its icon. Seed: leave empty for a new random map
 - Game style: Normal, or one of the Lua game styles from `Data/Scripts/Multiplayer` (Capture the Flag, Highlander, Tunnels, Racer and so on). A style may fix the scheme and the weapons (as in the desktop game); the pickers are then greyed out and say so.
 - Scheme: the 16 built-in schemes of the desktop game (Default, Pro Mode, Shoppa, Clean Slate, Minefield, Barrel Mayhem, Tunnel Hogs, Timeless, Thinking with Portals, King Mode, Mutant, Construction Mode, The Specialists, Space Invasion, HedgeEditor, Racer).
 - Weapon set: the 13 built-in sets (Default, Crazy, Pro Mode, Shoppa, Clean Slate, Minefield, Thinking with Portals, One of Everything, Highlander, Balanced Random Weapon, Construction Mode, Shoppa Pro, HedgeEditor). With "Pick the weapons that share the scheme's name" on (the same default as the desktop game), choosing a scheme also chooses the weapon set of the same name when there is one.
-- Key values (all editable, hold the plus or minus to repeat, tap the number to type one): turn time, starting health, sudden death, water rise, mines, mine timer, crate drops, health crate chance, explosive barrels.
+- Key values (all editable, hold the plus or minus to repeat, tap the number to type one): turn time (up to "Unlimited" at 9999 seconds), starting health, sudden death, water rise, mines, mine timer, crate drops, health crate chance, explosive barrels.
 - More rules (button): damage modifier, health in a crate, health lost in sudden death, rope length, get away time, dud mines, air mines, sentries, world edge, and the 25 rule switches (switch hedgehog, divide teams, indestructible land, border, low gravity, laser sight, invulnerable, reset health, vampirism, karma, artillery, random order, king, place hedgehogs, shared ammo, no girders, no land objects, AI survival, unlimited attacks, reset weapons, ammo per hedgehog, no wind, more wind, tag team, bottom border).
 
 Editing a number or a switch makes the scheme "changed from ..."; picking a scheme again resets all of them.
@@ -278,6 +278,7 @@ No device is needed for these.
 | `HP_TEST_ARGS` | Extra engine options, e.g. `--ui-scale 240 --inset-left 80 --inset-top 40` |
 | `HP_TEST_SHOTS` | Seconds after the start at which extra screenshots `build/host-test/shot_<n>.png` are taken |
 | `HP_TEST_SIZE` | Window size, e.g. `2340x1080` (default 1280x720) |
+| `HP_TEST_DISPLAY` | Xvfb display number (default 77), so two runs can go side by side |
 | `HP_TEST_SOUND=1` | Run with sound on, using the SDL dummy audio driver, instead of off |
 
 The summary at the end shows whether the engine was still running, the IPC lines and, for computer players, the `engine command` lines that the launcher logs for every attack, jump, weapon choice and turn end the engine reports, plus a count per command letter.
@@ -292,7 +293,7 @@ The summary at the end shows whether the engine was still running, the IPC lines
 - The options reach the engine: a computer-only game under AddressSanitizer with sound on (SDL dummy audio) and `--volume 100 --effects-volume 50 --music-volume 30 --no-voices --raw-quality 3 --showfps --no-teamtag --no-hogtag --no-healthtag` starts, shows the frames per second counter and no name tags, with no sanitizer report. `config-test.sh` also checks that the engine's option table (`ArgParsers.pas`) has an entry and a case for every option the app sends.
 - Vibration: in a computer-only host test with a hand-edited loadout of only Skip, Watermelon and Hellish Handgrenade, the engine calls `hw_device_rumble` for each big explosion (the host test launcher logs `[hosttest] rumble 40 ms`). The Java side of it (`GameActivity.rumble`, the vibrator) is not checked.
 
-Not verified: running on an Android device or emulator (the build machine has no KVM, so no x86_64 emulator could be started). The touch handling, safe area layout, scaled HUD and weapon menu, pause and focus handling were checked on the host with injected SDL touch and window events. The OpenGL ES 1.1 context on real drivers, audio, vibration, the Java display measurement, and the setup, team and options screens (their layout and touch behaviour) are only tested on the owner's phone. The setup screens were not rendered either: there is no Android layout renderer on the build machine.
+Not verified: running on an Android device or emulator (the build machine has no KVM, so no x86_64 emulator could be started). The touch handling, safe area layout, scaled HUD and weapon menu, pause and focus handling were checked on the host with injected SDL touch and window events. The OpenGL ES 1.1 context on real drivers, audio, vibration, the Java display measurement, and the setup, team and options screens (their layout and touch behaviour) are only tested on the owner's phone. The setup screens were not rendered. An optional Robolectric screenshot test is in `app/src/test` (`./gradlew -Pscreenshots -Pandroid.useAndroidX=true testDebugUnitTest` writes PNGs of the screens at 2340 x 1080 and 409 dpi to `build/screenshots`); it compiles, but it has never run: Maven Central answered 429 (per-IP download limit) for `nativeruntime-dist-compat`, which graphics mode NATIVE needs. Try it from another network.
 
 ## Size
 

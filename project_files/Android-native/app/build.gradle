@@ -53,8 +53,8 @@ android {
         applicationId appId
         minSdk 24
         targetSdk 34
-        versionCode 6
-        versionName '0.2.0'
+        versionCode 7
+        versionName '0.2.1'
         resValue 'string', 'app_name', appName
         buildConfigField 'String', 'APP_NAME', "\"${appName}\""
         buildConfigField 'String', 'SOURCE_URL', "\"${sourceUrl}\""
@@ -108,6 +108,13 @@ android {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
     }
+    testOptions {
+        unitTests {
+            // Robolectric needs the merged resources to inflate the setup screens.
+            includeAndroidResources = true
+            all { systemProperty 'screenshot.dir', (System.getenv('SCREENSHOT_DIR') ?: new File(genDir, 'screenshots').path) ; systemProperty 'screenshot.data', new File(genDir, 'assets/Data').path }
+        }
+    }
     lint {
         abortOnError false
         checkReleaseBuilds false
@@ -138,5 +145,17 @@ tasks.matching { it.name == 'preBuild' }.configureEach {
         if (!missing.isEmpty()) {
             throw new GradleException("Missing generated inputs: ${missing.join(', ')}. Run project_files/Android-native/scripts/build-apk.sh, or the listed scripts first.")
         }
+    }
+}
+
+// Optional: pictures of the setup screens without a phone. Robolectric renders the real layouts with Skia
+// (graphics mode NATIVE) at 2340 x 1080 and 409 dpi, as on the Fairphone 4. Not part of any normal build; run
+//   ./gradlew -Pscreenshots -Pandroid.useAndroidX=true testDebugUnitTest
+// and see build/screenshots/*.png. Needs network access to Maven Central the first time (Robolectric and its
+// Android 14 jar are downloaded).
+if (project.hasProperty('screenshots')) {
+    dependencies {
+        testImplementation 'junit:junit:4.13.2'
+        testImplementation 'org.robolectric:robolectric:4.14.1'
     }
 }

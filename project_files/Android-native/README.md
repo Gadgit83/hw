@@ -18,7 +18,7 @@ libmain.so                  native/launcher/hp_main.c   SDL_main: starts the IPC
 engine (pas2c output)       hwengine_RunEngine(), connects to 127.0.0.1:<port> and asks for the config ('C')
    |-- fpcrtl               Pascal runtime in C (from upstream project_files/hwc/rtl)
    |-- PhysFS, Lua 5.1      bundled with the engine (misc/libphysfs, misc/liblua)
-   |-- libhwengine_future   Rust library (map generation), built with cargo
+   |-- libhwengine_future   Rust library (hwFloat maths, collision, gear checksums, map generation, AI), built with cargo
    `-- SDL2, SDL2_image, SDL2_mixer (stb_vorbis), SDL2_ttf (FreeType), SDL2_net
 ```
 
@@ -52,7 +52,9 @@ Trimmed from the data: the 17 MB CJK font, other languages than English, single 
 | `scripts/` | Reproducible build steps, see below |
 | `third_party/`, `build/` | Downloaded and generated, gitignored |
 
-The engine changes (pas2c friendly constructs, the `PAS2C_ANDROID` define, GLES 1.1 context, SDL2_mixer binding fixes) are commits on branch `android` of https://github.com/Gadgit83/hw. They are not patch files and no upstream code is committed here. The engine is pinned to base `1bbc396d3`, the commit WebWars also uses (see `docs/decisions.md`, D2).
+The engine changes (pas2c friendly constructs, the `PAS2C_ANDROID` define, GLES 1.1 context, SDL2_mixer binding fixes, and two small changes that pas2c needs for current upstream) are commits on branch `android-master` of https://github.com/Gadgit83/hw, which is upstream master plus those commits. They are not patch files and no upstream code is committed here. The engine therefore tracks upstream master (see `docs/decisions.md`, D2). The older branch `android` (base `1bbc396d3`, the commit WebWars also uses) is kept as a fallback and is no longer used by the scripts.
+
+Because the Rust library now owns the `hwFloat` fixed-point maths, collision tests and gear checksums, the simulation is the same code as upstream's, which keeps replays and determinism in line with desktop Hedgewars. The pas2c C code calls it through ordinary function calls into `libhwengine_future.so`. These calls cannot be inlined across the library boundary: a microbenchmark on an x86_64 desktop measured about 3 ns per `hwFloat` operation (multiply plus add pair: 6.3 ns). Not measured: engine frame times on a phone.
 
 ## Prerequisites
 
@@ -75,9 +77,9 @@ ABIS=arm64-v8a host/scripts/build-apk.sh  # phone only, smaller APK
 
 It runs these steps, which can also be run on their own:
 
-1. `fetch-deps.sh` clones the engine fork (`HW_ENGINE_REPO`, branch `HW_ENGINE_BRANCH`, default `Gadgit83/hw` branch `android`, into `upstream/hw` or `HW_ENGINE_DIR`) and the SDL2 family at the tags pinned in `versions.env`, into `host/third_party`. Everything is a `git clone`, no archive downloads.
+1. `fetch-deps.sh` clones the engine fork (`HW_ENGINE_REPO`, branch `HW_ENGINE_BRANCH`, default `Gadgit83/hw` branch `android-master`, into `upstream/hw` or `HW_ENGINE_DIR`) and the SDL2 family at the tags pinned in `versions.env`, into `host/third_party`. Everything is a `git clone`, no archive downloads.
 2. `gen-engine.sh` builds pas2c with GHC and transpiles the engine to `host/build/engine-c`.
-3. `build-rust.sh` builds `libhwengine_future.so` with cargo for each ABI.
+3. `build-rust.sh` builds `libhwengine_future.so` with cargo for each ABI (the Rust workspace is synced with `rsync --delete` first, so stale files from an earlier engine revision cannot linger).
 4. `stage-assets.sh` stages the trimmed game data in `host/build/assets`.
 5. `./gradlew assembleDebug` compiles the native code through CMake and packages the APK. When `host/build` is already populated it can be run directly (`-Pabis=arm64-v8a` limits the ABIs).
 
@@ -102,7 +104,7 @@ Most of it is game data (112 MB staged, compressed little because the images and
 
 ## Verification done
 
-- pas2c transpiles the whole engine and clang compiles it for arm64-v8a and x86_64.
+- pas2c transpiles the whole engine (upstream master `1e2216a` plus the Android commits) and clang compiles it for arm64-v8a and x86_64.
 - `libmain.so` is linked with `-Wl,--no-undefined`; a separate `llvm-nm` check finds every undefined symbol in the NEEDED libraries.
 - `scripts/host-test.sh` builds the same engine and launcher for Linux with desktop OpenGL, starts a two team game from the config produced by `GameConfig.java`, and runs it headless under Xvfb. The engine connects to the IPC server, receives the 60 config messages, generates a map, loads all sprites, and renders the touch interface and teams.
 

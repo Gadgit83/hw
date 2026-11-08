@@ -7,7 +7,7 @@ REPO_DIR="$(cd "$HOST_DIR/.." && pwd)"
 . "$HOST_DIR/scripts/versions.env"
 BUILD_DIR="${BUILD_DIR:-$HOST_DIR/build}"
 THIRD_PARTY="${THIRD_PARTY:-$HOST_DIR/third_party}"
-# Engine source checkout (the Gadgit83/hw fork, branch android by default).
+# Engine source checkout (the Gadgit83/hw fork, branch android-master by default, which tracks upstream master).
 HW_ENGINE_DIR="${HW_ENGINE_DIR:-$REPO_DIR/upstream/hw}"
 if [ -z "${ANDROID_HOME:-}" ]; then
   for c in "${ANDROID_SDK_ROOT:-}" "$HOME/Android/Sdk" "$HOME/android-sdk" /home/user/android-sdk; do

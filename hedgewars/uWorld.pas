@@ -496,7 +496,7 @@ begin
     y:= AMRect.y;
 {$IFDEF USE_AM_NUMCOLUMN}
     usesDefaultSlotKeys:= CheckDefaultSlotKeys;
-{$ENDIF USE_AM_NUMCOLUMN}
+{$ENDIF}
     for i:= 0 to cMaxSlotIndex do
         if (i <> cHiddenSlotIndex) and (Ammo^[i, 0].Count > 0) then
             begin

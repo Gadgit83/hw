@@ -423,9 +423,9 @@ const
     cMaxTurnTime = Pred(High(LongInt)); // maximum possible turn time
 
 var
-    cTeamHealthHeight,
-    cFontBorder,
-    cFontPadding: LongInt;
+    cTeamHealthHeight: LongInt = 19;
+    cFontBorder: LongInt = 2;
+    cFontPadding: LongInt = 2;
 
     cAirPlaneSpeed: hwFloat;
     cBombsSpeed   : hwFloat;
@@ -528,11 +528,13 @@ var
 implementation
 uses uRust;
 
+{$IFNDEF PAS2C}
 initialization
 
     cTeamHealthHeight:= round(19 * HDPIScaleFactor);
     cFontBorder:= round(2 * HDPIScaleFactor);
     cFontPadding:= round(2 * HDPIScaleFactor);
+{$ENDIF}
 
     cAirPlaneSpeed:= hwf_raw(false, 3006477107);
     cBombsSpeed:= hwf_raw(false, 429496729);

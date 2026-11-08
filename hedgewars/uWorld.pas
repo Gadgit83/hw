@@ -86,6 +86,7 @@ var AMShiftTargetX, AMShiftTargetY, AMShiftX, AMShiftY, SlotsNum: LongInt;
     AMAnimType: LongInt;
     recTexture: PTexture;
     AmmoMenuTex     : PTexture;
+    AmmoMenuUp      : LongInt; // integer factor the menu texture was enlarged by (1: not enlarged)
     HorizontOffset: LongInt;
     cOffsetY: LongInt;
     WorldEnd, WorldFade : array[0..3] of HwColor4f;
@@ -490,8 +491,10 @@ function GetAmmoMenuTexture(Ammo: PHHAmmo): PTexture;
 const BORDERSIZE = 2;
 var x, y, i, t, SlotsNumY, SlotsNumX, AMFrame: LongInt;
     STurns: LongInt;
-    amSurface: PSDL_Surface;
+    amSurface, bigSurface: PSDL_Surface;
     AMRect: TSDL_Rect;
+    k, sp4, dp4: LongInt;
+    srcPix, dstPix: PLongWordArray;
 {$IFDEF USE_AM_NUMCOLUMN}
     tmpsurf: PSDL_Surface;
     usesDefaultSlotKeys: boolean;
@@ -616,7 +619,36 @@ DrawLine2Surf(amSurface, i, BORDERSIZE, i, AMRect.h + BORDERSIZE,160,160,160);//
 DrawLine2Surf(amSurface, AMRect.w+BORDERSIZE+i, BORDERSIZE, AMRect.w + BORDERSIZE+i, AMRect.h + BORDERSIZE, 160,160,160);//right
 end;
 
-GetAmmoMenuTexture:= Surface2Tex(amSurface, false);
+// Scaled touch menu: the 32 px icons would be magnified by a fractional factor with plain linear
+// filtering, which blurs pixel art. Enlarge the texture by the next whole factor with nearest
+// neighbour copies instead and let the GPU shrink it by the remaining fraction when it is drawn
+// (the "sharp bilinear" trick): edges stay crisp and nothing else is made blocky.
+AmmoMenuUp:= 1;
+if (cUIScale <> 1.0) and (cMenuScale > 1.0) then
+    begin
+    k:= trunc(cMenuScale + 0.999);
+    while (k > 1) and ((amSurface^.w * k > 2048) or (amSurface^.h * k > 2048)) do
+        dec(k);
+    if k > 1 then
+        begin
+        bigSurface:= SDL_CreateRGBSurface(SDL_SWSURFACE, amSurface^.w * k, amSurface^.h * k, 32, RMask, GMask, BMask, AMask);
+        if bigSurface <> nil then
+            begin
+            srcPix:= amSurface^.pixels;
+            dstPix:= bigSurface^.pixels;
+            sp4:= amSurface^.pitch shr 2;
+            dp4:= bigSurface^.pitch shr 2;
+            for y:= 0 to bigSurface^.h - 1 do
+                for x:= 0 to bigSurface^.w - 1 do
+                    dstPix^[y * dp4 + x]:= srcPix^[(y div k) * sp4 + (x div k)];
+            SDL_FreeSurface(amSurface);
+            amSurface:= bigSurface;
+            AmmoMenuUp:= k;
+            end;
+        end;
+    end;
+
+GetAmmoMenuTexture:= Surface2Tex(amSurface, AmmoMenuUp > 1);
 if amSurface <> nil then SDL_FreeSurface(amSurface);
 end;
 
@@ -755,7 +787,10 @@ if AMState = AMHiding then // hide ammo menu
             end;
     end;
 
-DrawTexture(AmmoRect.x + AMShiftX, AmmoRect.y + AMShiftY, AmmoMenuTex);
+if AmmoMenuUp > 1 then
+    DrawTexture(AmmoRect.x + AMShiftX, AmmoRect.y + AMShiftY, AmmoMenuTex, 1.0 / AmmoMenuUp)
+else
+    DrawTexture(AmmoRect.x + AMShiftX, AmmoRect.y + AMShiftY, AmmoMenuTex);
 
 if ((AMState = AMHiding) or (AMState = AMShowingUp)) and ((AMAnimType and AMTypeMaskAlpha) <> 0 )then
     untint;

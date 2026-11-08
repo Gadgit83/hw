@@ -579,6 +579,7 @@ type
         historicalX, historicalY : LongInt;
         timeSinceDown            : Longword;
         pressedWidget            : POnScreenWidget;
+        downWhilePaused          : boolean;
         end;
 
     PSpriteData = ^TSpriteData;

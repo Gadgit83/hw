@@ -100,9 +100,12 @@ xr:= round(x * cScreenWidth);
 yr:= round(y * cScreenHeight);
 
 finger:= addFinger(xr, yr, pointerId);
+finger^.downWhilePaused:= isPaused;
 
 inc(buttonsDown);//inc buttonsDown, if we don't see a button down we'll dec it
 
+if (not isPaused) or isOnWidget(pauseButton, finger^) then
+begin
 if isOnCrosshair(finger^) then
 begin
     aimingCrosshair:= true;
@@ -151,7 +154,7 @@ if isOnWidget(arrowDown, finger^) then
 
 if isOnWidget(pauseButton, finger^) then
     begin
-    ParseTeamCommand('pause');
+    ParseCommand('pause', true);
     moveCursor:= false;
     finger^.pressedWidget:= @pauseButton;
     exit;
@@ -192,6 +195,8 @@ if isOnWidget(utilityWidget2, finger^) then
         end;
     exit;
     end;
+
+end; // not paused (while paused only the pause button reacts, the rest pans the camera)
 
 dec(buttonsDown);//no buttonsDown, undo the inc() above
 if buttonsDown = 0 then
@@ -276,10 +281,22 @@ if finger = nil then
 //Check for onTouchClick event
 if not(fingerHasMoved(finger^)) then
     begin
-    if (RealTicks - finger^.timeSinceDown) < clickTime then
-        onTouchClick(finger^)
-    else
-        onTouchLongClick(finger^);
+    // While paused nothing is clicked: a tap that went down on no widget during the pause resumes the
+    // game (and is not also a click), and a finger that went down before the pause (map, jump, menu
+    // chest) or on a widget does nothing when lifted, so it cannot open the weapon menu or start a
+    // long press jump behind the pause. The pause button finger is never a click either.
+    if isPaused then
+        begin
+        if finger^.downWhilePaused and (finger^.pressedWidget = nil) then
+            ParseCommand('pause', true);
+        end
+    else if finger^.pressedWidget <> @pauseButton then
+        begin
+        if (RealTicks - finger^.timeSinceDown) < clickTime then
+            onTouchClick(finger^)
+        else
+            onTouchLongClick(finger^);
+        end;
     end;
 
 if aimingCrosshair then
@@ -396,6 +413,7 @@ fingers[pointerCount].dx := 0;
 fingers[pointerCount].dy := 0;
 fingers[pointerCount].timeSinceDown:= RealTicks;
 fingers[pointerCount].pressedWidget:= nil;
+fingers[pointerCount].downWhilePaused:= false;
 
 addFinger:= @fingers[pointerCount];
 inc(pointerCount);
@@ -440,6 +458,7 @@ for index := 0 to pointerCount do
             fingers[index].historicalY := fingers[pointerCount].historicalY;
             fingers[index].timeSinceDown := fingers[pointerCount].timeSinceDown;
             fingers[index].pressedWidget := fingers[pointerCount].pressedWidget;
+            fingers[index].downWhilePaused := fingers[pointerCount].downWhilePaused;
 
             fingers[pointerCount].id := noFingerId;
             end

@@ -388,7 +388,12 @@ final class Diag {
         StringBuilder sb = new StringBuilder();
         sb.append("Hedge Party log report, ").append(timestamp()).append('\n');
         sb.append("App ").append(versionName(c)).append('\n');
+        sb.append("Engine ").append(BuildConfig.ENGINE_COMMIT).append(" (").append(BuildConfig.ENGINE_BRANCH)
+                .append("), app source ").append(BuildConfig.APP_COMMIT).append('\n');
         sb.append(deviceLine()).append('\n');
+        sb.append("Options: ").append(Store.loadOptions(c).toText().replace("\n", " ")).append('\n');
+        File ipc = new File(c.getFilesDir(), "game.ipc");
+        section(sb, "Game setup sent to the engine (files/game.ipc)", readTail(ipc, 16 * 1024));
         sb.append("Game marker present: ").append(previousGameUnclean(c)).append('\n');
 
         section(sb, "Last error", readTail(new File(dir, LAST_ERROR), 4000));

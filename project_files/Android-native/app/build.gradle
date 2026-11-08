@@ -6,17 +6,48 @@ plugins {
 def abis = (project.findProperty('abis') ?: 'arm64-v8a,x86_64').split(',').collect { it.trim() }
 def sdlJava = file('../third_party/SDL/android-project/app/src/main/java')
 
+// Build information for the About page and the log report: the engine and app commits this APK is built from.
+// Read straight from git at configuration time (the engine checkout is HW_ENGINE_DIR or ../upstream/hw).
+def gitOut = { File dir, String... a ->
+    try {
+        def p = new ProcessBuilder(['git', '-C', dir.absolutePath] + a.toList()).redirectErrorStream(true).start()
+        def t = p.inputStream.text.trim()
+        p.waitFor()
+        return p.exitValue() == 0 ? t : ''
+    } catch (Exception ignored) {
+        return ''
+    }
+}
+def engineDir = new File(System.getenv('HW_ENGINE_DIR') ?: new File(rootDir, '../upstream/hw').path)
+def engineCommit = gitOut(engineDir, 'rev-parse', '--short=9', 'HEAD') ?: 'unknown'
+def engineBranch = gitOut(engineDir, 'rev-parse', '--abbrev-ref', 'HEAD') ?: 'unknown'
+if (engineCommit != 'unknown' && !gitOut(engineDir, 'status', '--porcelain', '--untracked-files=no', '--', 'hedgewars', 'tools/pas2c').isEmpty()) {
+    engineCommit += '+local changes'
+}
+def appCommit = gitOut(rootDir, 'rev-parse', '--short=9', 'HEAD') ?: 'unknown'
+if (appCommit != 'unknown' && !gitOut(rootDir, 'status', '--porcelain', '--untracked-files=no').isEmpty()) {
+    appCommit += '+local changes'
+}
+
 android {
     namespace 'party.hedge.host'
     compileSdk 34
+    buildFeatures {
+        buildConfig true
+    }
     ndkVersion '27.2.12479018'
 
     defaultConfig {
         applicationId 'party.hedge.host'
         minSdk 24
         targetSdk 34
-        versionCode 5
-        versionName '0.1.4'
+        versionCode 6
+        versionName '0.2.0'
+        // Shown on the About page and in the log report: which engine and which app source this APK was built from.
+        buildConfigField 'String', 'ENGINE_COMMIT', "\"${engineCommit}\""
+        buildConfigField 'String', 'ENGINE_BRANCH', "\"${engineBranch}\""
+        buildConfigField 'String', 'APP_COMMIT', "\"${appCommit}\""
+        buildConfigField 'String', 'BUILD_ABIS', "\"${abis.join(', ')}\""
         ndk { abiFilters(*abis) }
         externalNativeBuild {
             cmake {

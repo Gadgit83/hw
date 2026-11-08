@@ -5,6 +5,9 @@
         <item name="android:windowBackground">@color/hp_bg</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@color/hp_bg</item>
+        <item name="android:colorAccent">#F2B632</item>
+        <item name="android:colorControlActivated">#F2B632</item>
+        <item name="android:textColorHint">#78927C</item>
     </style>
     <style name="GameTheme" parent="@android:style/Theme.NoTitleBar.Fullscreen">
         <item name="android:windowBackground">@android:color/black</item>

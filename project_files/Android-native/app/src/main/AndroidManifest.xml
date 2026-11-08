@@ -31,6 +31,22 @@
             </intent-filter>
         </activity>
 
+        <!-- Options (sound, display and controls, advanced and about). -->
+        <activity
+            android:name=".OptionsActivity"
+            android:exported="false"
+            android:screenOrientation="sensorLandscape"
+            android:windowSoftInputMode="adjustResize"
+            android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|smallestScreenSize" />
+
+        <!-- One team in detail: colour, fort, grave, voice, hats and hedgehog names. -->
+        <activity
+            android:name=".TeamEditActivity"
+            android:exported="false"
+            android:screenOrientation="sensorLandscape"
+            android:windowSoftInputMode="adjustResize"
+            android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|smallestScreenSize" />
+
         <!-- The engine surface (SDL). -->
         <activity
             android:name=".GameActivity"

@@ -107,6 +107,7 @@ Most of it is game data (112 MB staged, compressed little because the images and
 - pas2c transpiles the whole engine (upstream master `1e2216a` plus the Android commits) and clang compiles it for arm64-v8a and x86_64.
 - `libmain.so` is linked with `-Wl,--no-undefined`; a separate `llvm-nm` check finds every undefined symbol in the NEEDED libraries.
 - `scripts/host-test.sh` builds the same engine and launcher for Linux with desktop OpenGL, starts a two team game from the config produced by `GameConfig.java`, and runs it headless under Xvfb. The engine connects to the IPC server, receives the 60 config messages, generates a map, loads all sprites, and renders the touch interface and teams.
+- `ASAN=ON scripts/host-test.sh 45` builds the same test with AddressSanitizer (needs `apt install libclang-rt-dev`), which reports the out-of-bounds accesses that the phone's MTE and hardened allocator turn into crashes. `HP_TEST_RESTORE=1,3,6,14` posts `SDL_WINDOWEVENT_RESTORED` at those seconds; the phone sends it right after start-up and after every pause, and the engine answers with `fullscr`, which reloads the video state, the chat lines and every texture (this reproduced the v0.1.1 crash in `PrettifySurfaceAlpha`).
 
 Not verified: running on an Android device or emulator (the build machine has no KVM, so no x86_64 emulator could be started). Touch input, the OpenGL ES 1.1 context on real drivers, audio, pause and resume, and the Java setup screen are untested at runtime.
 

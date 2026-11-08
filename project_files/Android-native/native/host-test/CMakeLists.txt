@@ -35,3 +35,12 @@ if(NOT HP_FORTIFY_LUA)
   set_source_files_properties(${LUA_SRC} PROPERTIES COMPILE_OPTIONS "-U_FORTIFY_SOURCE;-D_FORTIFY_SOURCE=0")
 endif()
 target_link_libraries(hp_hosttest PRIVATE SDL2 SDL2_image SDL2_mixer SDL2_ttf SDL2_net OpenGL::GL ${HP_RUST_LIB} pthread m dl)
+
+# AddressSanitizer build for the memory-error hunt (scripts/host-test.sh passes ASAN=1 through).
+# FORTIFY is dropped in that mode so ASan reports the original access.
+option(HP_ASAN "Build the engine with AddressSanitizer" OFF)
+if(HP_ASAN)
+  target_compile_options(hp_hosttest PRIVATE -fsanitize=address -fno-omit-frame-pointer -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0)
+  set_source_files_properties(${LUA_SRC} PROPERTIES COMPILE_OPTIONS "-fsanitize=address;-U_FORTIFY_SOURCE;-D_FORTIFY_SOURCE=0")
+  target_link_options(hp_hosttest PRIVATE -fsanitize=address)
+endif()

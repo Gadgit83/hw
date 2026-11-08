@@ -245,6 +245,133 @@ final class Diag {
         }
     }
 
+    /**
+     * Native crash dump (tombstone) of the latest CRASH_NATIVE exit of the game process, from
+     * ApplicationExitInfo.getTraceInputStream() (Android 11+). Android 12+ gives a protobuf
+     * (tombstone.proto), Android 11 text. The raw bytes are kept in logs/tombstone-game.bin and the
+     * report carries a text rendering: the text itself, or a generic protobuf dump (field numbers
+     * as in system/core/debuggerd/proto/tombstone.proto, which names the signal, fault address,
+     * registers and backtrace frames with pc, function and build id).
+     */
+    private static String nativeTombstone(Context c) {
+        if (Build.VERSION.SDK_INT < 30) return "not available before Android 11";
+        try {
+            ActivityManager am = (ActivityManager) c.getSystemService(Context.ACTIVITY_SERVICE);
+            List<ApplicationExitInfo> l = am.getHistoricalProcessExitReasons(c.getPackageName(), 0, 16);
+            for (ApplicationExitInfo i : l) {
+                if (i.getReason() != ApplicationExitInfo.REASON_CRASH_NATIVE) continue;
+                String pn = i.getProcessName();
+                if (pn == null || !pn.endsWith(":game")) continue;
+                String head = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.UK).format(new Date(i.getTimestamp()))
+                        + "  " + pn + "  pid " + i.getPid() + "\n";
+                InputStream in = i.getTraceInputStream();
+                if (in == null) return head + "(the system kept no trace for this exit)";
+                byte[] data;
+                try (InputStream t = in) {
+                    ByteArrayOutputStream bo = new ByteArrayOutputStream();
+                    byte[] buf = new byte[8192];
+                    int n;
+                    while ((n = t.read(buf)) > 0 && bo.size() < 2 * 1024 * 1024) bo.write(buf, 0, n);
+                    data = bo.toByteArray();
+                }
+                try (OutputStream o = new FileOutputStream(new File(logsDir(c), "tombstone-game.bin"))) {
+                    o.write(data);
+                } catch (IOException ignored) {
+                }
+                if (data.length == 0) return head + "(empty trace)";
+                if (looksLikeText(data)) return head + new String(data, StandardCharsets.UTF_8);
+                StringBuilder sb = new StringBuilder(head).append("(protobuf, ").append(data.length).append(" bytes)\n");
+                dumpProto(data, 0, data.length, 0, sb);
+                return sb.toString();
+            }
+            return "(no native crash of the game process in the system's exit history)";
+        } catch (Throwable t) {
+            return "[failed: " + t + "]";
+        }
+    }
+
+    private static boolean looksLikeText(byte[] d) {
+        int n = Math.min(d.length, 512);
+        for (int i = 0; i < n; i++) {
+            int b = d[i] & 0xff;
+            if (b == 0 || (b < 9) || (b > 13 && b < 32)) return false;
+        }
+        return true;
+    }
+
+    private static boolean printable(byte[] d, int from, int to) {
+        if (to <= from) return false;
+        for (int i = from; i < to; i++) {
+            int b = d[i] & 0xff;
+            if (b < 32 && b != 9 && b != 10) return false;
+            if (b == 127) return false;
+        }
+        return true;
+    }
+
+    /** Generic protobuf walker: "field: value", nested messages indented. Stops quietly on bad data. */
+    private static int dumpProto(byte[] d, int pos, int end, int depth, StringBuilder sb) {
+        StringBuilder pad = new StringBuilder();
+        for (int i = 0; i < depth; i++) pad.append("  ");
+        while (pos < end && sb.length() < 400 * 1024) {
+            long[] k = varint(d, pos, end);
+            if (k == null) return -1;
+            pos = (int) k[1];
+            int field = (int) (k[0] >>> 3), wire = (int) (k[0] & 7);
+            if (field == 0) return -1;
+            if (wire == 0) {
+                long[] v = varint(d, pos, end);
+                if (v == null) return -1;
+                pos = (int) v[1];
+                sb.append(pad).append(field).append(": ").append(v[0] < 0 ? Long.toUnsignedString(v[0]) : String.valueOf(v[0]))
+                        .append(v[0] > 4096 || v[0] < 0 ? " (0x" + Long.toHexString(v[0]) + ")" : "").append('\n');
+            } else if (wire == 1) {
+                if (pos + 8 > end) return -1;
+                long v = 0;
+                for (int i = 7; i >= 0; i--) v = (v << 8) | (d[pos + i] & 0xff);
+                pos += 8;
+                sb.append(pad).append(field).append(": 0x").append(Long.toHexString(v)).append('\n');
+            } else if (wire == 5) {
+                if (pos + 4 > end) return -1;
+                long v = 0;
+                for (int i = 3; i >= 0; i--) v = (v << 8) | (d[pos + i] & 0xff);
+                pos += 4;
+                sb.append(pad).append(field).append(": 0x").append(Long.toHexString(v)).append('\n');
+            } else if (wire == 2) {
+                long[] len = varint(d, pos, end);
+                if (len == null || len[0] < 0 || len[1] + len[0] > end) return -1;
+                int s = (int) len[1], e = (int) (s + len[0]);
+                pos = e;
+                if (printable(d, s, e)) {
+                    sb.append(pad).append(field).append(": \"").append(new String(d, s, e - s, StandardCharsets.UTF_8)).append("\"\n");
+                } else {
+                    int mark = sb.length();
+                    sb.append(pad).append(field).append(" {\n");
+                    if (depth < 8 && e > s && dumpProto(d, s, e, depth + 1, sb) >= 0) {
+                        sb.append(pad).append("}\n");
+                    } else {
+                        sb.setLength(mark);
+                        sb.append(pad).append(field).append(": [").append(e - s).append(" bytes]\n");
+                    }
+                }
+            } else {
+                return -1;
+            }
+        }
+        return pos;
+    }
+
+    /** {value, next position} or null. */
+    private static long[] varint(byte[] d, int pos, int end) {
+        long v = 0;
+        for (int shift = 0; shift < 64 && pos < end; shift += 7) {
+            int b = d[pos++] & 0xff;
+            v |= (long) (b & 0x7f) << shift;
+            if ((b & 0x80) == 0) return new long[] { v, pos };
+        }
+        return null;
+    }
+
     /** Newest engine log written by the game itself (files/user/Logs/game*.log). */
     private static File newestEngineLog(Context c) {
         File[] l = new File(c.getFilesDir(), "user/Logs").listFiles();
@@ -266,6 +393,7 @@ final class Diag {
 
         section(sb, "Last error", readTail(new File(dir, LAST_ERROR), 4000));
         section(sb, "Recent process exits", exitReasons(c));
+        section(sb, "Native crash of the game process (tombstone)", nativeTombstone(c));
         for (String t : new String[] { "game", "main" }) {
             section(sb, "Java crash in " + t, readTail(new File(dir, "crash-" + t + ".txt"), 20000));
         }

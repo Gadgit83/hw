@@ -2060,7 +2060,7 @@ end;
 var PrevSentPointTime: LongWord = 0;
 
 procedure MoveCamera;
-var EdgesDist, shs,z, dstX: LongInt;
+var EdgesDist, shs,z, dstX, mh: LongInt;
     inbtwnTrgtAttks: Boolean;
 begin
 {$IFNDEF MOBILE}
@@ -2116,14 +2116,20 @@ if ((CursorPoint.X = prevPoint.X) and (CursorPoint.Y = prevpoint.Y)) then
 
 if (AMState = AMShowingUp) or (AMState = AMShowing) then
 begin
+    // AmmoRect and CursorPoint are in weapon menu units (screen / cMenuScale) when the touch HUD is
+    // scaled, but cScreenHeight is the real screen height here (outside ShowAmmoMenu), so the
+    // clamp below must use the menu unit height or it pushes the cursor out of the menu
+    mh:= cScreenHeight;
+    if (cUIScale <> 1.0) and (cMenuScale > 0) then
+        mh:= round(cScreenHeight / cMenuScale);
     if CursorPoint.X < AmmoRect.x + amNumOffsetX + 3 then//check left
         CursorPoint.X:= AmmoRect.x + amNumOffsetX + 3;
     if CursorPoint.X > AmmoRect.x + AmmoRect.w - 3 then//check right
         CursorPoint.X:= AmmoRect.x + AmmoRect.w - 3;
-    if CursorPoint.Y > cScreenHeight - AmmoRect.y -amNumOffsetY - 1 then//check top
-        CursorPoint.Y:= cScreenHeight - AmmoRect.y - amNumOffsetY - 1;
-    if CursorPoint.Y < cScreenHeight - (AmmoRect.y + AmmoRect.h - AMSlotSize - 5) then//check bottom
-        CursorPoint.Y:= cScreenHeight - (AmmoRect.y + AmmoRect.h - AMSlotSize - 5);
+    if CursorPoint.Y > mh - AmmoRect.y -amNumOffsetY - 1 then//check top
+        CursorPoint.Y:= mh - AmmoRect.y - amNumOffsetY - 1;
+    if CursorPoint.Y < mh - (AmmoRect.y + AmmoRect.h - AMSlotSize - 5) then//check bottom
+        CursorPoint.Y:= mh - (AmmoRect.y + AmmoRect.h - AMSlotSize - 5);
     prevPoint:= CursorPoint;
     CameraBounds;
     exit

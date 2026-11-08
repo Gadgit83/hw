@@ -75,6 +75,7 @@ var
     fingers: array[0..cMaxFingers-1] of TTouch_Data;
     moveCursor : boolean;
     invertCursor : boolean;
+    uiDragX, uiDragY: Single;
 
     //Pinch to zoom
     pinchSize : LongInt;
@@ -96,6 +97,8 @@ var
 begin
 rectSize:= round(baseRectSize * cUIScale);
 halfRectSize:= rectSize shr 1;
+uiDragX:= 0;
+uiDragY:= 0;
 xr:= round(x * cScreenWidth);
 yr:= round(y * cScreenHeight);
 
@@ -232,6 +235,17 @@ if finger = nil then
 
 if moveCursor then
     begin
+        if bShowAmmoMenu then
+            begin
+            // the weapon menu is drawn in UI units, so its cursor moves by UI units
+            uiDragX:= uiDragX + finger^.dx / cMenuScale;
+            uiDragY:= uiDragY + finger^.dy / cMenuScale;
+            CursorPoint.X:= CursorPoint.X + trunc(uiDragX);
+            CursorPoint.Y:= CursorPoint.Y - trunc(uiDragY);
+            uiDragX:= uiDragX - trunc(uiDragX);
+            uiDragY:= uiDragY - trunc(uiDragY);
+            end
+        else
         if invertCursor then
         begin
             CursorPoint.X := CursorPoint.X - finger^.dx;
@@ -696,6 +710,8 @@ begin
     for index := 0 to (cMaxFingers-1) do
         fingers[index].id := noFingerId;
 
+    uiDragX:= 0;
+    uiDragY:= 0;
     rectSize:= round(baseRectSize * cUIScale);
     halfRectSize:= rectSize shr 1;
 end;

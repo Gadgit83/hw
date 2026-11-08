@@ -921,6 +921,12 @@ begin
 {$ELSE}
     SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
 {$ENDIF}
+{$IFDEF ANDROID_NATIVE}{$IFNDEF PAS2C_DESKTOP_GL}
+    // SDL defaults to an ES 2.0 context on Android; the renderer needs ES 1.1
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, 4); // SDL_GL_CONTEXT_PROFILE_ES
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 1);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 1);
+{$ENDIF}{$ENDIF}
     SDL_GL_SetAttribute(SDL_GL_RED_SIZE, 5);
     SDL_GL_SetAttribute(SDL_GL_GREEN_SIZE, 6);
     SDL_GL_SetAttribute(SDL_GL_BLUE_SIZE, 5);

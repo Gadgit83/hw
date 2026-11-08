@@ -10,7 +10,16 @@
 #endif
 #include <arpa/inet.h>
 #include <errno.h>
+#include <netdb.h>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
+#include <poll.h>
+#include <stdarg.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <time.h>
+#include <fcntl.h>
+#include <sys/time.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <string.h>
@@ -70,6 +79,367 @@ static int write_full(int fd, const void *buf, size_t n)
     return 0;
 }
 
+
+/* ---------------------------------------------------------------------------------------------
+ * Network mode (docs/tv-viewer-plan.md section 2.8). The engine still talks to this launcher over the local
+ * IPC socket. In network mode the launcher also holds a TCP link to the relay (the host phone's service):
+ *  - the IPC reader thread copies every engine message into a queue and never blocks on the network;
+ *  - a sender thread writes the queue to the relay;
+ *  - a downstream thread reads the relay's frames (the same one-byte length framing as the IPC) and
+ *    writes them to the engine socket under a lock.
+ * The relay filters and forwards; this side only taps. It also records, in a diagnostics file, every
+ * turn checksum (N) and map digest (M) that crosses the link in either direction, so that two phones'
+ * sequences can be compared.
+ * ------------------------------------------------------------------------------------------- */
+static int g_net;
+static char g_net_host[128], g_net_token[160], g_net_nick[64] = "Player", g_net_diag[1024];
+static int g_net_port;
+static int g_net_pending;                 /* config sent, connect to the relay after the engine's next '?' */
+static int g_relay_fd = -1;
+static volatile int g_net_up, g_net_ending, g_net_lost;
+static pthread_mutex_t g_wr_lock = PTHREAD_MUTEX_INITIALIZER;   /* all writes to the engine socket */
+static int g_engine_fd = -1;
+
+struct qnode { struct qnode *next; unsigned char len; unsigned char data[255]; };
+static struct qnode *g_q_head, *g_q_tail;
+static unsigned long g_q_count;
+static int g_q_closed;
+static pthread_mutex_t g_q_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t g_q_cond = PTHREAD_COND_INITIALIZER;
+static pthread_t g_send_thread, g_down_thread;
+static int g_send_started, g_down_started;
+
+static unsigned long g_tx_msgs, g_rx_msgs, g_tx_dropped_local;
+static unsigned long g_tx_type[256], g_rx_type[256];
+static uint64_t g_tx_fnv = 0xcbf29ce484222325ULL, g_rx_fnv = 0xcbf29ce484222325ULL;
+static int g_turn_seq;
+static FILE *g_diag;
+static struct timespec g_t0;
+static pthread_mutex_t g_diag_lock = PTHREAD_MUTEX_INITIALIZER;
+
+static void fnv_add(uint64_t *h, const unsigned char *b, size_t n)
+{
+    for (size_t i = 0; i < n; i++) {
+        *h ^= b[i];
+        *h *= 0x100000001b3ULL;
+    }
+}
+
+static void diag(const char *fmt, ...)
+{
+    if (!g_diag) return;
+    struct timespec t;
+    va_list ap;
+    clock_gettime(CLOCK_MONOTONIC, &t);
+    long ms = (long)((t.tv_sec - g_t0.tv_sec) * 1000 + (t.tv_nsec - g_t0.tv_nsec) / 1000000);
+    pthread_mutex_lock(&g_diag_lock);
+    fprintf(g_diag, "%7ld ", ms);
+    va_start(ap, fmt);
+    vfprintf(g_diag, fmt, ap);
+    va_end(ap);
+    fputc('\n', g_diag);
+    fflush(g_diag);
+    pthread_mutex_unlock(&g_diag_lock);
+}
+
+int hp_ipc_net_config(const char *path)
+{
+    FILE *f = fopen(path, "r");
+    char line[400];
+    if (!f) return -1;
+    while (fgets(line, sizeof line, f)) {
+        size_t n = strlen(line);
+        while (n > 0 && (line[n - 1] == '\n' || line[n - 1] == '\r')) line[--n] = 0;
+        char *eq = strchr(line, '=');
+        if (!eq) continue;
+        *eq++ = 0;
+        if (!strcmp(line, "host")) snprintf(g_net_host, sizeof g_net_host, "%s", eq);
+        else if (!strcmp(line, "port")) g_net_port = atoi(eq);
+        else if (!strcmp(line, "token")) snprintf(g_net_token, sizeof g_net_token, "%s", eq);
+        else if (!strcmp(line, "nick") && *eq) snprintf(g_net_nick, sizeof g_net_nick, "%s", eq);
+        else if (!strcmp(line, "diag")) snprintf(g_net_diag, sizeof g_net_diag, "%s", eq);
+    }
+    fclose(f);
+    if (!g_net_host[0] || g_net_port <= 0 || !g_net_token[0]) return -1;
+    g_net = 1;
+    return 0;
+}
+
+const char *hp_ipc_net_nick(void)
+{
+    return g_net ? g_net_nick : NULL;
+}
+
+static void engine_write(const void *buf, size_t n)
+{
+    pthread_mutex_lock(&g_wr_lock);
+    if (g_engine_fd >= 0) write_full(g_engine_fd, buf, n);
+    pthread_mutex_unlock(&g_wr_lock);
+}
+
+/* The relay link is gone or the relay ended the game: tell the user and make the engine stop. */
+static void net_lost(const char *reason)
+{
+    if (g_net_ending || __sync_lock_test_and_set(&g_net_lost, 1)) return;
+    LOGE("relay: %s", reason);
+    diag("LINK %s", reason);
+    if (g_error_handler) g_error_handler(reason);
+    pthread_mutex_lock(&g_fd_lock);
+    if (g_client_fd >= 0) shutdown(g_client_fd, SHUT_RDWR);
+    pthread_mutex_unlock(&g_fd_lock);
+}
+
+static void note_digest(const char *dir, const unsigned char *m, int len)
+{
+    if (m[0] == 'N') {
+        if (len >= 7) {
+            unsigned tick = ((unsigned)m[5] << 8) | m[6];
+            int seq = __sync_add_and_fetch(&g_turn_seq, 1);
+            diag("N %s turn %d checksum %02x%02x%02x%02x tick %u", dir, seq, m[1], m[2], m[3], m[4], tick);
+        } else {
+            diag("N %s final (no checksum, %d bytes)", dir, len);
+        }
+    } else if (m[0] == 'M') {
+        char t[160];
+        int k = len - 1 < 150 ? len - 1 : 150;
+        memcpy(t, m + 1, (size_t)k);
+        t[k] = 0;
+        for (int i = 0; i < k; i++) if ((unsigned char)t[i] < 32 || (unsigned char)t[i] > 126) t[i] = '.';
+        diag("M %s map digest %s", dir, t);
+    } else if (m[0] == 'F' || m[0] == 'G') {
+        char t[160];
+        int k = len - 1 < 150 ? len - 1 : 150;
+        memcpy(t, m + 1, (size_t)k);
+        t[k] = 0;
+        diag("%c %s team %s (unsynced)", m[0], dir, t);
+    } else if (m[0] == 'f' || m[0] == 'g') {
+        char t[160];
+        int k = len - 3 < 150 ? len - 3 : 150;
+        if (k < 0) k = 0;
+        memcpy(t, m + 1, (size_t)k);
+        t[k] = 0;
+        diag("%c %s team %s (synced)", m[0], dir, t);
+    }
+}
+
+static void *send_thread(void *arg)
+{
+    (void)arg;
+    for (;;) {
+        pthread_mutex_lock(&g_q_lock);
+        while (!g_q_head && !g_q_closed) pthread_cond_wait(&g_q_cond, &g_q_lock);
+        struct qnode *n = g_q_head;
+        if (n) {
+            g_q_head = n->next;
+            if (!g_q_head) g_q_tail = NULL;
+            g_q_count--;
+        }
+        pthread_mutex_unlock(&g_q_lock);
+        if (!n) break;                                        /* closed and drained */
+        unsigned char buf[256];
+        buf[0] = n->len;
+        memcpy(buf + 1, n->data, n->len);
+        if (!g_net_lost && write_full(g_relay_fd, buf, (size_t)n->len + 1)) net_lost("Lost the connection to the host (send failed).");
+        free(n);
+    }
+    return NULL;
+}
+
+/* Called on the IPC reader thread for every engine message: only appends to the queue. */
+static void net_tap(const unsigned char *msg, unsigned len)
+{
+    if (!g_net_up || g_net_lost) return;
+    g_tx_msgs++;
+    g_tx_type[msg[0]]++;
+    unsigned char f = (unsigned char)len;
+    fnv_add(&g_tx_fnv, &f, 1);
+    fnv_add(&g_tx_fnv, msg, len);
+    note_digest("tx", msg, (int)len);
+    struct qnode *n = malloc(sizeof *n);
+    if (!n) return;
+    n->next = NULL;
+    n->len = (unsigned char)len;
+    memcpy(n->data, msg, len);
+    pthread_mutex_lock(&g_q_lock);
+    if (g_q_count > 200000) {                                  /* the relay is not taking data: give up */
+        pthread_mutex_unlock(&g_q_lock);
+        free(n);
+        g_tx_dropped_local++;
+        net_lost("The host is not accepting data.");
+        return;
+    }
+    if (g_q_tail) g_q_tail->next = n; else g_q_head = n;
+    g_q_tail = n;
+    g_q_count++;
+    pthread_cond_signal(&g_q_cond);
+    pthread_mutex_unlock(&g_q_lock);
+}
+
+/* A control frame is the length byte, a 0, a kind letter and text; sent at once because the process may be about to end. */
+static void net_send_control(char kind, const char *text)
+{
+    if (!g_net_up || g_relay_fd < 0) return;
+    unsigned char buf[256];
+    size_t tl = strlen(text);
+    if (tl > 250) tl = 250;
+    buf[0] = (unsigned char)(tl + 2);
+    buf[1] = 0;
+    buf[2] = (unsigned char)kind;
+    memcpy(buf + 3, text, tl);
+    /* Behind the queue, in order: let the sender catch up briefly, then write. */
+    for (int i = 0; i < 100; i++) {
+        pthread_mutex_lock(&g_q_lock);
+        int empty = g_q_head == NULL;
+        pthread_mutex_unlock(&g_q_lock);
+        if (empty) break;
+        usleep(5000);
+    }
+    write_full(g_relay_fd, buf, tl + 3);
+    diag("CONTROL %c %s", kind, text);
+}
+
+static void *down_thread(void *arg)
+{
+    (void)arg;
+    for (;;) {
+        unsigned char len, msg[256];
+        if (read_full(g_relay_fd, &len, 1)) break;
+        if (len && read_full(g_relay_fd, msg, len)) break;
+        if (!len) continue;
+        if (msg[0] == 0) {
+            if (len > 2 && msg[1] == 'X') {
+                char t[260];
+                memcpy(t, msg + 2, (size_t)len - 2);
+                t[len - 2] = 0;
+                char m[300];
+                snprintf(m, sizeof m, "The host ended the game: %s", t);
+                net_lost(m);
+            }
+            continue;
+        }
+        unsigned char frame[257];
+        frame[0] = len;
+        memcpy(frame + 1, msg, len);
+        g_rx_msgs++;
+        g_rx_type[msg[0]]++;
+        fnv_add(&g_rx_fnv, frame, (size_t)len + 1);
+        note_digest("rx", msg, len);
+        engine_write(frame, (size_t)len + 1);
+    }
+    if (!g_net_ending) net_lost("The connection to the host was lost.");
+    return NULL;
+}
+
+static int net_connect(void)
+{
+    struct addrinfo hints, *res = NULL;
+    char portstr[16], line[600];
+    memset(&hints, 0, sizeof hints);
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_STREAM;
+    snprintf(portstr, sizeof portstr, "%d", g_net_port);
+    clock_gettime(CLOCK_MONOTONIC, &g_t0);
+    if (g_net_diag[0]) g_diag = fopen(g_net_diag, "w");
+    diag("engine link to %s:%d as '%s'", g_net_host, g_net_port, g_net_nick);
+    if (getaddrinfo(g_net_host, portstr, &hints, &res) || !res) {
+        diag("LINK cannot resolve %s", g_net_host);
+        return -1;
+    }
+    int fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (fd < 0) { freeaddrinfo(res); return -1; }
+    fcntl(fd, F_SETFL, O_NONBLOCK);
+    int rc = connect(fd, res->ai_addr, res->ai_addrlen);
+    freeaddrinfo(res);
+    if (rc < 0 && errno == EINPROGRESS) {
+        struct pollfd p = { fd, POLLOUT, 0 };
+        int err = 0;
+        socklen_t el = sizeof err;
+        if (poll(&p, 1, 8000) <= 0 || getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &el) || err) {
+            diag("LINK connect failed or timed out");
+            close(fd);
+            return -1;
+        }
+    } else if (rc < 0) {
+        diag("LINK connect failed: %s", strerror(errno));
+        close(fd);
+        return -1;
+    }
+    fcntl(fd, F_SETFL, 0);
+    int one = 1;
+    setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof one);
+    setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, &one, sizeof one);
+    struct timeval tv = { 10, 0 };
+    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof tv);
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
+    int n = snprintf(line, sizeof line, "{\"t\":\"hello\",\"role\":\"engine\",\"token\":\"%s\"}\n", g_net_token);
+    if (write_full(fd, line, (size_t)n)) { close(fd); return -1; }
+    /* reply line, byte by byte so no binary data is read */
+    size_t used = 0;
+    for (;;) {
+        char c;
+        ssize_t r = recv(fd, &c, 1, 0);
+        if (r <= 0 || used >= sizeof line - 1) { close(fd); diag("LINK no reply from the host"); return -1; }
+        if (c == '\n') break;
+        line[used++] = c;
+    }
+    line[used] = 0;
+    if (!strstr(line, "\"t\":\"ok\"")) {
+        diag("LINK refused: %s", line);
+        const char *rs = strstr(line, "\"reason\":\"");
+        static char why[300];
+        snprintf(why, sizeof why, "The host refused the game link: %s", rs ? rs + 10 : line);
+        char *q = strchr(why, '"');
+        if (q) *q = 0;
+        if (g_error_handler) g_error_handler(why);
+        close(fd);
+        return -1;
+    }
+    tv.tv_sec = 0;                                             /* the downstream thread blocks without a limit */
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
+    g_relay_fd = fd;
+    g_net_up = 1;
+    diag("engine link up: %s", line);
+    if (pthread_create(&g_send_thread, NULL, send_thread, NULL) == 0) g_send_started = 1;
+    if (pthread_create(&g_down_thread, NULL, down_thread, NULL) == 0) g_down_started = 1;
+    return 0;
+}
+
+/* The engine has closed the IPC socket: let the sender drain, then close the link and write the summary. */
+static void net_finish(void)
+{
+    if (!g_net) return;
+    g_net_ending = 1;
+    if (g_send_started) {
+        pthread_mutex_lock(&g_q_lock);
+        g_q_closed = 1;
+        pthread_cond_broadcast(&g_q_cond);
+        pthread_mutex_unlock(&g_q_lock);
+        pthread_join(g_send_thread, NULL);
+        g_send_started = 0;
+    }
+    if (g_relay_fd >= 0) shutdown(g_relay_fd, SHUT_RDWR);
+    if (g_down_started) {
+        pthread_join(g_down_thread, NULL);
+        g_down_started = 0;
+    }
+    if (g_relay_fd >= 0) close(g_relay_fd);
+    g_relay_fd = -1;
+    g_net_up = 0;
+    if (g_diag) {
+        char types[400];
+        size_t u = 0;
+        types[0] = 0;
+        for (int i = 0; i < 256 && u < sizeof types - 30; i++) {
+            if (g_tx_type[i] || g_rx_type[i])
+                u += (size_t)snprintf(types + u, sizeof types - u, " %c:%lu/%lu", i >= 32 && i < 127 ? i : '?', g_tx_type[i], g_rx_type[i]);
+        }
+        diag("SUMMARY tx %lu messages hash %016llx, rx %lu messages hash %016llx, turns %d, by type tx/rx:%s",
+             g_tx_msgs, (unsigned long long)g_tx_fnv, g_rx_msgs, (unsigned long long)g_rx_fnv, g_turn_seq, types);
+        fclose(g_diag);
+        g_diag = NULL;
+    }
+}
+
 /* Send every non-empty line of the config file as one length-prefixed message. */
 static int send_config(int fd)
 {
@@ -119,25 +489,43 @@ static void *server_thread(void *arg)
     }
     g_client_fd = fd;
     pthread_mutex_unlock(&g_fd_lock);
-    LOGI("engine connected");
+    pthread_mutex_lock(&g_wr_lock);
+    g_engine_fd = fd;
+    pthread_mutex_unlock(&g_wr_lock);
+    LOGI("engine connected%s", g_net ? " (network mode)" : "");
     for (;;) {
         unsigned char len;
         unsigned char msg[256];
         if (read_full(fd, &len, 1)) break;
         if (len && read_full(fd, msg, len)) break;
+        /* Network mode: tap every engine message (right after the read) into the queue for the relay link. */
+        if (g_net && len && msg[0] != 'C' && msg[0] != '?') net_tap(msg, len);
         if (len && msg[0] == 'C') {
             /* The engine asks for the game configuration. */
             if (send_config(fd)) break;
+            if (g_net) g_net_pending = 1;
         } else if (len && msg[0] == '?') {
             /* The engine asks a question; answer with '!' as the Qt frontend does. */
             static const unsigned char ok[2] = { 1, '!' };
-            if (write_full(fd, ok, sizeof ok)) break;
+            pthread_mutex_lock(&g_wr_lock);
+            int bad = write_full(fd, ok, sizeof ok);
+            pthread_mutex_unlock(&g_wr_lock);
+            if (bad) break;
+            if (g_net && g_net_pending) {
+                /* The setup has been delivered: now join the game through the relay. */
+                g_net_pending = 0;
+                if (net_connect()) {
+                    if (g_error_handler) g_error_handler("Could not connect the game to the host (see the log).");
+                    break;
+                }
+            }
         } else if (len > 1 && msg[0] == 'E') {
             /* The engine reports a fatal error and is about to exit the process. */
             char text[256];
             memcpy(text, msg + 1, (size_t)len - 1);
             text[len - 1] = 0;
             LOGE("engine error: %s", text);
+            if (g_net) net_send_control('E', text);          /* before anything else: the process is about to end */
             if (g_error_handler) g_error_handler(text);
         }
         else if (len >= 3) {
@@ -167,6 +555,10 @@ static void *server_thread(void *arg)
         LOGI("engine commands seen:%s", used ? sum : " none");
     }
     LOGI("engine closed the IPC socket");
+    net_finish();
+    pthread_mutex_lock(&g_wr_lock);
+    g_engine_fd = -1;
+    pthread_mutex_unlock(&g_wr_lock);
     pthread_mutex_lock(&g_fd_lock);
     g_client_fd = -1;
     pthread_mutex_unlock(&g_fd_lock);

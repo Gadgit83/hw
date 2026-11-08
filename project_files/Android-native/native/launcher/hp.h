@@ -16,3 +16,10 @@ void hp_ipc_join(void);
 /* Called from the server thread when the engine reports a fatal error ('E' message). The text
  * is NUL terminated and valid only during the call. Optional; the desktop test leaves it unset. */
 void hp_ipc_set_error_handler(void (*handler)(const char *message));
+
+/* Network mode. Reads the relay link (host, port, token, nick, diag) from a small key=value file. Call before
+ * hp_ipc_start; returns 0 when the file is valid, and the launcher then joins the game through the relay
+ * (see hp_ipc.c). Returns -1 when there is no such file: a local game. */
+int hp_ipc_net_config(const char *path);
+/* The player name from that file (for --nick), or NULL in a local game. */
+const char *hp_ipc_net_nick(void);

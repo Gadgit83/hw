@@ -108,6 +108,11 @@ int main(int argc, char **argv)
     }
     const char *w = argc > 4 ? argv[4] : "1280", *h = argc > 5 ? argv[5] : "720";
     char port[16];
+    /* HP_NET_CFG=<file>: network game through the relay, same key=value file the app writes (net.cfg). */
+    if (getenv("HP_NET_CFG") && hp_ipc_net_config(getenv("HP_NET_CFG")) != 0) {
+        fprintf(stderr, "cannot read the network config %s\n", getenv("HP_NET_CFG"));
+        return 1;
+    }
     int p = hp_ipc_start(argv[3]);
     if (p < 0) return 2;
     snprintf(port, sizeof port, "%d", p);
@@ -118,8 +123,9 @@ int main(int argc, char **argv)
         "--locale", "en.txt", "--nodampen", "--nosound", "--nomusic",
     };
     int nargs = 16;
+    if (hp_ipc_net_nick()) { args[nargs++] = "--nick"; args[nargs++] = (char *)hp_ipc_net_nick(); }
     /* HP_TEST_SOUND=1 runs with the SDL dummy audio driver and sound on (the default test has it off). */
-    if (getenv("HP_TEST_SOUND")) nargs = 15;
+    if (getenv("HP_TEST_SOUND")) { for (int i = 15; i + 1 < nargs; i++) args[i] = args[i + 1]; nargs--; }
     /* HP_TEST_ARGS: extra engine options, e.g. "--ui-scale 240 --inset-left 80". */
     char *extra = getenv("HP_TEST_ARGS") ? strdup(getenv("HP_TEST_ARGS")) : NULL, *sv = NULL;
     if (extra)

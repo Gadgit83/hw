@@ -507,6 +507,7 @@ begin
     PathPrefix:= copy(PathPrefix, 1, length(PathPrefix) - 1);
     UserPathPrefix:= copy(UserPathPrefix, 1, length(UserPathPrefix) - 1);
 
+{$IFDEF PAS2C}uConsts.initModule;{$ENDIF}  // sets hwFloat constants (FreePascal does this in an initialization section)
     uUtils.initModule(complete);    // opens the debug file, must be the first
     uVariables.initModule;          // inits all global variables
     uCommands.initModule;           // helps below

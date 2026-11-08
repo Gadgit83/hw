@@ -423,9 +423,9 @@ const
     cMaxTurnTime = Pred(High(LongInt)); // maximum possible turn time
 
 var
-    cTeamHealthHeight,
-    cFontBorder,
-    cFontPadding: LongInt;
+    cTeamHealthHeight: LongInt = 19;
+    cFontBorder: LongInt = 2;
+    cFontPadding: LongInt = 2;
 
     cAirPlaneSpeed: hwFloat;
     cBombsSpeed   : hwFloat;
@@ -525,14 +525,21 @@ var
              cLittle,
              cHHKick: hwFloat;
 
+procedure initModule;
+
 implementation
 uses uRust;
 
-initialization
-
+// Unit initialisation lives in a procedure so that pas2c, which has no
+// notion of an initialization section, can call it from hwengine.pas.
+// With FreePascal the initialization section below calls it, as before.
+procedure initModule;
+begin
+{$IFNDEF PAS2C}
     cTeamHealthHeight:= round(19 * HDPIScaleFactor);
     cFontBorder:= round(2 * HDPIScaleFactor);
     cFontPadding:= round(2 * HDPIScaleFactor);
+{$ENDIF}
 
     cAirPlaneSpeed:= hwf_raw(false, 3006477107);
     cBombsSpeed:= hwf_raw(false, 429496729);
@@ -632,5 +639,11 @@ initialization
 
      cLittle:= hwf_min_positive();
      cHHKick:= hwf_new(1, 100);  // _0_01
+end;
+
+{$IFNDEF PAS2C}
+initialization
+    initModule;
+{$ENDIF}
 
 end.

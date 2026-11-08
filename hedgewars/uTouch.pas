@@ -103,6 +103,7 @@ xr:= round(x * cScreenWidth);
 yr:= round(y * cScreenHeight);
 
 finger:= addFinger(xr, yr, pointerId);
+finger^.downWhilePaused:= isPaused;
 
 inc(buttonsDown);//inc buttonsDown, if we don't see a button down we'll dec it
 
@@ -283,7 +284,6 @@ var
     finger: PTouch_Data;
     widget: POnScreenWidget;
     xr, yr: LongInt;
-    resumed: boolean;
 begin
 xr:= round(x * cScreenWidth);
 yr:= round(y * cScreenHeight);
@@ -292,20 +292,15 @@ finger:= updateFinger(xr, yr, 0, 0, pointerId);
 if finger = nil then
     exit;
 
-resumed:= false;
-
 //Check for onTouchClick event
 if not(fingerHasMoved(finger^)) then
     begin
-    // a tap that started on no widget resumes a paused game (the pause button toggles on touch down,
-    // and a finger held on a widget before the pause does not resume on release); the resuming tap
-    // does not also act as a click
-    if isPaused and (finger^.pressedWidget = nil) then
-        begin
-        ParseCommand('pause', true);
-        resumed:= true;
-        end;
-    if not resumed then
+    // a tap that went down on no widget while the game was paused resumes it; the resuming tap does
+    // not also act as a click. A finger that went down while the game was running (map, jump) or on
+    // a widget does not resume on release, and the pause button finger is not a click either.
+    if isPaused and finger^.downWhilePaused and (finger^.pressedWidget = nil) then
+        ParseCommand('pause', true)
+    else if finger^.pressedWidget <> @pauseButton then
         begin
         if (RealTicks - finger^.timeSinceDown) < clickTime then
             onTouchClick(finger^)
@@ -428,6 +423,7 @@ fingers[pointerCount].dx := 0;
 fingers[pointerCount].dy := 0;
 fingers[pointerCount].timeSinceDown:= RealTicks;
 fingers[pointerCount].pressedWidget:= nil;
+fingers[pointerCount].downWhilePaused:= false;
 
 addFinger:= @fingers[pointerCount];
 inc(pointerCount);
@@ -472,6 +468,7 @@ for index := 0 to pointerCount do
             fingers[index].historicalY := fingers[pointerCount].historicalY;
             fingers[index].timeSinceDown := fingers[pointerCount].timeSinceDown;
             fingers[index].pressedWidget := fingers[pointerCount].pressedWidget;
+            fingers[index].downWhilePaused := fingers[pointerCount].downWhilePaused;
 
             fingers[pointerCount].id := noFingerId;
             end

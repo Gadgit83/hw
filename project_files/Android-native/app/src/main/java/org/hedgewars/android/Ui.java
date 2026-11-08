@@ -93,21 +93,34 @@ public final class Ui {
         hideBars(a);
     }
 
-    /** Full screen: the status and navigation bars stay hidden (a swipe from the edge shows them for a moment). */
+    /**
+     * Full screen: the status and navigation bars stay hidden (a swipe from the edge shows them for a moment).
+     * Safe to call at any point of the activity life cycle, including from onCreate before setContentView.
+     * Window.getInsetsController() dereferences the decor view, which does not exist before setContentView
+     * (NullPointerException on Android 11 and later, the 0.2.1 crash on launch), so the controller is taken from the
+     * decor view instead. That creates the decor view on demand. Before the window is attached the decor view has no
+     * controller yet; the legacy system UI flags then apply the same state, and onWindowFocusChanged calls this again.
+     */
     public static void hideBars(Activity a) {
         Window w = a.getWindow();
+        View decor = w.getDecorView();
         if (Build.VERSION.SDK_INT >= 30) {
-            WindowInsetsController c = w.getInsetsController();
+            WindowInsetsController c = null;
+            try {
+                c = decor.getWindowInsetsController();
+            } catch (RuntimeException e) {
+                // not attached yet: fall through to the flags
+            }
             if (c != null) {
                 c.hide(WindowInsets.Type.statusBars() | WindowInsets.Type.navigationBars());
                 c.setSystemBarsBehavior(WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+                return;
             }
-        } else {
-            w.getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-                    | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
-                    | View.SYSTEM_UI_FLAG_FULLSCREEN | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-                    | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
         }
+        decor.setSystemUiVisibility(View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                | View.SYSTEM_UI_FLAG_FULLSCREEN | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
     }
 
     /** Insets to keep clear of: system bars, the keyboard and the display cut-out: left, top, right, bottom. */

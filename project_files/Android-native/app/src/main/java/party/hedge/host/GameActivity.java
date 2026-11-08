@@ -109,6 +109,12 @@ public class GameActivity extends SDLActivity {
                     l = Math.max(l, bars.left); rt = Math.max(rt, bars.right); b = Math.max(b, bars.bottom);
                 }
             }
+            // The activity is sensorLandscape, so a 180 degree flip moves the cut-out to the other side
+            // and the measured insets are for the wrong side. Use the larger of each opposite pair for both.
+            int lr = Math.max(l, rt);
+            l = lr; rt = lr;
+            int tb = Math.max(t, b);
+            t = tb; b = tb;
             r[2] = l; r[3] = t; r[4] = rt; r[5] = b;
         } catch (RuntimeException e) {
             // keep the defaults

@@ -173,25 +173,34 @@ end;
 
 procedure PrettifySurfaceAlpha(surf: PSDL_Surface; pixels: PLongwordArray);
 var
-    // current row index, second last row index of array, width and first/last i of row
-    r, slr, w, si, li: LongWord;
+    // current row index, second last row index of array, width, row stride (in pixels)
+    // and first/last i of row
+    r, slr, w, stride, si, li: LongWord;
 begin
     w:= surf^.w;
-    // just a single pixel, nothing to do here
-    if (w < 2) and (surf^.h < 2) then
+    // nothing to do for empty surfaces or just a single pixel
+    if (w = 0) or (surf^.h = 0) or ((w < 2) and (surf^.h < 2)) then
         exit;
-    slr:= surf^.h - 2;
+    // rows are pitch bytes apart, which can be more than w * 4
+    stride:= surf^.pitch div 4;
     si:= 0;
     li:= w - 1;
-    for r:= 0 to slr do
+    // all rows except the last one also look at their bottom neighbour. Do not
+    // compute h - 2 for a single row surface, it would wrap around (LongWord)
+    // and run far past the end of the pixel buffer
+    if surf^.h >= 2 then
         begin
-        PrettifyAlpha(pixels, pixels, si, li, w);
-        // move indices to next row
-        si:= si + w;
-        li:= li + w;
+        slr:= surf^.h - 2;
+        for r:= 0 to slr do
+            begin
+            PrettifyAlpha(pixels, pixels, si, li, stride);
+            // move indices to next row
+            si:= si + stride;
+            li:= li + stride;
+            end;
         end;
     // don't forget last row
-    PrettifyAlpha(pixels, nil, si, li, w);
+    PrettifyAlpha(pixels, nil, si, li, stride);
 end;
 
 procedure PrettifyAlpha2D(height, width: LongWord);

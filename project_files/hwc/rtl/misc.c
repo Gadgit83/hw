@@ -223,6 +223,8 @@ char* fpcrtl__pcharA__vars(astring * s)
     return &s->s[1];
 }
 
+#ifndef HW_GLES1 /* OpenGL ES 1.1 has no shaders */
 void fpcrtl_glShaderSource(GLuint shader, GLsizei count,/* const dropped for pas2c compat */ GLchar **string, const GLint *length) {
     glShaderSource(shader, count, (const char * const *)string, length);
 }
+#endif

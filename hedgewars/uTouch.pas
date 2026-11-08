@@ -295,11 +295,15 @@ if finger = nil then
 //Check for onTouchClick event
 if not(fingerHasMoved(finger^)) then
     begin
-    // a tap that went down on no widget while the game was paused resumes it; the resuming tap does
-    // not also act as a click. A finger that went down while the game was running (map, jump) or on
-    // a widget does not resume on release, and the pause button finger is not a click either.
-    if isPaused and finger^.downWhilePaused and (finger^.pressedWidget = nil) then
-        ParseCommand('pause', true)
+    // While paused nothing is clicked: a tap that went down on no widget during the pause resumes the
+    // game (and is not also a click), and a finger that went down before the pause (map, jump, menu
+    // chest) or on a widget does nothing when lifted, so it cannot open the weapon menu or start a
+    // long press jump behind the pause. The pause button finger is never a click either.
+    if isPaused then
+        begin
+        if finger^.downWhilePaused and (finger^.pressedWidget = nil) then
+            ParseCommand('pause', true);
+        end
     else if finger^.pressedWidget <> @pauseButton then
         begin
         if (RealTicks - finger^.timeSinceDown) < clickTime then

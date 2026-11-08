@@ -404,9 +404,9 @@ if ChatHidden and (not showAll) then
     visibleCount:= 0;
 
 // draw chat lines with some distance from screen border
-left:= 4 - cScreenWidth div 2;
+left:= 4 - cScreenWidth div 2 + round(cSafeInsetL / cUIScale);
 {$IFDEF USE_TOUCH_INTERFACE}
-i:= 55;
+i:= 55 + round(cSafeInsetT / cUIScale);
 {$ELSE}
 i:= 10;
 {$ENDIF}

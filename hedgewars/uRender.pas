@@ -107,6 +107,9 @@ procedure openglPushMatrix      ();
 procedure openglPopMatrix       (); 
 procedure openglTranslatef      (X, Y, Z: GLfloat); 
 
+procedure PushUIScale(f: GLfloat);
+procedure PopUIScale;
+
 
 implementation
 uses {$IFNDEF PAS2C} StrUtils, {$ENDIF}uVariables, uUtils
@@ -885,6 +888,20 @@ begin
     updateViewLimits();
 
     UpdateModelviewProjection;
+end;
+
+// Draws everything that follows f times larger (touch HUD on high density screens).
+procedure PushUIScale(f: GLfloat);
+begin
+openglPushMatrix;
+openglScalef(f, f, 1.0);
+UpdateModelviewProjection;
+end;
+
+procedure PopUIScale;
+begin
+openglPopMatrix;
+UpdateModelviewProjection;
 end;
 
 procedure DrawSpriteFromRect(Sprite: TSprite; r: TSDL_Rect; X, Y, Height, Position: LongInt); 

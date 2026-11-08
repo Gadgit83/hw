@@ -233,6 +233,15 @@ game to freeze if one online player minimizes Hedgewars. *)
                                 if GameState = gsSuspend then
                                     GameState:= previousGameState;
                                 cWindowedMaximized:= false;
+{$IFDEF ANDROID_NATIVE}
+                                // coming back from the background: resume the pause that leaving caused
+                                if cPausedByFocus and cHasFocus then
+                                    begin
+                                    cPausedByFocus:= false;
+                                    if isPaused then
+                                        ParseCommand('pause', true);
+                                    end;
+{$ENDIF}
 {$IFDEF ANDROID}
                                 //This call is used to reinitialize the glcontext and reload the textures
                                 ParseCommand('fullscr '+intToStr(LongInt(cFullScreen)), true);

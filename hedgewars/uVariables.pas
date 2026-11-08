@@ -194,6 +194,11 @@ var
     cVolumeDownKey  : boolean;
     cMuteToggle     : boolean; // Mute toggle requested
     cHasFocus       : boolean;
+    cPausedByFocus  : boolean; // mobile: the pause was caused by losing focus, so regaining it resumes
+    cSafeInsetL, cSafeInsetT, cSafeInsetR, cSafeInsetB: LongInt; // screen pixels kept clear of rounded corners and cut-outs
+    cMenuTarget     : GLfloat; // wanted scale of the weapon menu (0: same as the HUD)
+    cMenuScale      : GLfloat; // scale the weapon menu is drawn at right now
+    cUIScale        : GLfloat; // size of the touch HUD relative to the desktop layout
     cInactDelay     : Longword;
 
     bBetweenTurns   : boolean;
@@ -2774,6 +2779,13 @@ begin
 {$ENDIF}
 
     cDefaultChatScale:= 1.0;
+    cUIScale:= 1.0;
+    cMenuScale:= 1.0;
+    cMenuTarget:= 0.0;
+    cSafeInsetL:= 0;
+    cSafeInsetT:= 0;
+    cSafeInsetR:= 0;
+    cSafeInsetB:= 0;
 
     cTagsMask:= htTeamName or htName or htHealth;
     cPrevTagsMask:= cTagsMask;
@@ -3026,6 +3038,7 @@ begin
     cVolumeDownKey  := false;
     cMuteToggle     := false;
     cHasFocus       := true;
+    cPausedByFocus  := false;
     cInactDelay     := 100;
     ReadyTimeLeft   := 0;
 

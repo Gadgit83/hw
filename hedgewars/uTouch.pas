@@ -39,7 +39,7 @@ function convertToCursorX(x: LongInt): LongInt;
 function convertToCursorY(y: LongInt): LongInt;
 
 function addFinger(x,y: Longword; id: Int64): PTouch_Data;
-function updateFinger(x,y,dx,dy: Longword; id: Int64): PTouch_Data;
+function updateFinger(x,y,dx,dy: LongInt; id: Int64): PTouch_Data;
 procedure deleteFinger(id: Int64);
 
 procedure onTouchClick(finger: TTouch_Data);
@@ -57,6 +57,7 @@ function calculateDelta(finger1, finger2: TTouch_Data): LongInt;
 function getSecondFinger(finger: TTouch_Data): PTouch_Data;
 function isOnRect(rect: TSDL_Rect; finger: TTouch_Data): boolean;
 function isOnRect(x,y,w,h: LongInt; finger: TTouch_Data): boolean;
+function isOnUIRect(rect: TSDL_Rect; finger: TTouch_Data; scale: GLfloat): boolean;
 function isOnWidget(widget: TOnScreenWidget; finger: TTouch_Data): boolean;
 procedure printFinger(finger: TTouch_Data);
 implementation
@@ -74,6 +75,7 @@ var
     fingers: array[0..cMaxFingers-1] of TTouch_Data;
     moveCursor : boolean;
     invertCursor : boolean;
+    uiDragX, uiDragY: Single;
 
     //Pinch to zoom
     pinchSize : LongInt;
@@ -90,8 +92,13 @@ var
 procedure onTouchDown(x, y: Single; pointerId: Int64);
 var
     finger: PTouch_Data;
-    xr, yr, tmp: LongWord;
+    xr, yr: LongInt;
+    tmp: LongWord;
 begin
+rectSize:= round(baseRectSize * cUIScale);
+halfRectSize:= rectSize shr 1;
+uiDragX:= 0;
+uiDragY:= 0;
 xr:= round(x * cScreenWidth);
 yr:= round(y * cScreenHeight);
 
@@ -99,6 +106,8 @@ finger:= addFinger(xr, yr, pointerId);
 
 inc(buttonsDown);//inc buttonsDown, if we don't see a button down we'll dec it
 
+if (not isPaused) or isOnWidget(pauseButton, finger^) then
+begin
 if isOnCrosshair(finger^) then
 begin
     aimingCrosshair:= true;
@@ -147,7 +156,7 @@ if isOnWidget(arrowDown, finger^) then
 
 if isOnWidget(pauseButton, finger^) then
     begin
-    ParseTeamCommand('pause');
+    ParseCommand('pause', true);
     moveCursor:= false;
     finger^.pressedWidget:= @pauseButton;
     exit;
@@ -189,6 +198,8 @@ if isOnWidget(utilityWidget2, finger^) then
     exit;
     end;
 
+end; // not paused (while paused only the pause button reacts, the rest pans the camera)
+
 dec(buttonsDown);//no buttonsDown, undo the inc() above
 if buttonsDown = 0 then
     begin
@@ -210,7 +221,7 @@ procedure onTouchMotion(x, y, dx, dy: Single; pointerId: Int64);
 var
     finger, secondFinger: PTouch_Data;
     currentPinchDelta, zoom : Single;
-    xr, yr, dxr, dyr: LongWord;
+    xr, yr, dxr, dyr: LongInt;
 begin
 xr:= round(x * cScreenWidth);
 yr:= round(y * cScreenHeight);
@@ -223,6 +234,17 @@ if finger = nil then
 
 if moveCursor then
     begin
+        if bShowAmmoMenu then
+            begin
+            // the weapon menu is drawn in UI units, so its cursor moves by UI units
+            uiDragX:= uiDragX + finger^.dx / cMenuScale;
+            uiDragY:= uiDragY + finger^.dy / cMenuScale;
+            CursorPoint.X:= CursorPoint.X + trunc(uiDragX);
+            CursorPoint.Y:= CursorPoint.Y - trunc(uiDragY);
+            uiDragX:= uiDragX - trunc(uiDragX);
+            uiDragY:= uiDragY - trunc(uiDragY);
+            end
+        else
         if invertCursor then
         begin
             CursorPoint.X := CursorPoint.X - finger^.dx;
@@ -260,7 +282,7 @@ procedure onTouchUp(x,y: Single; pointerId: Int64);
 var
     finger: PTouch_Data;
     widget: POnScreenWidget;
-    xr, yr: LongWord;
+    xr, yr: LongInt;
 begin
 xr:= round(x * cScreenWidth);
 yr:= round(y * cScreenHeight);
@@ -272,6 +294,9 @@ if finger = nil then
 //Check for onTouchClick event
 if not(fingerHasMoved(finger^)) then
     begin
+    // tapping anywhere but on the pause button itself (which toggles on touch down) resumes a paused game
+    if isPaused and (finger^.pressedWidget <> @pauseButton) then
+        ParseCommand('pause', true);
     if (RealTicks - finger^.timeSinceDown) < clickTime then
         onTouchClick(finger^)
     else
@@ -343,10 +368,10 @@ begin
 
 if bShowAmmoMenu then
     begin
-    if isOnRect(AmmoRect, finger) then
+    if isOnUIRect(AmmoRect, finger, cMenuScale) then
         begin
-        CursorPoint.X:= finger.x;
-        CursorPoint.Y:= finger.y;
+        CursorPoint.X:= round(finger.x / cMenuScale);
+        CursorPoint.Y:= round(finger.y / cMenuScale);
         ParseTeamCommand('put');
         end
     else
@@ -397,7 +422,7 @@ addFinger:= @fingers[pointerCount];
 inc(pointerCount);
 end;
 
-function updateFinger(x, y, dx, dy: Longword; id: Int64): PTouch_Data;
+function updateFinger(x, y, dx, dy: LongInt; id: Int64): PTouch_Data;
 var finger : PTouch_Data;
 begin
 finger:= findFinger(id);
@@ -418,7 +443,8 @@ procedure deleteFinger(id: Int64);
 var
     index : Longword;
 begin
-
+if pointerCount = 0 then
+    exit;
 dec(pointerCount);
 for index := 0 to pointerCount do
     begin
@@ -639,9 +665,19 @@ begin
                (cScreenHeight - finger.y < y + h);
 end;
 
+// Hit test for things drawn in UI units (the touch HUD): see UISwapIn in uWorld.
+function isOnUIRect(rect: TSDL_Rect; finger: TTouch_Data; scale: GLfloat): boolean;
+var fx, fy: LongInt;
+begin
+    fx:= round(finger.x / scale);
+    fy:= round((cScreenHeight - finger.y) / scale);
+    isOnUIRect:= (fx > rect.x) and (fx < rect.x + rect.w) and
+                 (fy > rect.y) and (fy < rect.y + rect.h);
+end;
+
 function isOnWidget(widget: TOnScreenWidget; finger: TTouch_Data): boolean;
 begin
-    isOnWidget:= widget.show and isOnRect(widget.active, finger);
+    isOnWidget:= widget.show and isOnUIRect(widget.active, finger, cUIScale);
 end;
 
 procedure printFinger(finger: TTouch_Data);
@@ -662,8 +698,10 @@ begin
     for index := 0 to (cMaxFingers-1) do
         fingers[index].id := noFingerId;
 
-    rectSize:= baseRectSize;
-    halfRectSize:= baseRectSize shr 1;
+    uiDragX:= 0;
+    uiDragY:= 0;
+    rectSize:= round(baseRectSize * cUIScale);
+    halfRectSize:= rectSize shr 1;
 end;
 
 procedure freeModule;

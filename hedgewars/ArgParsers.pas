@@ -99,6 +99,9 @@ begin
     WriteLn(stdout, '  --nomusic: Disable music');
     WriteLn(stdout, '  --nosound: Disable sound effects');
     WriteLn(stdout, '  --nodampen: Don''t dampen sound volume when game application loses focus');
+    WriteLn(stdout, '  --effects-volume <percent>: Sound effects level as a percentage of --volume (default 100)');
+    WriteLn(stdout, '  --music-volume <percent>: Music level as a percentage of --volume (default 50)');
+    WriteLn(stdout, '  --no-voices: Disable hedgehog voices');
     WriteLn(stdout, '');
     WriteLn(stdout, 'HUD:');
     WriteLn(stdout, '  --altdmg: Show alternative damage');
@@ -245,14 +248,15 @@ begin
 end;
 
 function parseParameter(cmd:string; arg:string; var paramIndex:LongInt): Boolean;
-const reallyAll: array[0..43] of shortstring = (
+const reallyAll: array[0..46] of shortstring = (
                 '--prefix', '--user-prefix', '--locale', '--fullscreen-width', '--fullscreen-height', '--width',
                 '--height', '--maximized', '--frame-interval', '--volume','--nomusic', '--nosound', '--nodampen',
                 '--fullscreen', '--showfps', '--altdmg', '--low-quality', '--raw-quality', '--stereo', '--nick',
                 '--zoom',
   {internal}    '--internal', '--port', '--recorder', '--landpreview',
   {misc}        '--stats-only', '--gci', '--help','--protocol', '--no-teamtag','--no-hogtag','--no-healthtag','--translucent-tags','--lua-test','--no-holiday-silliness','--chat-size', '--prefix64', '--user-prefix64',
-  {android}     '--ui-scale', '--inset-left', '--inset-top', '--inset-right', '--inset-bottom', '--menu-scale');
+  {android}     '--ui-scale', '--inset-left', '--inset-top', '--inset-right', '--inset-bottom', '--menu-scale',
+                '--effects-volume', '--music-volume', '--no-voices');
 var cmdIndex: byte;
 begin
     parseParameter:= false;
@@ -309,6 +313,9 @@ begin
         {--inset-right}         41: cSafeInsetR := getLongIntParameter(arg, paramIndex, parseParameter);
         {--inset-bottom}        42: cSafeInsetB := getLongIntParameter(arg, paramIndex, parseParameter);
         {--menu-scale}          43: cMenuTarget := 1.0 * getLongIntParameter(arg, paramIndex, parseParameter) / 100;
+        {--effects-volume}      44: SetEffectsVolume    ( getLongIntParameter(arg, paramIndex, parseParameter) );
+        {--music-volume}        45: SetMusicVolume      ( getLongIntParameter(arg, paramIndex, parseParameter) );
+        {--no-voices}           46: SetVoices           ( false );
     else
         begin
         //Assume the first "non parameter" is the demo file, anything else is invalid

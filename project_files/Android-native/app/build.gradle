@@ -1,0 +1,65 @@
+plugins {
+    id 'com.android.application'
+}
+
+// ABIs to build; override with -Pabis=arm64-v8a (or "arm64-v8a,x86_64").
+def abis = (project.findProperty('abis') ?: 'arm64-v8a,x86_64').split(',').collect { it.trim() }
+def sdlJava = file('../third_party/SDL/android-project/app/src/main/java')
+
+android {
+    namespace 'party.hedge.host'
+    compileSdk 34
+    ndkVersion '27.2.12479018'
+
+    defaultConfig {
+        applicationId 'party.hedge.host'
+        minSdk 24
+        targetSdk 34
+        versionCode 1
+        versionName '0.1.0'
+        ndk { abiFilters(*abis) }
+        externalNativeBuild {
+            cmake {
+                arguments '-DANDROID_STL=c++_static',
+                          '-DCMAKE_BUILD_TYPE=Release',
+                          '-DCMAKE_C_FLAGS_RELEASE=-O2 -DNDEBUG',
+                          '-DCMAKE_SHARED_LINKER_FLAGS=-Wl,-z,max-page-size=16384'
+            }
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path '../native/CMakeLists.txt'
+            version '3.22.1'
+        }
+    }
+
+    sourceSets.main {
+        // SDLActivity and friends come straight from the SDL checkout (not copied into this repo).
+        java.srcDirs += sdlJava
+        // Trimmed game data staged by scripts/stage-assets.sh.
+        assets.srcDirs += file('../build/assets')
+        // libhwengine_future.so per ABI, built by scripts/build-rust.sh.
+        jniLibs.srcDirs += file('../build/rust')
+    }
+
+    androidResources {
+        // Already compressed formats: store as they are so first-run extraction is fast.
+        noCompress += ['ogg', 'png', 'ttf', 'wav', 'lua', 'txt', 'cfg', 'yaml', 'toml']
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+        }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    lint {
+        abortOnError false
+        checkReleaseBuilds false
+    }
+}

@@ -20,8 +20,22 @@ P2C_DIR="$BUILD_DIR/pas2c"
 OUT="${OUT_DIR:-$BUILD_DIR/engine-c}"
 STAMP="$OUT/.engine-stamp"
 
+# The key and the stamp are only meaningful for a git checkout: without git every git call below
+# would fail silently and the key would collapse to the hash of this script. Fail hard instead.
+require_git_engine() {
+  local top
+  top="$(git -C "$HW_ENGINE_DIR" rev-parse --show-toplevel 2>/dev/null)" || top=""
+  # the directory must be the root of its own checkout, not a plain copy inside some other repository
+  if [ -z "$top" ] || [ "$(cd "$top" && pwd -P)" != "$(cd "$HW_ENGINE_DIR" && pwd -P)" ]; then
+    echo "ENGINE CHECKOUT IS NOT A GIT REPOSITORY: $HW_ENGINE_DIR" >&2
+    echo "The engine C cannot be checked against it. Point HW_ENGINE_DIR at a git checkout of the engine (host/scripts/fetch-deps.sh creates one)." >&2
+    return 1
+  fi
+}
+
 engine_key() {
   # Everything the generated C depends on, as one hash.
+  require_git_engine || return 1
   {
     git -C "$HW_ENGINE_DIR" rev-parse HEAD:hedgewars HEAD:tools/pas2c
     git -C "$HW_ENGINE_DIR" diff HEAD -- hedgewars tools/pas2c
@@ -32,9 +46,17 @@ engine_key() {
     echo "defs ${EXTRA_DEFS:-}"
   } | sha256sum | cut -d' ' -f1
 }
-engine_head() { git -C "$HW_ENGINE_DIR" rev-parse HEAD; }
+engine_head() { git -C "$HW_ENGINE_DIR" rev-parse HEAD 2>/dev/null || echo unknown; }
 
-stamp_matches() { [ -f "$STAMP" ] && grep -qx "key $(engine_key)" "$STAMP"; }
+# A key that cannot be computed is a mismatch, never a match.
+stamp_matches() {
+  local key
+  [ -f "$STAMP" ] || return 1
+  key="$(engine_key)" || return 1
+  [ -n "$key" ] && grep -qx "key $key" "$STAMP"
+}
+
+case "$MODE" in --check|--ensure|generate) require_git_engine || exit 3 ;; esac
 
 case "$MODE" in
   --check)

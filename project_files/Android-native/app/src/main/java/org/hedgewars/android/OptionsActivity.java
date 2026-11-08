@@ -24,7 +24,7 @@ import java.util.Arrays;
 import java.util.List;
 
 /** Options: sound, display and controls, and the advanced and about pages. Changes apply to the next game. */
-public class OptionsActivity extends Activity {
+public class OptionsActivity extends SetupActivity {
 
     private Ui ui;
     private Options o;
@@ -58,27 +58,27 @@ public class OptionsActivity extends Activity {
         root.setBackgroundColor(Ui.BG);
 
         topBar = ui.row();
-        topBar.setPadding(ui.dp(16), ui.dp(8), ui.dp(16), ui.dp(4));
-        topBar.addView(ui.button("‹ Done", true, v -> finish()), Ui.lp(ViewGroup.LayoutParams.WRAP_CONTENT, ui.dp(48)));
-        TextView title = ui.text("Options", 22, Color.WHITE);
+        topBar.setPadding(ui.dp(10), ui.dp(2), ui.dp(10), 0);
+        topBar.addView(ui.button("‹ Done", true, v -> finish()), Ui.lp(ViewGroup.LayoutParams.WRAP_CONTENT, ui.dp(Ui.TOUCH_DP)));
+        TextView title = ui.text("Options", 18, Color.WHITE);
         title.setTypeface(Typeface.DEFAULT_BOLD);
-        topBar.addView(title, ui.margins(ui.weight(1f), 16, 0, 0, 0));
+        title.setSingleLine(true);
+        topBar.addView(title, ui.margins(Ui.lp(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT), 12, 0, 12, 0));
         tabs = ui.tabs(new String[] { "Sound", "Display and controls", "Advanced" }, tab, i -> {
             tab = i;
             show();
         });
-        topBar.addView(tabs.view, Ui.lp(ui.dp(500), ViewGroup.LayoutParams.WRAP_CONTENT));
-        root.addView(topBar);
-
+        topBar.addView(tabs.view, Ui.lp(ui.dp(440), ViewGroup.LayoutParams.WRAP_CONTENT));
         notice = ui.hint("Changes apply to the next game you start.");
-        notice.setPadding(ui.dp(20), 0, ui.dp(16), ui.dp(2));
-        root.addView(notice);
+        notice.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
+        topBar.addView(notice, ui.margins(ui.weight(1f), 12, 0, 4, 0));
+        root.addView(topBar);
 
         ScrollView scroll = new ScrollView(this);
         scroll.setClipToPadding(false);
         holder = new LinearLayout(this);
         holder.setOrientation(LinearLayout.VERTICAL);
-        holder.setPadding(ui.dp(16), ui.dp(2), ui.dp(16), ui.dp(16));
+        holder.setPadding(ui.dp(12), ui.dp(2), ui.dp(12), ui.dp(8));
         scroll.addView(holder, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         root.addView(scroll, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
 
@@ -108,7 +108,7 @@ public class OptionsActivity extends Activity {
         LinearLayout cols = new LinearLayout(this);
         cols.setOrientation(wide() ? LinearLayout.HORIZONTAL : LinearLayout.VERTICAL);
         cols.addView(a, wide() ? ui.weight(1f) : full());
-        cols.addView(b, wide() ? ui.margins(ui.weight(1f), 10, 0, 0, 0) : ui.margins(full(), 0, 10, 0, 0));
+        cols.addView(b, wide() ? ui.margins(ui.weight(1f), 8, 0, 0, 0) : ui.margins(full(), 0, 8, 0, 0));
         holder.addView(cols);
     }
 
@@ -207,7 +207,7 @@ public class OptionsActivity extends Activity {
         LinearLayout left = new LinearLayout(this);
         left.setOrientation(LinearLayout.VERTICAL);
         left.addView(size);
-        left.addView(edge, ui.margins(full(), 0, 10, 0, 0));
+        left.addView(edge, ui.margins(full(), 0, 8, 0, 0));
         twoColumns(left, look);
     }
 
@@ -218,17 +218,17 @@ public class OptionsActivity extends Activity {
         tools.addView(ui.heading("Diagnostics"));
         tools.addView(ui.text("If a game stops or something looks wrong, share the log so it can be looked at.", 14, Color.WHITE));
         tools.addView(ui.button("Share log", false, v -> LogShare.share(this, msg -> Toast.makeText(this, msg, Toast.LENGTH_LONG).show())),
-                ui.margins(Ui.lp(ViewGroup.LayoutParams.WRAP_CONTENT, ui.dp(48)), 0, 8, 0, 0));
+                ui.margins(Ui.lp(ViewGroup.LayoutParams.WRAP_CONTENT, ui.dp(Ui.TOUCH_DP)), 0, 2, 0, 0));
         tools.addView(ui.heading("Reset"));
         tools.addView(ui.text("Unpack the game data again if something is missing or damaged. Your setup and options are kept.", 14, Color.WHITE));
         tools.addView(ui.button("Reset game data", false, v -> confirm("Unpack the game data again?",
                 "The data is copied from the app again, which takes a few seconds. Your setup and options are kept.", this::resetData)),
-                ui.margins(Ui.lp(ViewGroup.LayoutParams.WRAP_CONTENT, ui.dp(48)), 0, 8, 0, 0));
+                ui.margins(Ui.lp(ViewGroup.LayoutParams.WRAP_CONTENT, ui.dp(Ui.TOUCH_DP)), 0, 2, 0, 0));
         tools.addView(ui.text("Put every setting back to how it was when the app was installed.", 14, Color.WHITE),
-                ui.margins(full(), 0, 12, 0, 0));
+                ui.margins(full(), 0, 6, 0, 0));
         tools.addView(ui.button("Reset setup and options", false, v -> confirm("Reset setup and options?",
                 "Teams, map, rules and all options go back to their defaults.", this::resetSettings)),
-                ui.margins(Ui.lp(ViewGroup.LayoutParams.WRAP_CONTENT, ui.dp(48)), 0, 8, 0, 0));
+                ui.margins(Ui.lp(ViewGroup.LayoutParams.WRAP_CONTENT, ui.dp(Ui.TOUCH_DP)), 0, 2, 0, 0));
 
         LinearLayout about = ui.card();
         about.addView(ui.heading("About"));
@@ -251,7 +251,7 @@ public class OptionsActivity extends Activity {
         lic.setOrientation(LinearLayout.HORIZONTAL);
         lic.addView(ui.button("Licence text", false, v -> showFile("COPYING", "Licence")), ui.weight(1f));
         lic.addView(ui.button("Credits", false, v -> showFile("CREDITS", "Credits")), ui.margins(ui.weight(1f), 8, 0, 0, 0));
-        links.addView(lic, ui.margins(full(), 0, 6, 0, 0));
+        links.addView(lic, ui.margins(full(), 0, 0, 0, 0));
         about.addView(links, ui.margins(full(), 0, 8, 0, 0));
         twoColumns(tools, about);
     }

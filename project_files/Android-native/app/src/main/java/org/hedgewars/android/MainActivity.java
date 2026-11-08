@@ -33,7 +33,7 @@ import java.util.Random;
  * The setup screen: teams, map and theme, rules and weapons, then Start. The last setup is kept in the
  * preferences and comes back on the next launch. Options and the log are one tap away.
  */
-public class MainActivity extends Activity {
+public class MainActivity extends SetupActivity {
     private static final int TAB_TEAMS = 0, TAB_MAP = 1, TAB_RULES = 2;
 
     private static final String[] MAP_TYPE_NAMES = {
@@ -56,6 +56,7 @@ public class MainActivity extends Activity {
     private TextView status, summary, problemText, schemeInfo;
     private Button start;
     private boolean moreRules;
+    private boolean warming;
     private final Random rnd = new Random();
 
     // Static, so a recreated MainActivity in the same process sees an install already running
@@ -121,22 +122,22 @@ public class MainActivity extends Activity {
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(Ui.BG);
 
+        // One row: title, tabs, Options.
         topBar = ui.row();
-        topBar.setPadding(ui.dp(16), ui.dp(8), ui.dp(16), ui.dp(4));
-        LinearLayout titles = new LinearLayout(this);
-        titles.setOrientation(LinearLayout.VERTICAL);
-        TextView title = ui.text(BuildConfig.APP_NAME, 24, Color.WHITE);
+        topBar.setPadding(ui.dp(14), ui.dp(2), ui.dp(8), 0);
+        TextView title = ui.text(BuildConfig.APP_NAME, 20, Color.WHITE);
         title.setTypeface(Typeface.DEFAULT_BOLD);
-        titles.addView(title);
-        topBar.addView(titles, ui.weight(1f));
+        title.setSingleLine(true);
+        topBar.addView(title, ui.weight(1f));
         tabs = ui.tabs(new String[] { "Teams", "Map", "Rules" }, tab, i -> {
             tab = i;
             showTab();
         });
-        topBar.addView(tabs.view, Ui.lp(ui.dp(380), ViewGroup.LayoutParams.WRAP_CONTENT));
+        topBar.addView(tabs.view, Ui.lp(ui.dp(270), ViewGroup.LayoutParams.WRAP_CONTENT));
         LinearLayout optionsBox = new LinearLayout(this);
         optionsBox.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
-        optionsBox.addView(ui.button("Options", false, v -> startActivity(new Intent(this, OptionsActivity.class))));
+        optionsBox.addView(ui.iconButton(Ui.GLYPH_SLIDERS, "Options",
+                v -> startActivity(new Intent(this, OptionsActivity.class))), Ui.lp(ui.dp(Ui.TOUCH_DP), ui.dp(Ui.TOUCH_DP)));
         topBar.addView(optionsBox, ui.weight(1f));
         root.addView(topBar);
 
@@ -144,33 +145,33 @@ public class MainActivity extends Activity {
         problemBox.setOrientation(LinearLayout.HORIZONTAL);
         problemBox.setGravity(Gravity.CENTER_VERTICAL);
         problemBox.setVisibility(View.GONE);
-        problemBox.setPadding(ui.dp(14), ui.dp(6), ui.dp(8), ui.dp(6));
-        problemBox.setBackground(ui.round(Color.rgb(84, 52, 44), 12));
-        problemText = ui.text("", 13, Color.rgb(255, 214, 190));
+        problemBox.setPadding(ui.dp(12), ui.dp(2), ui.dp(4), ui.dp(2));
+        problemBox.setBackground(ui.round(Color.rgb(84, 52, 44), 10));
+        problemText = ui.text("", 12, Color.rgb(255, 214, 190));
         problemBox.addView(problemText, ui.weight(1f));
         problemBox.addView(ui.button("Share last log", false, v -> shareLog()));
         LinearLayout.LayoutParams pp = Ui.lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        pp.setMargins(ui.dp(16), ui.dp(4), ui.dp(16), ui.dp(2));
+        pp.setMargins(ui.dp(12), ui.dp(2), ui.dp(12), ui.dp(2));
         root.addView(problemBox, pp);
 
         scroll = new ScrollView(this);
         scroll.setClipToPadding(false);
         holder = new LinearLayout(this);
         holder.setOrientation(LinearLayout.VERTICAL);
-        holder.setPadding(ui.dp(16), ui.dp(2), ui.dp(16), ui.dp(12));
+        holder.setPadding(ui.dp(12), 0, ui.dp(12), ui.dp(8));
         scroll.addView(holder, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         root.addView(scroll, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
 
         // Always visible: what will be played, the data state, and Start.
         bottomBar = ui.row();
         bottomBar.setBackgroundColor(Color.rgb(28, 42, 32));
-        bottomBar.setPadding(ui.dp(16), ui.dp(6), ui.dp(16), ui.dp(6));
+        bottomBar.setPadding(ui.dp(14), ui.dp(2), ui.dp(12), ui.dp(2));
         LinearLayout texts = new LinearLayout(this);
         texts.setOrientation(LinearLayout.VERTICAL);
-        summary = ui.text("", 14, Color.WHITE);
+        summary = ui.text("", 13, Color.WHITE);
         summary.setMaxLines(1);
         summary.setEllipsize(android.text.TextUtils.TruncateAt.END);
-        status = ui.text("", 12, Ui.MUTED);
+        status = ui.text("", 11, Ui.MUTED);
         status.setMaxLines(2);
         texts.addView(summary);
         texts.addView(status);
@@ -179,8 +180,8 @@ public class MainActivity extends Activity {
             if (dataReady) startGame(); else prepareData();
         });
         start.setEnabled(false);
-        start.setTextSize(17);
-        bottomBar.addView(start, Ui.lp(ui.dp(200), ui.dp(52)));
+        start.setTextSize(15);
+        bottomBar.addView(start, Ui.lp(ui.dp(170), ui.dp(Ui.TOUCH_DP)));
         root.addView(bottomBar);
 
         // The cut-out, bars and keyboard become padding around everything, so nothing is covered and the
@@ -272,7 +273,25 @@ public class MainActivity extends Activity {
 
     /** (Re)reads the saved setup and the lists from the unpacked data, then shows the current tab. */
     private void loadContent() {
-        data = Store.data(this);
+        final GameData d = Store.data(this);
+        if (d.isWarm()) {
+            applyContent(d);
+            return;
+        }
+        // First look at the data folders: scan them off the UI thread (the lists are cached for later visits).
+        if (warming) return;
+        warming = true;
+        new Thread(() -> {
+            d.warm();
+            runOnUiThread(() -> {
+                warming = false;
+                if (!isDestroyed() && !isFinishing() && dataReady) applyContent(d);
+            });
+        }, "data-scan").start();
+    }
+
+    private void applyContent(GameData d) {
+        data = d;
         model = Store.loadSetup(this, data);
         contentReady = true;
         showTab();
@@ -332,20 +351,29 @@ public class MainActivity extends Activity {
     // Teams tab -----------------------------------------------------------------------------------
 
     private void buildTeams() {
-        LinearLayout head = ui.row();
-        LinearLayout t = new LinearLayout(this);
-        t.setOrientation(LinearLayout.VERTICAL);
         int hogs = 0;
         for (SetupModel.Team tm : model.teams) hogs += tm.hogs;
-        t.addView(ui.heading("Teams"));
-        head.addView(t, ui.weight(1f));
+        boolean sameSide = false;
+        for (int i = 0; i < model.teams.size(); i++)
+            for (int j = i + 1; j < model.teams.size(); j++)
+                if (model.teams.get(i).color == model.teams.get(j).color) sameSide = true;
+
+        LinearLayout head = ui.row();
+        head.setMinimumHeight(ui.dp(Ui.TOUCH_DP));
+        TextView h = ui.heading("Teams");
+        head.addView(h, ui.margins(Ui.lp(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT), 0, 0, 10, 0));
+        TextView info = ui.text(model.teams.size() + " of " + SetupModel.MAX_TEAMS + " teams, " + hogs + " hedgehogs"
+                + (sameSide ? ". Teams of one colour play as one side." : ""), 12, Ui.MUTED);
+        info.setSingleLine(true);
+        info.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        head.addView(info, ui.weight(1f));
         Button add = ui.button("Add team", false, v -> {
             if (model.teams.size() >= SetupModel.MAX_TEAMS) return;
             model.teams.add(SetupModel.randomTeam(data, rnd, model.freeColor(), model.teams));
             redraw();
         });
         add.setEnabled(model.teams.size() < SetupModel.MAX_TEAMS);
-        Button dice = ui.button("Randomise teams", false, v -> {
+        Button dice = ui.button("Randomise", false, v -> {
             for (int i = 0; i < model.teams.size(); i++) {
                 SetupModel.Team old = model.teams.get(i);
                 SetupModel.Team nt = SetupModel.randomTeam(data, rnd, old.color, model.teams);
@@ -355,24 +383,27 @@ public class MainActivity extends Activity {
             }
             redraw();
         });
-        head.addView(dice, ui.margins(Ui.lp(ViewGroup.LayoutParams.WRAP_CONTENT, ui.dp(48)), 0, 0, 8, 0));
-        head.addView(add, Ui.lp(ViewGroup.LayoutParams.WRAP_CONTENT, ui.dp(48)));
+        dice.setContentDescription("Randomise teams");
+        head.addView(dice, Ui.lp(ViewGroup.LayoutParams.WRAP_CONTENT, ui.dp(Ui.TOUCH_DP)));
+        head.addView(add, Ui.lp(ViewGroup.LayoutParams.WRAP_CONTENT, ui.dp(Ui.TOUCH_DP)));
         holder.addView(head);
-        holder.addView(ui.hint(model.teams.size() + " of " + SetupModel.MAX_TEAMS + " teams, " + hogs
-                + " hedgehogs. Teams with the same colour play on the same side."));
 
-        int cols = contentWidthDp() >= 760 ? 2 : 1;
+        // Three columns on a phone held sideways, so up to six teams are in view at once.
+        int w = contentWidthDp();
+        int cols = w >= 800 ? 3 : w >= 520 ? 2 : 1;
         LinearLayout grid = null;
         for (int i = 0; i < model.teams.size(); i++) {
             if (i % cols == 0) {
                 grid = new LinearLayout(this);
                 grid.setOrientation(LinearLayout.HORIZONTAL);
-                holder.addView(grid, ui.margins(Ui.lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT), 0, 8, 0, 0));
+                holder.addView(grid, ui.margins(Ui.lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT), 0, i == 0 ? 0 : 6, 0, 0));
             }
-            grid.addView(teamCard(i), ui.margins(ui.weight(1f), i % cols == 0 ? 0 : 8, 0, 0, 0));
+            grid.addView(teamCard(i), ui.margins(ui.weight(1f), i % cols == 0 ? 0 : 6, 0, 0, 0));
         }
-        if (cols == 2 && model.teams.size() % 2 == 1 && grid != null) {
-            grid.addView(new View(this), ui.margins(ui.weight(1f), 8, 0, 0, 0));
+        if (grid != null) {
+            for (int pad = model.teams.size() % cols; pad != 0 && pad < cols; pad++) {
+                grid.addView(new View(this), ui.margins(ui.weight(1f), 6, 0, 0, 0));
+            }
         }
     }
 
@@ -385,61 +416,73 @@ public class MainActivity extends Activity {
     private LinearLayout teamCard(final int index) {
         final SetupModel.Team tm = model.teams.get(index);
         LinearLayout card = ui.card();
+        card.setPadding(ui.dp(6), ui.dp(2), ui.dp(6), ui.dp(2));
 
         LinearLayout line1 = ui.row();
-        Button colour = new Button(this);
-        colour.setBackground(ui.roundStroke(0xff000000 | SetupModel.COLORS[tm.color], Color.WHITE, 2, 10));
-        colour.setContentDescription("Team colour: " + SetupModel.COLOR_NAMES[tm.color]);
-        colour.setMinWidth(0);
-        colour.setMinHeight(0);
-        colour.setOnClickListener(v -> ui.pickGrid("Team colour", Arrays.asList(SetupModel.COLOR_NAMES),
-                key -> colourIcon(SetupModel.COLORS[Arrays.asList(SetupModel.COLOR_NAMES).indexOf(key)]),
-                SetupModel.COLOR_NAMES[tm.color], 84, false, key -> {
-                    tm.color = Arrays.asList(SetupModel.COLOR_NAMES).indexOf(key);
-                    redraw();
-                }));
-        line1.addView(colour, Ui.lp(ui.dp(48), ui.dp(48)));
+        Button colour = ui.swatchButton(SetupModel.COLORS[tm.color], "Team colour: " + SetupModel.COLOR_NAMES[tm.color],
+                v -> ui.pickGrid("Team colour", Arrays.asList(SetupModel.COLOR_NAMES),
+                        key -> colourIcon(SetupModel.COLORS[Arrays.asList(SetupModel.COLOR_NAMES).indexOf(key)]),
+                        SetupModel.COLOR_NAMES[tm.color], 84, false, key -> {
+                            tm.color = Arrays.asList(SetupModel.COLOR_NAMES).indexOf(key);
+                            redraw();
+                        }));
+        line1.addView(colour, Ui.lp(ui.dp(Ui.TOUCH_DP), ui.dp(Ui.TOUCH_DP)));
         EditText name = ui.field(tm.name, "Team name");
         name.setFilters(new android.text.InputFilter[] { new android.text.InputFilter.LengthFilter(32) });
         name.addTextChangedListener(new SimpleWatcher(s -> tm.name = s));
-        line1.addView(name, ui.margins(ui.weight(1f), 8, 0, 8, 0));
-        Button remove = ui.button("✕", false, v -> {
+        line1.addView(name, ui.margins(Ui.lp(0, ui.dp(40), 1f), 0, 0, 2, 0));
+        Ui.Glyph remove = ui.iconButton(Ui.GLYPH_CROSS, "Remove team", v -> {
             if (model.teams.size() <= SetupModel.MIN_TEAMS) return;
             model.teams.remove(index);
             redraw();
         });
-        remove.setContentDescription("Remove team");
         remove.setEnabled(model.teams.size() > SetupModel.MIN_TEAMS);
-        line1.addView(remove, Ui.lp(ui.dp(48), ui.dp(48)));
+        line1.addView(remove, Ui.lp(ui.dp(Ui.TOUCH_DP), ui.dp(Ui.TOUCH_DP)));
         card.addView(line1);
 
         LinearLayout line2 = ui.row();
-        line2.setPadding(0, ui.dp(8), 0, 0);
         List<String> levels = levelNames();
-        Button type = ui.button(levels.get(tm.level) + " ▾", false, v ->
+        Button type = ui.choiceButton(shortLevelNames().get(tm.level));
+        type.setPadding(ui.dp(10), 0, ui.dp(8), 0);
+        type.setOnClickListener(v ->
                 ui.pickFromList("Team " + (index + 1) + " is played by", levels, tm.level, which -> {
                     tm.level = which;
                     redraw();
                 }));
-        line2.addView(type, ui.weight(1f));
-        line2.addView(ui.stepper("", SetupModel.MIN_HOGS, SetupModel.MAX_HOGS, 1, tm.hogs, n -> n + " hogs", n -> {
-            tm.hogs = n;
-            updateSummary();
-        }), ui.margins(Ui.lp(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT), 6, 0, 6, 0));
-        line2.addView(ui.button("Customise", false, v -> {
+        line2.addView(type, Ui.lp(ViewGroup.LayoutParams.WRAP_CONTENT, ui.dp(Ui.TOUCH_DP)));
+        LinearLayout hogs = ui.stepper("", SetupModel.MIN_HOGS, SetupModel.MAX_HOGS, tm.hogs, 54, 34, n -> n + " hogs",
+                (cur, dir) -> cur + dir, n -> {
+                    tm.hogs = n;
+                    updateSummary();
+                });
+        hogs.setGravity(Gravity.CENTER);
+        line2.addView(hogs, ui.weight(1f));
+        Button edit = ui.button("Edit", false, v -> {
             saveModel();
             startActivity(new Intent(this, TeamEditActivity.class).putExtra("team", index));
-        }));
+        });
+        edit.setContentDescription("Customise team " + (index + 1));
+        edit.setPadding(ui.dp(8), 0, ui.dp(8), 0);
+        line2.addView(edit, Ui.lp(ViewGroup.LayoutParams.WRAP_CONTENT, ui.dp(Ui.TOUCH_DP)));
         card.addView(line2);
         return card;
     }
 
-    private List<String> levelNames() {
+    /** The full names, for the list. */
+    static List<String> levelNames() {
         List<String> l = new ArrayList<>();
         l.add("Human");
         for (int i = 1; i <= 5; i++) {
             l.add("Computer, level " + i + (i == 1 ? " (easiest)" : i == 5 ? " (hardest)" : ""));
         }
+        return l;
+    }
+
+    /** The short names, for a button: "Human", "CPU 1" to "CPU 5". */
+    static List<String> shortLevelNames() {
+        List<String> l = new ArrayList<>();
+        l.add("Human");
+        for (int i = 1; i <= 5; i++) l.add("CPU " + i);
         return l;
     }
 
@@ -517,12 +560,12 @@ public class MainActivity extends Activity {
         EditText seed = ui.field(model.seed, "Random each game");
         seed.setInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
         seed.addTextChangedListener(new SimpleWatcher(s -> model.seed = s));
-        look.addView(seed, Ui.lp(ViewGroup.LayoutParams.MATCH_PARENT, ui.dp(48)));
+        look.addView(seed, ui.margins(Ui.lp(ViewGroup.LayoutParams.MATCH_PARENT, ui.dp(40)), 0, 2, 0, 4));
         look.addView(ui.hint("Leave empty for a new random map every game. The same seed with the same map settings always gives the same map."));
 
         cols.addView(map, wide ? ui.weight(1f) : Ui.lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        cols.addView(look, wide ? ui.margins(ui.weight(1f), 10, 0, 0, 0)
-                : ui.margins(Ui.lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT), 0, 10, 0, 0));
+        cols.addView(look, wide ? ui.margins(ui.weight(1f), 8, 0, 0, 0)
+                : ui.margins(Ui.lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT), 0, 8, 0, 0));
         holder.addView(cols);
     }
 
@@ -533,24 +576,24 @@ public class MainActivity extends Activity {
             return;
         }
         LinearLayout r = ui.row();
-        r.setMinimumHeight(ui.dp(56));
-        r.addView(ui.text("Map", 15, Color.WHITE), ui.weight(1f));
-        Button b = ui.button(model.imageMap + "  ▾", false, v ->
+        r.setMinimumHeight(ui.dp(Ui.TOUCH_DP));
+        r.addView(ui.text("Map", 14, Color.WHITE), ui.weight(1f));
+        Button b = ui.choiceButton(model.imageMap);
+        b.setOnClickListener(v ->
                 ui.pickGrid("Image map", maps, key -> Icons.map(data, key), model.imageMap, 150, true, key -> {
                     model.imageMap = key;
                     showTab();
                 }));
-        r.addView(b, Ui.lp(ViewGroup.LayoutParams.WRAP_CONTENT, ui.dp(48)));
+        r.addView(b, Ui.lp(ViewGroup.LayoutParams.WRAP_CONTENT, ui.dp(Ui.TOUCH_DP)));
         map.addView(r);
-        Bitmap pv = Icons.map(data, model.imageMap);
-        if (pv != null) {
-            ImageView iv = new ImageView(this);
-            iv.setImageBitmap(pv);
-            iv.setAdjustViewBounds(true);
-            iv.setBackground(ui.round(Color.rgb(20, 30, 24), 8));
-            map.addView(iv, ui.margins(Ui.lp(ViewGroup.LayoutParams.MATCH_PARENT, ui.dp(110)), 0, 4, 0, 4));
-            iv.setScaleType(ImageView.ScaleType.FIT_CENTER);
-        }
+        // The preview is decoded on a worker (the picture can be large); the cache makes a second showing instant.
+        ImageView iv = new ImageView(this);
+        iv.setAdjustViewBounds(true);
+        iv.setBackground(ui.round(Color.rgb(20, 30, 24), 8));
+        iv.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        final String mapName = model.imageMap;
+        ui.loadPicture(iv, () -> Icons.map(data, mapName));
+        map.addView(iv, ui.margins(Ui.lp(ViewGroup.LayoutParams.MATCH_PARENT, ui.dp(96)), 0, 2, 0, 2));
         int hogs = 0;
         for (SetupModel.Team t : model.teams) hogs += t.hogs;
         int limit = data.mapHogLimit(model.imageMap);
@@ -560,14 +603,17 @@ public class MainActivity extends Activity {
 
     private View themeRow() {
         LinearLayout r = ui.row();
-        r.setMinimumHeight(ui.dp(56));
-        r.addView(ui.text("Theme", 15, Color.WHITE), ui.weight(1f));
+        r.setMinimumHeight(ui.dp(Ui.TOUCH_DP));
+        r.addView(ui.text("Theme", 14, Color.WHITE), ui.weight(1f));
         String cur = model.theme.isEmpty() ? "Random" : model.theme;
-        ImageView icon = new ImageView(this);
-        Bitmap ib = model.theme.isEmpty() ? null : Icons.theme(data, model.theme);
-        if (ib != null) icon.setImageBitmap(ib);
-        r.addView(icon, Ui.lp(ui.dp(40), ui.dp(40)));
-        Button b = ui.button(cur + "  ▾", false, v -> {
+        if (!model.theme.isEmpty()) {
+            ImageView icon = new ImageView(this);
+            final String theme = model.theme;
+            ui.loadPicture(icon, () -> Icons.theme(data, theme));
+            r.addView(icon, Ui.lp(ui.dp(32), ui.dp(32)));
+        }
+        Button b = ui.choiceButton(cur);
+        b.setOnClickListener(v -> {
             List<String> keys = new ArrayList<>();
             keys.add("Random");
             keys.addAll(data.themes());
@@ -577,7 +623,7 @@ public class MainActivity extends Activity {
                         showTab();
                     });
         });
-        r.addView(b, ui.margins(Ui.lp(ViewGroup.LayoutParams.WRAP_CONTENT, ui.dp(48)), 8, 0, 0, 0));
+        r.addView(b, ui.margins(Ui.lp(ViewGroup.LayoutParams.WRAP_CONTENT, ui.dp(Ui.TOUCH_DP)), 4, 0, 0, 0));
         return r;
     }
 
@@ -640,8 +686,9 @@ public class MainActivity extends Activity {
             right.addView(ui.hint("These come from the game style, so they cannot be changed."));
         }
         boolean editable = !schemeLocked;
-        Rules r = model.rules;
-        addValue(right, r, Rules.V_TURN_TIME, "Turn time", 1, 300, 5, n -> n + " s", editable);
+        // What will really be played: a game style may force a scheme, and then those numbers are shown.
+        Rules r = shown;
+        addTurnTime(right, r, editable);
         addValue(right, r, Rules.V_HEALTH, "Starting health", 1, 1000, 5, n -> Integer.toString(n), editable);
         addValue(right, r, Rules.V_SUDDEN, "Sudden death after", 0, 51, 1, n -> (n + 1) + (n == 0 ? " round" : " rounds"), editable);
         addValue(right, r, Rules.V_WATER_RISE, "Water rise", 0, 100, 5, n -> Integer.toString(n), editable);
@@ -652,8 +699,8 @@ public class MainActivity extends Activity {
         addValue(right, r, Rules.V_EXPLOSIVES, "Explosive barrels", 0, 200, 1, n -> Integer.toString(n), editable);
 
         cols.addView(left, wide ? ui.weight(1f) : Ui.lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        cols.addView(right, wide ? ui.margins(ui.weight(1f), 10, 0, 0, 0)
-                : ui.margins(Ui.lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT), 0, 10, 0, 0));
+        cols.addView(right, wide ? ui.margins(ui.weight(1f), 8, 0, 0, 0)
+                : ui.margins(Ui.lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT), 0, 8, 0, 0));
         holder.addView(cols);
 
         // More rules, hidden until asked for.
@@ -661,7 +708,7 @@ public class MainActivity extends Activity {
             moreRules = !moreRules;
             redraw();
         });
-        holder.addView(more, ui.margins(Ui.lp(ViewGroup.LayoutParams.WRAP_CONTENT, ui.dp(48)), 0, 10, 0, 0));
+        holder.addView(more, ui.margins(Ui.lp(ViewGroup.LayoutParams.WRAP_CONTENT, ui.dp(Ui.TOUCH_DP)), 0, 4, 0, 0));
         if (moreRules) {
             LinearLayout extra = ui.card();
             extra.addView(ui.heading("More rules"));
@@ -699,6 +746,21 @@ public class MainActivity extends Activity {
             extra.addView(both);
             holder.addView(extra, ui.margins(Ui.lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT), 0, 10, 0, 0));
         }
+    }
+
+    /** Turn time: by 5 seconds up to 5 minutes, then "Unlimited" (9999, as the Timeless and HedgeEditor schemes use). */
+    private void addTurnTime(LinearLayout into, Rules r, boolean editable) {
+        final int unlimited = 9999;
+        LinearLayout row = ui.stepper("Turn time", 1, unlimited, r.value[Rules.V_TURN_TIME], 76, 44,
+                n -> n >= unlimited ? "Unlimited" : n + " s",
+                (cur, dir) -> dir > 0 ? (cur >= 300 ? unlimited : Math.min(300, cur + 5))
+                        : (cur >= unlimited ? 300 : Math.max(1, cur - 5)),
+                n -> {
+                    r.value[Rules.V_TURN_TIME] = n;
+                    updateSchemeInfo();
+                });
+        enableAll(row, editable);
+        into.addView(row);
     }
 
     private void addValue(LinearLayout into, Rules r, int entry, String label, int min, int max, int step,

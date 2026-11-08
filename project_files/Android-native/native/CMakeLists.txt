@@ -101,7 +101,17 @@ target_compile_options(fpcrtl PRIVATE -fsigned-char -w)
 target_compile_definitions(fpcrtl PUBLIC HP_GLES1=1)
 set_target_properties(fpcrtl PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
-file(GLOB ENGINE_SRC "${HP_ENGINE_C}/*.c")
+# Stale check: the generated C must match the engine checkout (see scripts/gen-engine.sh). The stamp
+# is a configure dependency, so a regeneration re-runs CMake and picks up added or removed files.
+set(HP_ENGINE_STAMP "${HP_ENGINE_C}/.engine-stamp")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${HP_ENGINE_STAMP}")
+execute_process(COMMAND ${CMAKE_COMMAND} -E env "OUT_DIR=${HP_ENGINE_C}" "HW_ENGINE_DIR=${HP_ENGINE_SRC}"
+          bash "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/gen-engine.sh" --check
+  RESULT_VARIABLE HP_STALE OUTPUT_VARIABLE HP_STALE_OUT ERROR_VARIABLE HP_STALE_ERR)
+if(NOT HP_STALE EQUAL 0 AND NOT HP_SKIP_ENGINE_CHECK)
+  message(FATAL_ERROR "${HP_STALE_ERR}")
+endif()
+file(GLOB ENGINE_SRC CONFIGURE_DEPENDS "${HP_ENGINE_C}/*.c")
 add_library(hwengine_c STATIC ${ENGINE_SRC})
 target_compile_definitions(hwengine_c PRIVATE PAS2C=1)
 target_compile_options(hwengine_c PRIVATE -fsigned-char -fno-strict-aliasing -w -Werror=incompatible-pointer-types)

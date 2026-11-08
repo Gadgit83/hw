@@ -64,6 +64,17 @@ android {
     }
 }
 
+// The engine C must come from the current engine checkout. By default a stale or missing
+// build/engine-c is regenerated (needs GHC); -PengineStale=fail makes the build stop instead.
+def engineStale = (project.findProperty('engineStale') ?: 'regenerate')
+tasks.register('checkEngineC', Exec) {
+    group = 'build'
+    description = 'Regenerates (or rejects) engine C that does not match the engine checkout'
+    workingDir file('..')
+    commandLine 'bash', 'scripts/gen-engine.sh', engineStale == 'fail' ? '--check' : '--ensure'
+}
+tasks.matching { it.name == 'preBuild' }.configureEach { dependsOn 'checkEngineC' }
+
 // Fail early, with a pointer, when the generated inputs are missing.
 tasks.matching { it.name == 'preBuild' }.configureEach {
     doFirst {

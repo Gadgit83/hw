@@ -11,6 +11,7 @@
 #include <jni.h>
 #include <android/log.h>
 #include <errno.h>
+#include <stdint.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -132,6 +133,56 @@ static void query_display(int out[6])
     (*env)->DeleteLocalRef(env, act);
 }
 
+/* Asks GameActivity.engineOptions() for the engine options chosen in the options menu (sound, quality,
+ * tags, frame rate counter). Returns the number of strings stored in out (heap copies, kept for the
+ * life of the process), at most max. */
+static int query_options(char **out, int max)
+{
+    int n = 0;
+    JNIEnv *env = (JNIEnv *)SDL_AndroidGetJNIEnv();
+    jobject act = (jobject)SDL_AndroidGetActivity();
+    if (!env || !act) return 0;
+    jclass cls = (*env)->GetObjectClass(env, act);
+    jmethodID mid = cls ? (*env)->GetMethodID(env, cls, "engineOptions", "()[Ljava/lang/String;") : NULL;
+    if (mid) {
+        jobjectArray arr = (jobjectArray)(*env)->CallObjectMethod(env, act, mid);
+        if (!(*env)->ExceptionCheck(env) && arr) {
+            jsize len = (*env)->GetArrayLength(env, arr);
+            for (jsize i = 0; i < len && n < max; i++) {
+                jstring js = (jstring)(*env)->GetObjectArrayElement(env, arr, i);
+                if (js) {
+                    const char *c = (*env)->GetStringUTFChars(env, js, NULL);
+                    if (c) {
+                        out[n++] = strdup(c);
+                        (*env)->ReleaseStringUTFChars(env, js, c);
+                    }
+                    (*env)->DeleteLocalRef(env, js);
+                }
+            }
+        }
+        if (arr) (*env)->DeleteLocalRef(env, arr);
+    }
+    if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
+    if (cls) (*env)->DeleteLocalRef(env, cls);
+    (*env)->DeleteLocalRef(env, act);
+    return n;
+}
+
+/* Called by the engine (pas2c output of uUtils.pas, DeviceRumble) on a big explosion: a short
+ * vibration, if the player has it switched on. Runs on the engine thread. */
+void hp_rumble(int32_t ms)
+{
+    JNIEnv *env = (JNIEnv *)SDL_AndroidGetJNIEnv();
+    jobject act = (jobject)SDL_AndroidGetActivity();
+    if (!env || !act) return;
+    jclass cls = (*env)->GetObjectClass(env, act);
+    jmethodID mid = cls ? (*env)->GetMethodID(env, cls, "rumble", "(I)V") : NULL;
+    if (mid) (*env)->CallVoidMethod(env, act, mid, (jint)ms);
+    if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
+    if (cls) (*env)->DeleteLocalRef(env, cls);
+    (*env)->DeleteLocalRef(env, act);
+}
+
 int SDL_main(int argc, char **argv)
 {
     (void)argc;
@@ -202,7 +253,7 @@ int SDL_main(int argc, char **argv)
     snprintf(it, sizeof it, "%d", di[3]);
     snprintf(ir, sizeof ir, "%d", di[4]);
     snprintf(ib, sizeof ib, "%d", di[5]);
-    char *args[] = {
+    char *args[96] = {
         "--no-holiday-silliness", "--internal", "--port", port,
         "--prefix", data, "--user-prefix", user,
         "--width", w, "--height", h,
@@ -211,8 +262,14 @@ int SDL_main(int argc, char **argv)
         "--ui-scale", ui, "--menu-scale", menu,
         "--inset-left", il, "--inset-top", it, "--inset-right", ir, "--inset-bottom", ib,
     };
-    int n = (int)(sizeof args / sizeof args[0]);
+    int n = 0;
+    while (args[n]) n++;                           /* the initialiser above fills a prefix, the rest is NULL */
+    int opt0 = n;
+    n += query_options(args + n, (int)(sizeof args / sizeof args[0]) - n - 1);
     LOGI("starting engine, ipc port %d, %sx%s, data %s", p, w, h, data);
+    for (int i = opt0; i < n; i++)
+        if (strncmp(args[i], "--", 2) == 0)
+            LOGI("option %s %s", args[i], i + 1 < n && strncmp(args[i + 1], "--", 2) ? args[i + 1] : "");
     LOGI("display: ui scale %s%%, menu scale %s%%, insets l%s t%s r%s b%s px", ui, menu, il, it, ir, ib);
     int rc = hwengine_RunEngine(n, args);
     LOGI("engine returned %d", rc);

@@ -29,6 +29,10 @@ static int g_client_fd = -1;
 static int g_stopping;
 static pthread_mutex_t g_fd_lock = PTHREAD_MUTEX_INITIALIZER;
 static void (*g_error_handler)(const char *message);
+/* Game commands the engine reports to the frontend (it records them for demos): counted per command
+ * letter, and the notable ones are logged, which shows that a computer player took a turn. */
+static unsigned long g_cmd_count[256];
+static int g_cmd_logged;
 
 void hp_ipc_set_error_handler(void (*handler)(const char *message))
 {
@@ -136,7 +140,31 @@ static void *server_thread(void *arg)
             LOGE("engine error: %s", text);
             if (g_error_handler) g_error_handler(text);
         }
+        else if (len >= 3) {
+            unsigned char c = msg[0];
+            g_cmd_count[c]++;
+            /* The last two bytes of a game command are the low half of the game tick. */
+            unsigned tick = ((unsigned)msg[len - 2] << 8) | msg[len - 1];
+            if (g_cmd_logged < 300 && (c == 'A' || c == 'a' || c == 'N' || c == 'S' || c == 'j' || c == 'J' || c >= 128)) {
+                g_cmd_logged++;
+                if (c >= 128) LOGI("engine command weapon slot %d tick %u", c - 128, tick);
+                else LOGI("engine command '%c' (%s) tick %u", c,
+                          c == 'A' ? "attack start" : c == 'a' ? "attack release" : c == 'N' ? "turn ends" :
+                          c == 'S' ? "switch hedgehog" : c == 'j' ? "jump" : "high jump", tick);
+            }
+        }
         /* Everything else (ticks, stats, resize notices) is only drained. */
+    }
+    {
+        char sum[600];
+        size_t used = 0;
+        sum[0] = 0;
+        for (int i = 0; i < 256 && used < sizeof sum - 24; i++) {
+            if (!g_cmd_count[i] || i == '+') continue;
+            used += (size_t)snprintf(sum + used, sizeof sum - used, i >= 128 ? " slot%d=%lu" : " %c=%lu",
+                                     i >= 128 ? i - 128 : i, g_cmd_count[i]);
+        }
+        LOGI("engine commands seen:%s", used ? sum : " none");
     }
     LOGI("engine closed the IPC socket");
     pthread_mutex_lock(&g_fd_lock);

@@ -1,6 +1,7 @@
 /* Desktop smoke-test launcher: same IPC server as the Android app, engine run on the main thread.
  * Usage: hp_hosttest <data dir> <user dir> <game.ipc> [width height]
  * Not shipped in the APK. */
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -93,6 +94,12 @@ static void *script_thread(void *arg)
     return NULL;
 }
 
+/* The engine calls this on a big explosion (uUtils.pas DeviceRumble); the app vibrates, the test logs it. */
+void hp_rumble(int32_t ms)
+{
+    fprintf(stderr, "[hosttest] rumble %d ms\n", (int)ms);
+}
+
 int main(int argc, char **argv)
 {
     if (argc < 4) {
@@ -111,6 +118,8 @@ int main(int argc, char **argv)
         "--locale", "en.txt", "--nodampen", "--nosound", "--nomusic",
     };
     int nargs = 16;
+    /* HP_TEST_SOUND=1 runs with the SDL dummy audio driver and sound on (the default test has it off). */
+    if (getenv("HP_TEST_SOUND")) nargs = 15;
     /* HP_TEST_ARGS: extra engine options, e.g. "--ui-scale 240 --inset-left 80". */
     char *extra = getenv("HP_TEST_ARGS") ? strdup(getenv("HP_TEST_ARGS")) : NULL, *sv = NULL;
     if (extra)

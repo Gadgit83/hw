@@ -26,7 +26,7 @@ import java.nio.file.Files;
 /**
  * Draws the setup, team and options screens to PNG files (build/screenshots) at the size of a Fairphone 4 held
  * sideways: 2340 x 1080 pixels at 409 dpi, with the camera cut-out on the left. Run with
- * {@code ./gradlew -Pscreenshots testDebugUnitTest}. Not a pass or fail test of the layout: the pictures are for
+ * {@code ./gradlew -Pscreenshots testDebugUnitTest --tests '*ScreenshotTest'}. Not a pass or fail test of the layout: the pictures are for
  * looking at.
  */
 @RunWith(RobolectricTestRunner.class)
@@ -34,6 +34,12 @@ import java.nio.file.Files;
 @Config(sdk = 34, qualifiers = "w915dp-h422dp-land-409dpi")
 public class ScreenshotTest {
     private static final int W = 2340, H = 1080;
+
+    /** Only when asked for (-Pscreenshots): it draws pictures, it does not check anything. */
+    @org.junit.Before
+    public void onlyWhenAsked() {
+        org.junit.Assume.assumeTrue("screenshots not requested", Boolean.getBoolean("screenshots"));
+    }
 
     /** The game data is linked in from the staged assets, with the marker the app looks for. */
     private static void installData(Context c) throws Exception {
@@ -44,7 +50,10 @@ public class ScreenshotTest {
             File to = new File(data, f.getName());
             if (!to.exists()) Files.createSymbolicLink(to.toPath(), f.toPath());
         }
-        new File(data, ".installed").createNewFile();
+        // the marker must hold the stamp, an empty file never matches and the app unpacks the data again
+        java.lang.reflect.Method m = DataInstaller.class.getDeclaredMethod("stamp", Context.class);
+        m.setAccessible(true);
+        Files.write(new File(data, ".installed").toPath(), ((String) m.invoke(null, c)).getBytes("UTF-8"));
     }
 
     private static void settle() throws Exception {

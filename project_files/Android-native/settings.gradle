@@ -9,6 +9,14 @@ dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
         google()
+        // Optional mirror of Maven Central, tried first (repo1 and repo.maven.apache.org answer HTTP 429 to many networks).
+        // scripts/ui-smoke-test.sh sets it to Google's copy for the Robolectric test dependencies.
+        if (System.getenv('HP_MAVEN_MIRROR')) {
+            maven {
+                url = uri(System.getenv('HP_MAVEN_MIRROR'))
+                content { includeGroup 'org.robolectric' }
+            }
+        }
         mavenCentral()
     }
 }

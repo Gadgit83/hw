@@ -204,7 +204,7 @@ Trimmed from the data: the 17 MB CJK font, other languages than English, single 
 - Network access to github.com, Maven (Google and Central), the Gradle distribution host and crates.io (not needed once the Gradle and cargo caches are filled: `./gradlew --offline` works from a warm cache)
 - For the host tests: `clang`, `libclang-rt-dev` (AddressSanitizer), `xvfb`, `imagemagick`, `libsdl2-dev`, `libsdl2-image-dev`, `libsdl2-mixer-dev`, `libsdl2-ttf-dev`, `libsdl2-net-dev`, `bc`
 
-Gradle itself is fetched by the committed wrapper (8.14.3, Android Gradle Plugin 8.7.3). The app uses only plain Android framework classes (no AndroidX), so there is nothing extra to download for the UI.
+Gradle itself is fetched by the committed wrapper (8.14.3, Android Gradle Plugin 8.7.3). The app uses only plain Android framework classes; AndroidX is switched on in `gradle.properties` only because Robolectric (unit tests) needs it. Nothing extra is packaged into the APK.
 
 ### From a fresh checkout to an APK
 
@@ -221,7 +221,8 @@ It runs these steps, which can also be run on their own (all paths below are rel
 2. `gen-engine.sh` builds pas2c with GHC and transpiles the engine in this checkout to `build/engine-c`.
 3. `build-rust.sh` builds `libhwengine_future.so` with cargo for each ABI (the Rust workspace is synced with `rsync --delete` first, so stale files from an earlier engine revision cannot linger).
 4. `stage-assets.sh` stages the trimmed game data in `build/assets`.
-5. `./gradlew assembleDebug` compiles the native code through CMake and packages the APK. When `build/` is already populated it can be run directly from this directory (`-Pabis=arm64-v8a` limits the ABIs).
+5. `ui-smoke-test.sh` runs the launch smoke test (see [UI smoke test](#ui-smoke-test)); a failure stops the build. `SKIP_UI_SMOKE=1 scripts/build-apk.sh` skips it (for working on the build itself, not for releases).
+6. `./gradlew assembleDebug` compiles the native code through CMake and packages the APK. When `build/` is already populated it can be run directly from this directory (`-Pabis=arm64-v8a` limits the ABIs).
 
 Output: `app/build/outputs/apk/debug/app-debug.apk`.
 
@@ -260,6 +261,14 @@ Deliberate escape hatches, for working on the build itself and not for releases:
 
 The commit of a build is written into `BuildConfig` (as the engine commit and the app source commit, which are the same repository) and shown in Options, Advanced, About ("+local changes" is added when the checkout had uncommitted changes).
 
+### UI smoke test
+
+`scripts/ui-smoke-test.sh` (about a minute, JVM only) opens every screen under Robolectric 4.14.1 on Android 14 and 15 (SDK 34 and 35) with a Fairphone 4 sized landscape display (`w915dp-h422dp-land-409dpi`, camera cut-out on the left) and fails if anything throws. It is `app/src/test/java/org/hedgewars/android/LaunchSmokeTest.java` and covers: the setup screen (all three tabs) with the game data installed and a setup saved by 0.2.0, and with default preferences; the setup screen on the very first launch with no game data, while it is unpacked; the options screen (all three tabs); and the team page for two teams. It exists because 0.2.1 crashed on every launch (`Window.getInsetsController()` called from `onCreate` before `setContentView`, a `NullPointerException` on Android 11 and later) and no test had ever opened a screen. `build-apk.sh` runs it before packaging and stops if it fails.
+
+Prerequisites: the staged game data (`stage-assets.sh`, used as the "installed" data with a `.installed` marker that holds the stamp `DataInstaller` compares, as an empty marker never matches) and the Android jars Robolectric runs against. Robolectric normally downloads those itself from repo1.maven.org, which answers HTTP 429 to many networks, so it runs offline here (`robolectric.offline`) from a cache folder, `ROBOLECTRIC_DEPS` (default `~/.cache/hedgeparty/robolectric`), that `scripts/fetch-robolectric.sh` fills from Google's copy of Maven Central with repo1 as the fallback (`ROBOLECTRIC_MIRRORS` overrides the list), checking each jar against its published SHA-1. The script is idempotent and `ui-smoke-test.sh` calls it. Robolectric's own library jars come from Maven through Gradle; `HP_MAVEN_MIRROR` (default Google's copy) is tried first for them, and `GRADLE_OFFLINE=1` adds `--offline` once the Gradle cache is warm. `SKIP_UI_SMOKE=1` makes `build-apk.sh` skip the test.
+
+`ScreenshotTest` (pictures of the screens, `./gradlew -Pscreenshots testDebugUnitTest --tests '*ScreenshotTest'`, PNGs in `build/screenshots`) is skipped unless `-Pscreenshots` is given.
+
 ### Host tests
 
 No device is needed for these.
@@ -293,7 +302,7 @@ The summary at the end shows whether the engine was still running, the IPC lines
 - The options reach the engine: a computer-only game under AddressSanitizer with sound on (SDL dummy audio) and `--volume 100 --effects-volume 50 --music-volume 30 --no-voices --raw-quality 3 --showfps --no-teamtag --no-hogtag --no-healthtag` starts, shows the frames per second counter and no name tags, with no sanitizer report. `config-test.sh` also checks that the engine's option table (`ArgParsers.pas`) has an entry and a case for every option the app sends.
 - Vibration: in a computer-only host test with a hand-edited loadout of only Skip, Watermelon and Hellish Handgrenade, the engine calls `hw_device_rumble` for each big explosion (the host test launcher logs `[hosttest] rumble 40 ms`). The Java side of it (`GameActivity.rumble`, the vibrator) is not checked.
 
-Not verified: running on an Android device or emulator (the build machine has no KVM, so no x86_64 emulator could be started). The touch handling, safe area layout, scaled HUD and weapon menu, pause and focus handling were checked on the host with injected SDL touch and window events. The OpenGL ES 1.1 context on real drivers, audio, vibration, the Java display measurement, and the setup, team and options screens (their layout and touch behaviour) are only tested on the owner's phone. The setup screens were not rendered. An optional Robolectric screenshot test is in `app/src/test` (`./gradlew -Pscreenshots -Pandroid.useAndroidX=true testDebugUnitTest` writes PNGs of the screens at 2340 x 1080 and 409 dpi to `build/screenshots`); it compiles, but it has never run: Maven Central answered 429 (per-IP download limit) for `nativeruntime-dist-compat`, which graphics mode NATIVE needs. Try it from another network.
+Not verified: running on an Android device or emulator (the build machine has no KVM, so no x86_64 emulator could be started). The touch handling, safe area layout, scaled HUD and weapon menu, pause and focus handling were checked on the host with injected SDL touch and window events. The OpenGL ES 1.1 context on real drivers, audio, vibration, the Java display measurement, and the setup, team and options screens (their layout and touch behaviour) are only tested on the owner's phone. The setup screens were not rendered. The launch smoke test opens the setup, options and team screens under Robolectric (Android 14 and 15) and checks that nothing throws (see [UI smoke test](#ui-smoke-test)); that is not a look at the layout. An optional Robolectric screenshot test is in `app/src/test` (`./gradlew -Pscreenshots testDebugUnitTest --tests '*ScreenshotTest'` writes PNGs of the screens at 2340 x 1080 and 409 dpi to `build/screenshots`).
 
 ## Size
 

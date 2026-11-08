@@ -113,6 +113,14 @@ procedure MuteAudio;
 // Set the initial volume
 procedure SetVolume(vol: LongInt);
 
+// Set the effects and music level as a percentage of the master volume (Android port options).
+// Effects default to 100 and music to 50, which is the fixed ratio the engine always used.
+procedure SetEffectsVolume(pct: LongInt);
+procedure SetMusicVolume(pct: LongInt);
+
+// Switch the hedgehog voices (taunts, hurt and victory lines) off or on.
+procedure SetVoices(enabled: boolean);
+
 // Modifies the sound volume of the game by voldelta and returns the new volume level.
 function  ChangeVolume(voldelta: LongInt): LongInt;
 
@@ -142,6 +150,9 @@ var cInitVolume: LongInt;
     Mus: PMixMusic; // music pointer
     isMusicEnabled: boolean;
     isSoundEnabled: boolean;
+    isVoicesEnabled: boolean;
+    cEffectsPct: LongInt;
+    cMusicPct: LongInt;
     isAutoDampening: boolean;
     isSEBackup: boolean;
     VoiceList : array[0..7] of TVoice =  (
@@ -691,7 +702,7 @@ procedure AddVoice(snd: TSound; voicepack: PVoicepack; ignoreMask, isFallback: b
 var i : LongInt;
 begin
 
-    if (not isSoundEnabled) or fastUntilLag or ((LastVoice.snd = snd) and  (LastVoice.voicepack = voicepack)) then
+    if (not isSoundEnabled) or (not isVoicesEnabled) or fastUntilLag or ((LastVoice.snd = snd) and  (LastVoice.voicepack = voicepack)) then
         exit;
     if (ignoreMask = false) and (MaskedSounds[snd] = true) then
         exit;
@@ -897,6 +908,25 @@ begin
     cInitVolume:= vol;
 end;
 
+procedure SetEffectsVolume(pct: LongInt);
+begin
+    if pct < 0 then pct:= 0;
+    if pct > 100 then pct:= 100;
+    cEffectsPct:= pct;
+end;
+
+procedure SetMusicVolume(pct: LongInt);
+begin
+    if pct < 0 then pct:= 0;
+    if pct > 100 then pct:= 100;
+    cMusicPct:= pct;
+end;
+
+procedure SetVoices(enabled: boolean);
+begin
+    isVoicesEnabled:= enabled;
+end;
+
 function GetVolumePercent(): LongInt;
 begin
     GetVolumePercent:= Volume * 100 div MIX_MAX_VOLUME;
@@ -917,12 +947,12 @@ begin
     inc(Volume, voldelta);
     if Volume < 0 then
         Volume:= 0;
-    // apply Volume to all channels
-    Mix_Volume(-1, Volume);
-    // get assigned Volume
-    Volume:= Mix_Volume(-1, -1);
+    if Volume > MIX_MAX_VOLUME then
+        Volume:= MIX_MAX_VOLUME;
+    // apply Volume to all channels (effects level is a percentage of the master volume)
+    Mix_Volume(-1, Volume * cEffectsPct div 100);
     if isMusicEnabled then
-        Mix_VolumeMusic(Volume * 4 div 8);
+        Mix_VolumeMusic(Volume * cMusicPct div 100);
     ChangeVolume:= GetVolumePercent();
 
     if (isMusicEnabled) then
@@ -1033,6 +1063,9 @@ procedure preInitModule;
 begin
     isMusicEnabled:= true;
     isSoundEnabled:= true;
+    isVoicesEnabled:= true;
+    cEffectsPct:= 100;
+    cMusicPct:= 50;
     isAutoDampening:= true;
     cInitVolume:= 100;
 end;

@@ -98,7 +98,7 @@ target_include_directories(fpcrtl PUBLIC ${RTL_DIR} ${HP_ENGINE_C} include)
 target_link_libraries(fpcrtl PUBLIC SDL2::SDL2 SDL2_image::SDL2_image SDL2_mixer::SDL2_mixer
   SDL2_ttf::SDL2_ttf SDL2_net::SDL2_net lua physfs physlayer)
 target_compile_options(fpcrtl PRIVATE -fsigned-char -w)
-target_compile_definitions(fpcrtl PUBLIC HP_GLES1=1)
+target_compile_definitions(fpcrtl PUBLIC HW_GLES1=1)
 set_target_properties(fpcrtl PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 # Stale check: the generated C must match the engine checkout (see scripts/gen-engine.sh). The stamp

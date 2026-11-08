@@ -23,7 +23,7 @@ add_executable(hp_hosttest hp_host_main.c ../launcher/hp_ipc.c ${ENGINE_SRC} ${R
   ${PL}/physfscompat.c ${PL}/physfsrwops.c ${PL}/physfslualoader.c ${PL}/hwpacksmounter.c)
 target_include_directories(hp_hosttest PRIVATE ${CMAKE_BINARY_DIR}/shim ${HP_ENGINE_C} ${HP_ENGINE_SRC}/project_files/hwc/rtl
   ${HP_ENGINE_SRC}/misc/liblua ${PD} ${PL} ${SDL2_INCLUDE_DIRS} /usr/include/SDL2)
-target_compile_definitions(hp_hosttest PRIVATE PAS2C=1 HP_GLES1=0 LUA_USE_POSIX PHYSFS_NO_CDROM_SUPPORT=1)
+target_compile_definitions(hp_hosttest PRIVATE PAS2C=1 HW_GLES1=0 LUA_USE_POSIX PHYSFS_NO_CDROM_SUPPORT=1)
 set_source_files_properties(${PL}/hwpacksmounter.c PROPERTIES COMPILE_OPTIONS "-include;lua.h")
 # Mirror the device build flags: optimised with FORTIFY on. Lua 5.1 is exempt (struct hack on
 # TString, see native/CMakeLists.txt). Note: glibc does not check strchr, so this does NOT

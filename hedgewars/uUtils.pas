@@ -842,16 +842,16 @@ begin
 end;
 
 {$IFDEF PAS2C}
-const HedgePartyLibName = 'hedgeparty';
+const AndroidLauncherLibName = 'hwlauncher';
 
-// provided by the Android launcher (host/native/launcher/hp_main.c)
-procedure hp_rumble(ms: LongInt); cdecl; external HedgePartyLibName;
+// provided by the Android launcher (project_files/Android-native/native/launcher/hp_main.c)
+procedure hw_device_rumble(ms: LongInt); cdecl; external AndroidLauncherLibName;
 {$ENDIF}
 
 procedure DeviceRumble(ms: LongInt);
 begin
 {$IFDEF PAS2C}
-    hp_rumble(ms);
+    hw_device_rumble(ms);
 {$ELSE}
     ms:= ms; // avoid compiler hint
 {$ENDIF}

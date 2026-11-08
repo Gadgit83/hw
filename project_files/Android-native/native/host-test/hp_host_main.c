@@ -95,7 +95,7 @@ static void *script_thread(void *arg)
 }
 
 /* The engine calls this on a big explosion (uUtils.pas DeviceRumble); the app vibrates, the test logs it. */
-void hp_rumble(int32_t ms)
+void hw_device_rumble(int32_t ms)
 {
     fprintf(stderr, "[hosttest] rumble %d ms\n", (int)ms);
 }

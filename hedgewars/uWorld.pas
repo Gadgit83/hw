@@ -881,7 +881,7 @@ c:= -1;
             if bSelected and (Ammoz[Ammo^[Slot, Pos].AmmoType].SkipTurns - CurrentTeam^.Clan^.TurnNumber < 0) then
                 begin
                 bShowAmmoMenu:= false;
-                WriteLnToConsole('[HP] weapon menu select: slot ' + inttostr(Slot) + ' pos ' + inttostr(Pos) + ' ammotype ' + inttostr(ord(Ammo^[Slot, Pos].AmmoType)));
+                WriteLnToConsole('[Touch] weapon menu select: slot ' + inttostr(Slot) + ' pos ' + inttostr(Pos) + ' ammotype ' + inttostr(ord(Ammo^[Slot, Pos].AmmoType)));
                 SetWeapon(Ammo^[Slot, Pos].AmmoType);
                 bSelected:= false;
                 FreeAndNilTexture(WeaponTooltipTex);

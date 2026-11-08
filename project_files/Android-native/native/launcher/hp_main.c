@@ -170,7 +170,7 @@ static int query_options(char **out, int max)
 
 /* Called by the engine (pas2c output of uUtils.pas, DeviceRumble) on a big explosion: a short
  * vibration, if the player has it switched on. Runs on the engine thread. */
-void hp_rumble(int32_t ms)
+void hw_device_rumble(int32_t ms)
 {
     JNIEnv *env = (JNIEnv *)SDL_AndroidGetJNIEnv();
     jobject act = (jobject)SDL_AndroidGetActivity();

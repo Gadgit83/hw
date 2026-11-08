@@ -27,7 +27,7 @@ mkdir -p "$BUILD_DIR/rust-src"; rsync -a --delete --exclude target "$HW_ENGINE_D
 cp "$BUILD_DIR/rust-target/release/libhwengine_future.so" "$BUILD_DIR/rust-host/"
 
 log "pas2c with desktop GL"
-OUT_DIR="$BUILD_DIR/engine-c-host" EXTRA_DEFS="-d HP_DESKTOP_GL" "$HOST_DIR/scripts/gen-engine.sh" | tail -1
+OUT_DIR="$BUILD_DIR/engine-c-host" EXTRA_DEFS="-d PAS2C_DESKTOP_GL" "$HOST_DIR/scripts/gen-engine.sh" | tail -1
 
 log "build"
 B="$T/build"; [ "${ASAN:-OFF}" = ON ] && B="$T/build-asan"

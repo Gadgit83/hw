@@ -16,7 +16,7 @@
 . "$(dirname "$0")/common.sh"
 MODE="${1:-generate}"
 P2C_DIR="$BUILD_DIR/pas2c"
-# EXTRA_DEFS (e.g. "-d HP_DESKTOP_GL") and OUT_DIR serve the host smoke test (scripts/host-test.sh).
+# EXTRA_DEFS (e.g. "-d PAS2C_DESKTOP_GL") and OUT_DIR serve the host smoke test (scripts/host-test.sh).
 OUT="${OUT_DIR:-$BUILD_DIR/engine-c}"
 STAMP="$OUT/.engine-stamp"
 

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The window background is the same green as the setup screen, so no black shows at any edge. -->
+    <style name="AppTheme" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/hp_bg</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@color/hp_bg</item>
+        <item name="android:colorAccent">#F2B632</item>
+        <item name="android:colorControlActivated">#F2B632</item>
+        <item name="android:textColorHint">#78927C</item>
+    </style>
+    <style name="GameTheme" parent="@android:style/Theme.NoTitleBar.Fullscreen">
+        <item name="android:windowBackground">@android:color/black</item>
+    </style>
+</resources>

@@ -25,6 +25,8 @@ static pthread_t g_thread;
 static int g_thread_started;
 /* The accepted engine socket, or -1. Guarded by g_fd_lock so hp_ipc_join can shut it down safely. */
 static int g_client_fd = -1;
+/* Set by hp_ipc_join so a connection accepted during shutdown is closed rather than served. */
+static int g_stopping;
 static pthread_mutex_t g_fd_lock = PTHREAD_MUTEX_INITIALIZER;
 
 static int read_full(int fd, void *buf, size_t n)
@@ -93,13 +95,21 @@ static void *server_thread(void *arg)
     (void)arg;
     int fd = accept(g_listen_fd, NULL, NULL);
     if (fd < 0) {
-        LOGE("accept failed: %s", strerror(errno));
+        pthread_mutex_lock(&g_fd_lock);
+        int stopping = g_stopping;
+        pthread_mutex_unlock(&g_fd_lock);
+        if (!stopping) LOGE("accept failed: %s", strerror(errno));
         return NULL;
     }
-    LOGI("engine connected");
     pthread_mutex_lock(&g_fd_lock);
+    if (g_stopping) {
+        pthread_mutex_unlock(&g_fd_lock);
+        close(fd);
+        return NULL;
+    }
     g_client_fd = fd;
     pthread_mutex_unlock(&g_fd_lock);
+    LOGI("engine connected");
     for (;;) {
         unsigned char len;
         unsigned char msg[256];
@@ -128,6 +138,9 @@ int hp_ipc_start(const char *config_path)
     struct sockaddr_in addr;
     socklen_t alen = sizeof addr;
     snprintf(g_config_path, sizeof g_config_path, "%s", config_path);
+    pthread_mutex_lock(&g_fd_lock);
+    g_stopping = 0;
+    pthread_mutex_unlock(&g_fd_lock);
     g_listen_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (g_listen_fd < 0) return -1;
     memset(&addr, 0, sizeof addr);
@@ -148,12 +161,14 @@ int hp_ipc_start(const char *config_path)
 void hp_ipc_join(void)
 {
     if (g_thread_started) {
-        /* Unblock accept() if the engine never connected. */
-        shutdown(g_listen_fd, SHUT_RDWR);
-        /* Unblock recv() if the engine is still connected and keeps its socket open. */
+        /* Mark stopping first, so a connection accepted from now on is closed, not served. */
         pthread_mutex_lock(&g_fd_lock);
+        g_stopping = 1;
+        /* Unblock recv() if the engine is still connected and keeps its socket open. */
         if (g_client_fd >= 0) shutdown(g_client_fd, SHUT_RDWR);
         pthread_mutex_unlock(&g_fd_lock);
+        /* Unblock accept() if the engine never connected. */
+        shutdown(g_listen_fd, SHUT_RDWR);
         pthread_join(g_thread, NULL);
         g_thread_started = 0;
     }

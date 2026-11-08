@@ -44,7 +44,7 @@ public final class GameConfig {
 
     /** Removes characters that would break the line based message format. */
     static String clean(String s, String fallback) {
-        String t = s == null ? "" : s.replaceAll("[\\p{Cntrl}\\u2028\\u2029]", " ").trim();
+        String t = s == null ? "" : s.replaceAll("[\\p{Cc}\\u2028\\u2029]", " ").trim();
         int cps = t.codePointCount(0, t.length());
         if (cps > 24) t = t.substring(0, t.offsetByCodePoints(0, 24)).trim();
         return t.isEmpty() ? fallback : t;
@@ -93,7 +93,6 @@ public final class GameConfig {
                 l.add("ehat NoHat");
             }
         }
-        l.add("!");
         return l;
     }
 

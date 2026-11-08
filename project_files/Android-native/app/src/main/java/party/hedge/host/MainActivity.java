@@ -174,7 +174,9 @@ public class MainActivity extends Activity {
     /** Posts a redraw to the activity on screen, if any. */
     private static void refresh() {
         MainActivity a = shown;
-        if (a != null) a.runOnUiThread(a::render);
+        if (a != null) a.runOnUiThread(() -> {
+            if (!a.isDestroyed() && !a.isFinishing()) a.render();
+        });
     }
 
     /** Shows the install state held in the statics. */

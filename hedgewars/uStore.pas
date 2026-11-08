@@ -512,7 +512,9 @@ for ii:= Low(TSprite) to High(TSprite) do
                     if ((ii = sprWater) or (ii = sprSDWater)) and ((cReducedQuality and (rq2DWater or rqClampLess)) = 0) then
                         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
                     end;
+{$IFNDEF ANDROID_NATIVE}
                 glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_PRIORITY, priority);
+{$ENDIF}
 // This should maybe be flagged. It wastes quite a bit of memory.
                 if not reload then
                     begin
@@ -1323,8 +1325,10 @@ begin
         flags:= SDL_WINDOW_OPENGL or SDL_WINDOW_SHOWN or SDL_WINDOW_RESIZABLE;
 
         {$IFDEF MOBILE}
+        {$IFNDEF ANDROID_NATIVE}
         if isPhone() then
             SDL_SetHint('SDL_IOS_ORIENTATIONS','LandscapeLeft LandscapeRight');
+        {$ENDIF}
         // no need for borders on mobile devices
         flags:= flags or SDL_WINDOW_BORDERLESS;
         {$ENDIF}

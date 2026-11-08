@@ -1,6 +1,7 @@
 package party.hedge.host;
 
 import android.app.Activity;
+import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.graphics.Color;
@@ -31,14 +32,29 @@ public class MainActivity extends Activity {
     private int teamCount = 2;
     private SharedPreferences prefs;
 
+    // Static, so a recreated MainActivity in the same process sees an install already running
+    // and does not start a second one. The install thread reports to whichever activity is shown.
+    private static volatile boolean installing;
+    private static volatile boolean dataReady;
+    private static volatile String installError;
+    private static volatile String installProgress = "";
+    private static volatile MainActivity shown;
+
     @Override
     protected void onCreate(Bundle b) {
         super.onCreate(b);
+        shown = this;
         prefs = getSharedPreferences("setup", MODE_PRIVATE);
         teamCount = Math.max(MIN_TEAMS, Math.min(MAX_TEAMS, prefs.getInt("teams", 2)));
         setContentView(buildUi());
         refreshRows();
         prepareData();
+    }
+
+    @Override
+    protected void onDestroy() {
+        if (shown == this) shown = null;
+        super.onDestroy();
     }
 
     private int dp(int v) {
@@ -104,7 +120,7 @@ public class MainActivity extends Activity {
         start = new Button(this);
         start.setText("Start game");
         start.setEnabled(false);
-        start.setOnClickListener(v -> startGame());
+        start.setOnClickListener(v -> { if (dataReady) startGame(); else prepareData(); });
         LinearLayout.LayoutParams sp = new LinearLayout.LayoutParams(dp(240), ViewGroup.LayoutParams.WRAP_CONTENT);
         sp.topMargin = dp(12);
         root.addView(start, sp);
@@ -122,23 +138,60 @@ public class MainActivity extends Activity {
         for (int i = 0; i < MAX_TEAMS; i++) rows[i].setVisibility(i < teamCount ? View.VISIBLE : View.GONE);
     }
 
-    /** Extract the game data on first run, off the UI thread. */
+    /** Extract the game data on first run, off the UI thread. Also used by the Retry button. */
     private void prepareData() {
-        if (DataInstaller.isInstalled(this)) {
-            status.setText("Ready");
-            start.setEnabled(true);
+        if (installing) {
+            render();
             return;
         }
-        status.setText("Unpacking game data, first start only...");
+        if (DataInstaller.isInstalled(this)) {
+            dataReady = true;
+            render();
+            return;
+        }
+        installing = true;
+        installError = null;
+        installProgress = "Unpacking game data, first start only...";
+        render();
+        Context app = getApplicationContext();
         new Thread(() -> {
+            String error = null;
             try {
-                DataInstaller.install(this, (done, total) ->
-                        runOnUiThread(() -> status.setText("Unpacking game data " + (100 * done / Math.max(total, 1)) + "%")));
-                runOnUiThread(() -> { status.setText("Ready"); start.setEnabled(true); });
+                DataInstaller.install(app, (done, total) -> {
+                    installProgress = "Unpacking game data " + (100 * done / Math.max(total, 1)) + "%";
+                    refresh();
+                });
+                dataReady = true;
             } catch (Exception e) {
-                runOnUiThread(() -> status.setText("Could not unpack the game data: " + e));
+                error = "Could not unpack the game data: " + (e.getMessage() != null ? e.getMessage() : e.toString());
             }
+            installError = error;
+            installing = false;
+            refresh();
         }, "data-install").start();
+    }
+
+    /** Posts a redraw to the activity on screen, if any. */
+    private static void refresh() {
+        MainActivity a = shown;
+        if (a != null) a.runOnUiThread(a::render);
+    }
+
+    /** Shows the install state held in the statics. */
+    private void render() {
+        if (installing) {
+            status.setText(installProgress);
+            start.setText("Start game");
+            start.setEnabled(false);
+        } else if (installError != null) {
+            status.setText(installError + ". Free up storage if needed, then tap Retry.");
+            start.setText("Retry");
+            start.setEnabled(true);
+        } else if (dataReady) {
+            status.setText("Ready");
+            start.setText("Start game");
+            start.setEnabled(true);
+        }
     }
 
     private void startGame() {

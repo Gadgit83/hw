@@ -2,6 +2,7 @@ package party.hedge.host;
 
 import android.content.Context;
 import android.content.res.AssetManager;
+import android.os.StatFs;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -19,6 +20,8 @@ public final class DataInstaller {
 
     private static final String ROOT = "Data";
     private static final String MARKER = ".installed";
+    /** Room needed for the unpacked data plus headroom. A constant, as the asset total is not known cheaply. */
+    private static final long REQUIRED_BYTES = 150L * 1024 * 1024;
 
     private DataInstaller() { }
 
@@ -42,6 +45,11 @@ public final class DataInstaller {
     }
 
     public static void install(Context c, Progress p) throws Exception {
+        long free = new StatFs(c.getFilesDir().getPath()).getAvailableBytes();
+        if (free < REQUIRED_BYTES) {
+            throw new IOException("not enough free storage: about 150 MB is needed, "
+                    + (free / (1024 * 1024)) + " MB is free");
+        }
         AssetManager am = c.getAssets();
         File dest = new File(c.getFilesDir(), ROOT);
         deleteTree(dest);

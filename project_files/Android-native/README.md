@@ -52,7 +52,7 @@ Trimmed from the data: the 17 MB CJK font, other languages than English, single 
 | `scripts/` | Reproducible build steps, see below |
 | `third_party/`, `build/` | Downloaded and generated, gitignored |
 
-The engine changes (pas2c friendly constructs, the `PAS2C_ANDROID` define, GLES 1.1 context, SDL2_mixer binding fixes) are commits on branch `android` of https://github.com/Gadgit83/hw. They are not patch files and no upstream code is committed here.
+The engine changes (pas2c friendly constructs, the `PAS2C_ANDROID` define, GLES 1.1 context, SDL2_mixer binding fixes) are commits on branch `android` of https://github.com/Gadgit83/hw. They are not patch files and no upstream code is committed here. The engine is pinned to base `1bbc396d3`, the commit WebWars also uses (see `docs/decisions.md`, D2).
 
 ## Prerequisites
 

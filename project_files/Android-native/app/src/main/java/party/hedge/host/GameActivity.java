@@ -23,6 +23,13 @@ public class GameActivity extends SDLActivity {
         super.onCreate(savedInstanceState);
     }
 
+    /** The engine keeps global state in its statics, so end the process to start every game clean. */
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        android.os.Process.killProcess(android.os.Process.myPid());
+    }
+
     /**
      * The engine has no Android back button handling, so the system Back key is forwarded as
      * Escape, which opens its pause/quit dialog. Leaving the game finishes the activity.

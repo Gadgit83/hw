@@ -44,8 +44,9 @@ public final class GameConfig {
 
     /** Removes characters that would break the line based message format. */
     static String clean(String s, String fallback) {
-        String t = s == null ? "" : s.replaceAll("[\\r\\n\\t]", " ").trim();
-        if (t.length() > 24) t = t.substring(0, 24).trim();
+        String t = s == null ? "" : s.replaceAll("[\\p{Cntrl}\\u2028\\u2029]", " ").trim();
+        int cps = t.codePointCount(0, t.length());
+        if (cps > 24) t = t.substring(0, t.offsetByCodePoints(0, 24)).trim();
         return t.isEmpty() ? fallback : t;
     }
 
@@ -82,7 +83,7 @@ public final class GameConfig {
             l.add("eammdelay " + DEFAULT_AMMO[2]);
             l.add("eammreinf " + DEFAULT_AMMO[3]);
             l.add("eammstore");
-            l.add("eaddteam team" + t + " " + COLORS[t] + " " + clean(teamNames[t], DEFAULT_TEAM_NAMES[t % 4]));
+            l.add("eaddteam team" + t + " " + (COLORS[t] & 0xffffffL) + " " + clean(teamNames[t], DEFAULT_TEAM_NAMES[t % 4]));
             l.add("egrave Statue");
             l.add("efort Earth");
             l.add("evoicepack Default");

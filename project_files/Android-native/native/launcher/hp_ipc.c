@@ -23,6 +23,9 @@ static int g_listen_fd = -1;
 static char g_config_path[1024];
 static pthread_t g_thread;
 static int g_thread_started;
+/* The accepted engine socket, or -1. Guarded by g_fd_lock so hp_ipc_join can shut it down safely. */
+static int g_client_fd = -1;
+static pthread_mutex_t g_fd_lock = PTHREAD_MUTEX_INITIALIZER;
 
 static int read_full(int fd, void *buf, size_t n)
 {
@@ -94,6 +97,9 @@ static void *server_thread(void *arg)
         return NULL;
     }
     LOGI("engine connected");
+    pthread_mutex_lock(&g_fd_lock);
+    g_client_fd = fd;
+    pthread_mutex_unlock(&g_fd_lock);
     for (;;) {
         unsigned char len;
         unsigned char msg[256];
@@ -102,10 +108,17 @@ static void *server_thread(void *arg)
         if (len && msg[0] == 'C') {
             /* The engine asks for the game configuration. */
             if (send_config(fd)) break;
+        } else if (len && msg[0] == '?') {
+            /* The engine asks a question; answer with '!' as the Qt frontend does. */
+            static const unsigned char ok[2] = { 1, '!' };
+            if (write_full(fd, ok, sizeof ok)) break;
         }
         /* Everything else (ticks, stats, resize notices) is only drained. */
     }
     LOGI("engine closed the IPC socket");
+    pthread_mutex_lock(&g_fd_lock);
+    g_client_fd = -1;
+    pthread_mutex_unlock(&g_fd_lock);
     close(fd);
     return NULL;
 }
@@ -137,6 +150,10 @@ void hp_ipc_join(void)
     if (g_thread_started) {
         /* Unblock accept() if the engine never connected. */
         shutdown(g_listen_fd, SHUT_RDWR);
+        /* Unblock recv() if the engine is still connected and keeps its socket open. */
+        pthread_mutex_lock(&g_fd_lock);
+        if (g_client_fd >= 0) shutdown(g_client_fd, SHUT_RDWR);
+        pthread_mutex_unlock(&g_fd_lock);
         pthread_join(g_thread, NULL);
         g_thread_started = 0;
     }

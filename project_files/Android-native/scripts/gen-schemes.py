@@ -14,7 +14,7 @@ import sys
 
 here = os.path.dirname(os.path.abspath(__file__))
 hw = sys.argv[1] if len(sys.argv) > 1 else os.path.join(here, "..", "..", "..")
-out = os.path.join(here, "..", "app", "src", "main", "java", "party", "hedge", "host", "SchemeData.java")
+out = os.path.join(here, "..", "app", "src", "main", "java", "org", "hedgewars", "android", "SchemeData.java")
 
 model = open(os.path.join(hw, "QTfrontend", "model", "gameSchemeModel.cpp"), encoding="utf-8").read()
 

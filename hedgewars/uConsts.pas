@@ -525,12 +525,17 @@ var
              cLittle,
              cHHKick: hwFloat;
 
+procedure initModule;
+
 implementation
 uses uRust;
 
+// Unit initialisation lives in a procedure so that pas2c, which has no
+// notion of an initialization section, can call it from hwengine.pas.
+// With FreePascal the initialization section below calls it, as before.
+procedure initModule;
+begin
 {$IFNDEF PAS2C}
-initialization
-
     cTeamHealthHeight:= round(19 * HDPIScaleFactor);
     cFontBorder:= round(2 * HDPIScaleFactor);
     cFontPadding:= round(2 * HDPIScaleFactor);
@@ -634,5 +639,11 @@ initialization
 
      cLittle:= hwf_min_positive();
      cHHKick:= hwf_new(1, 100);  // _0_01
+end;
+
+{$IFNDEF PAS2C}
+initialization
+    initModule;
+{$ENDIF}
 
 end.

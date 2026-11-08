@@ -4,7 +4,11 @@
 # the app writes, runs it headless under Xvfb for a while and saves screenshots.
 # Needs: apt install clang cmake ninja-build libsdl2-dev libsdl2-image-dev libsdl2-mixer-dev
 #        libsdl2-ttf-dev libsdl2-net-dev xvfb imagemagick
-# Usage: [ASAN=ON] [HP_TEST_RESTORE=8,16] host-test.sh [seconds]   (default 25)
+# Usage: [ASAN=ON] [HP_TEST_RESTORE=8,16] [HP_TEST_SCRIPT=...] [HP_TEST_ARGS=...] [HP_TEST_SHOTS=5,9] [HP_TEST_SIZE=2340x1080] host-test.sh [seconds]   (default 25)
+#   HP_TEST_SCRIPT   timed input injection, see native/host-test/hp_host_main.c (touch events, focus lost/gained, ...)
+#   HP_TEST_ARGS     extra engine options, e.g. "--ui-scale 240 --inset-left 80 --inset-top 40"
+#   HP_TEST_SHOTS    seconds after start at which extra screenshots $T/shot_<n>.png are taken
+#   HP_TEST_SIZE     window size (default 1280x720)
 #   ASAN=ON builds with AddressSanitizer; HP_TEST_RESTORE posts SDL_WINDOWEVENT_RESTORED at those
 #   seconds (the phone sends it at start-up and after every pause; it makes the engine run "fullscr").
 . "$(dirname "$0")/common.sh"
@@ -35,12 +39,20 @@ java -cp "$T/cfg" GenConfig "$T/game.ipc" "$DATA/Themes" 4242 "Red Team" "Blue T
 log "run for ${SECS}s under Xvfb"
 export DISPLAY=:77
 export ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=0:abort_on_error=0:halt_on_error=1}"
-Xvfb :77 -screen 0 1280x720x24 >/dev/null 2>&1 &
+SIZE="${HP_TEST_SIZE:-1280x720}"; SW="${SIZE%x*}"; SH="${SIZE#*x}"
+Xvfb :77 -screen 0 ${SIZE}x24 >/dev/null 2>&1 &
 XP=$!
 sleep 1
-"$B/hp_hosttest" "$DATA" "$T/user" "$T/game.ipc" 1280 720 >"$T/engine.log" 2>&1 &
+"$B/hp_hosttest" "$DATA" "$T/user" "$T/game.ipc" "$SW" "$SH" >"$T/engine.log" 2>&1 &
 EP=$!
-sleep $((SECS - 3)); import -window root "$T/screenshot.png"
+t0=$(date +%s.%N); n=0
+SHOTS="${HP_TEST_SHOTS:-}"
+for at in ${SHOTS//,/ }; do
+  n=$((n+1)); now=$(date +%s.%N); d=$(echo "$at - ($now - $t0)" | bc); [ "$(echo "$d > 0" | bc)" = 1 ] && sleep "$d"
+  import -window root "$T/shot_$n.png"
+done
+now=$(date +%s.%N); d=$(echo "$SECS - 3 - ($now - $t0)" | bc); [ "$(echo "$d > 0" | bc)" = 1 ] && sleep "$d"
+import -window root "$T/screenshot.png"
 sleep 3
 alive=no; kill -0 $EP 2>/dev/null && alive=yes
 kill $EP 2>/dev/null; sleep 1; kill $XP 2>/dev/null

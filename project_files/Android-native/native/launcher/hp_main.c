@@ -8,6 +8,7 @@
  *  - A normal end (engine returned 0) removes files/logs/game_running, the marker that
  *    GameActivity creates, so a marker left behind means the game did not finish cleanly. */
 #include <SDL.h>
+#include <jni.h>
 #include <android/log.h>
 #include <errno.h>
 #include <pthread.h>
@@ -110,6 +111,27 @@ static void redirect_stdio(void)
     if (pthread_create(&t, NULL, log_pump, (void *)(intptr_t)fds[0]) == 0) pthread_detach(t);
 }
 
+/* Asks GameActivity.engineDisplayInfo() (see there) for the HUD scale, the weapon menu scale and the
+ * safe area insets. On any failure the defaults stay (scale 100 %, no insets, which is the desktop layout). */
+static void query_display(int out[6])
+{
+    out[0] = 100; out[1] = 0; out[2] = out[3] = out[4] = out[5] = 0;
+    JNIEnv *env = (JNIEnv *)SDL_AndroidGetJNIEnv();
+    jobject act = (jobject)SDL_AndroidGetActivity();
+    if (!env || !act) return;
+    jclass cls = (*env)->GetObjectClass(env, act);
+    jmethodID mid = cls ? (*env)->GetMethodID(env, cls, "engineDisplayInfo", "()[I") : NULL;
+    if (mid) {
+        jintArray arr = (jintArray)(*env)->CallObjectMethod(env, act, mid);
+        if (!(*env)->ExceptionCheck(env) && arr && (*env)->GetArrayLength(env, arr) >= 6)
+            (*env)->GetIntArrayRegion(env, arr, 0, 6, out);
+        if (arr) (*env)->DeleteLocalRef(env, arr);
+    }
+    if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
+    if (cls) (*env)->DeleteLocalRef(env, cls);
+    (*env)->DeleteLocalRef(env, act);
+}
+
 int SDL_main(int argc, char **argv)
 {
     (void)argc;
@@ -156,6 +178,10 @@ int SDL_main(int argc, char **argv)
     }
     snprintf(port, sizeof port, "%d", p);
 
+    /* Landscape only. Without this hint SDL asks Android for every orientation when the engine creates
+     * its window, which overrides the manifest and let the game open in portrait. */
+    SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight");
+
     if (SDL_Init(SDL_INIT_VIDEO) == 0) {
         SDL_GetDisplayBounds(0, &bounds);
         SDL_QuitSubSystem(SDL_INIT_VIDEO);
@@ -167,15 +193,27 @@ int SDL_main(int argc, char **argv)
 
     /* In the HWLIBRARY build the engine parses argv from index 0, so slot 0 holds a
      * harmless option instead of a program name. */
+    int di[6];
+    char ui[16], menu[16], il[16], it[16], ir[16], ib[16];
+    query_display(di);
+    snprintf(ui, sizeof ui, "%d", di[0]);
+    snprintf(menu, sizeof menu, "%d", di[1]);
+    snprintf(il, sizeof il, "%d", di[2]);
+    snprintf(it, sizeof it, "%d", di[3]);
+    snprintf(ir, sizeof ir, "%d", di[4]);
+    snprintf(ib, sizeof ib, "%d", di[5]);
     char *args[] = {
         "--no-holiday-silliness", "--internal", "--port", port,
         "--prefix", data, "--user-prefix", user,
         "--width", w, "--height", h,
         "--fullscreen-width", w, "--fullscreen-height", h, "--fullscreen",
         "--locale", "en.txt", "--nodampen", "--nick", "Player",
+        "--ui-scale", ui, "--menu-scale", menu,
+        "--inset-left", il, "--inset-top", it, "--inset-right", ir, "--inset-bottom", ib,
     };
     int n = (int)(sizeof args / sizeof args[0]);
     LOGI("starting engine, ipc port %d, %sx%s, data %s", p, w, h, data);
+    LOGI("display: ui scale %s%%, menu scale %s%%, insets l%s t%s r%s b%s px", ui, menu, il, it, ir, ib);
     int rc = hwengine_RunEngine(n, args);
     LOGI("engine returned %d", rc);
     hp_ipc_join();

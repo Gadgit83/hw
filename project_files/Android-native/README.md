@@ -32,7 +32,26 @@ Seam for the hub: anything that can write a `game.ipc` (or later feed the same l
 
 ### Touch controls
 
-The engine's own touch interface (`uTouch.pas`) is enabled through the `MOBILE` code paths: walk arrows, jump, fire with charge, weapon menu, target, the engine's zoom gestures, and the pause button. The Android Back key is forwarded to the engine as Escape, which opens its quit dialog.
+The engine's own touch interface (`uTouch.pas`) is enabled through the `MOBILE` code paths. On a phone:
+
+| Gesture | Action |
+|---|---|
+| Left / right arrow (bottom left) | Walk, hold to keep walking |
+| Red button next to the arrows | Fire. Hold to charge the power, release to shoot |
+| Round red button (bottom right) | Jump: tap for a forward jump, long press for a back jump |
+| Drag on the aim marker (crosshair around the hedgehog) | Aim up and down |
+| Weapon chest (bottom right), or tap your hedgehog | Open the weapon menu; tap a weapon to choose it, tap outside to close |
+| Timer or bounce buttons (above the arrows, when the weapon uses them) | Set the fuse time or bounciness |
+| One finger drag on empty map | Move the camera (the camera then stops following the hedgehog until the next turn) |
+| Two finger pinch | Zoom |
+| Pause button (top right, yellow II) | Pause. While paused, tap it or anywhere else to resume; the map can still be dragged |
+| Android Back key | Opens the engine's quit dialog (Escape) |
+
+Losing focus (home button, notification shade, phone call) pauses the game and getting focus back resumes it. A pause you chose with the button stays until you tap.
+
+Size and safe area: `GameActivity.engineDisplayInfo()` measures the display and passes it to the engine as options (`--ui-scale`, `--menu-scale` in percent, `--inset-left/top/right/bottom` in pixels, see `hp_main.c`). The scale aims for about 8 mm per control and per weapon cell from the real screen density, and the insets come from the display cut-out and the rounded corners (`WindowInsets.getRoundedCorner`, API 31+; otherwise 3.5 % of the screen height). The engine lays out and hit tests the HUD in those scaled units, so a screen at 160 dpi or less keeps the desktop layout. The game window itself fills the screen including behind the camera cut-out (`shortEdges`).
+
+Orientation: both activities are `sensorLandscape`. SDL additionally asks Android for an orientation when the engine creates its window (with no hint it requests every orientation, which overrode the manifest and let the game open in portrait), so `GameActivity` overrides `setOrientationBis` and `hp_main.c` sets `SDL_HINT_ORIENTATIONS` to landscape.
 
 ### Game data
 
@@ -109,13 +128,13 @@ Most of it is game data (112 MB staged, compressed little because the images and
 - `scripts/host-test.sh` builds the same engine and launcher for Linux with desktop OpenGL, starts a two team game from the config produced by `GameConfig.java`, and runs it headless under Xvfb. The engine connects to the IPC server, receives the 60 config messages, generates a map, loads all sprites, and renders the touch interface and teams.
 - `ASAN=ON scripts/host-test.sh 45` builds the same test with AddressSanitizer (needs `apt install libclang-rt-dev`), which reports the out-of-bounds accesses that the phone's MTE and hardened allocator turn into crashes. `HP_TEST_RESTORE=1,3,6,14` posts `SDL_WINDOWEVENT_RESTORED` at those seconds; the phone sends it right after start-up and after every pause, and the engine answers with `fullscr`, which reloads the video state, the chat lines and every texture (this reproduced the v0.1.1 crash in `PrettifySurfaceAlpha`).
 
-Not verified: running on an Android device or emulator (the build machine has no KVM, so no x86_64 emulator could be started). Touch input, the OpenGL ES 1.1 context on real drivers, audio, pause and resume, and the Java setup screen are untested at runtime.
+Not verified: running on an Android device or emulator (the build machine has no KVM, so no x86_64 emulator could be started). The touch handling, safe area layout, scaled HUD and weapon menu, pause and focus handling were checked on the host with injected SDL touch and window events (`HP_TEST_SCRIPT`, `HP_TEST_ARGS`, `HP_TEST_SHOTS`, `HP_TEST_SIZE`, see `scripts/host-test.sh`). The OpenGL ES 1.1 context on real drivers, audio, the Java display measurement and the setup screen are only tested on the owner's phone.
 
 ## Known limitations
 
 - Hotseat only: no lobby, network play, AI teams or scheme and weapon editing yet. The default scheme and weapon set are fixed in `GameConfig.java`.
 - Fixed four hedgehogs per team, English only, random map and theme.
-- Touch targets are sized by the engine for the full screen resolution, so they may be small on very high density phones.
+- HUD text and sprites are drawn larger by scaling the engine's artwork, so they are a little soft on very dense screens. The names and health tags above the hedgehogs are part of the world and keep their size (pinch to zoom in).
 - Rendering uses OpenGL ES 1.1 as in the engine's mobile code path. Performance on low end devices is unmeasured.
 - First start unpacks the data, and the data is stored twice (APK and internal storage).
 - Debug signed APK only. A release build needs a keystore.

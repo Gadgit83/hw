@@ -106,28 +106,54 @@ public final class GameConfig {
         }
 
         // HWGame::commonConfig: for every team, its weapon lines, then the team itself.
+        for (int t = 0; t < m.teams.size(); t++) teamLines(l, m.teams.get(t), t, weapons, r);
+        return l;
+    }
+
+    /**
+     * The block of one team (HWGame::commonConfig and HWTeam::teamGameConfig): its weapon lines, the team itself
+     * and its hedgehogs. A network game builds the same blocks from teams that arrive from other phones.
+     */
+    public static void teamLines(List<String> l, SetupModel.Team tm, int t, String weapons, Rules r) {
         boolean sharedAmmo = r.flag[15];
         boolean perHogAmmo = r.flag[21];
-        for (int t = 0; t < m.teams.size(); t++) {
-            SetupModel.Team tm = m.teams.get(t);
-            l.add("eammloadt " + weapons.substring(0, 60));
-            l.add("eammprob " + weapons.substring(60, 120));
-            l.add("eammdelay " + weapons.substring(120, 180));
-            l.add("eammreinf " + weapons.substring(180, 240));
-            if (sharedAmmo || !perHogAmmo) l.add("eammstore");
-            l.add("eaddteam team" + t + " " + (SetupModel.COLORS[tm.color] & 0xffffff) + " "
-                    + cleanTeamName(tm.name, "Team " + (t + 1)));
-            l.add("egrave " + tm.grave);
-            l.add("efort " + tm.fort);
-            l.add("evoicepack " + tm.voice);
-            l.add("eflag " + tm.flag);
-            for (int h = 0; h < tm.hogs; h++) {
-                l.add("eaddhh " + tm.engineLevel() + " " + r.value[Rules.V_HEALTH] + " "
-                        + clean(tm.hogName[h], "Hedgehog " + (h + 1)));
-                l.add("ehat " + tm.hogHat[h]);
+        l.add("eammloadt " + weapons.substring(0, 60));
+        l.add("eammprob " + weapons.substring(60, 120));
+        l.add("eammdelay " + weapons.substring(120, 180));
+        l.add("eammreinf " + weapons.substring(180, 240));
+        if (sharedAmmo || !perHogAmmo) l.add("eammstore");
+        l.add("eaddteam team" + t + " " + (SetupModel.COLORS[tm.color] & 0xffffff) + " "
+                + cleanTeamName(tm.name, "Team " + (t + 1)));
+        l.add("egrave " + tm.grave);
+        l.add("efort " + tm.fort);
+        l.add("evoicepack " + tm.voice);
+        l.add("eflag " + tm.flag);
+        for (int h = 0; h < tm.hogs; h++) {
+            l.add("eaddhh " + tm.engineLevel() + " " + r.value[Rules.V_HEALTH] + " "
+                    + clean(tm.hogName[h], "Hedgehog " + (h + 1)));
+            l.add("ehat " + tm.hogHat[h]);
+        }
+    }
+
+    /**
+     * The lines one phone sends its engine in a network game, made from the canonical lines of {@link #build}
+     * (the same for everyone, so the map, rules and team order are identical): the first line becomes
+     * {@code TN}, and every team the phone does not own gets {@code erdriven} straight after its
+     * {@code eaddteam}, which makes the engine take that team's moves from the message queue (plan section 2.6).
+     * {@code owned[i]} says whether the phone owns the team with index i in the canonical order.
+     */
+    public static List<String> forRecipient(List<String> canonical, boolean[] owned) {
+        List<String> out = new ArrayList<>();
+        int team = 0;
+        for (String line : canonical) {
+            if (line.equals("TL")) { out.add("TN"); continue; }
+            out.add(line);
+            if (line.startsWith("eaddteam ")) {
+                if (team >= owned.length || !owned[team]) out.add("erdriven");
+                team++;
             }
         }
-        return l;
+        return out;
     }
 
     public static void write(File target, List<String> lines) throws IOException {

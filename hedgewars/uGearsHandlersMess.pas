@@ -3321,6 +3321,8 @@ begin
             if (performRumble <> nil) and (not fastUntilLag) then
                 performRumble(kSystemSoundID_Vibrate);
         {$ENDIF}
+        if not fastUntilLag then
+            DeviceRumble(40);
         DeleteGear(Gear);
         exit
         end;
@@ -5871,6 +5873,8 @@ begin
         if (performRumble <> nil) and (not fastUntilLag) then
             performRumble(kSystemSoundID_Vibrate);
     {$ENDIF}
+    if not fastUntilLag then
+        DeviceRumble(40);
 end;
 
 ////////////////////////////////////////////////////////////////////////////////

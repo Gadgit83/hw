@@ -859,7 +859,7 @@ begin
     WriteToConsole(msgLoading + s + ' ');
 
     // Load normal music
-    Mus:= Mix_LoadMUS_RW(rwopsOpenRead(s));
+    Mus:= Mix_LoadMUS_RW(rwopsOpenRead(s), 1);
     SDLCheck(Mus <> nil, 'Mix_LoadMUS_RW', false);
     if Mus <> nil then
         WriteLnToConsole(msgOK);
@@ -881,14 +881,15 @@ begin
        if (s <> '') then
            begin
            WriteLnToConsole(msgLoading + s + ' ');
-           Mus:= Mix_LoadMUS_RW(rwopsOpenRead(s));
+           Mus:= Mix_LoadMUS_RW(rwopsOpenRead(s), 1);
            SDLCheck(Mus <> nil, 'Mix_LoadMUS_RW', false);
            if Mus <> nil then
                WriteLnToConsole(msgOK)
            end;
        end;
 
-    SDLCheck(Mix_FadeInMusic(Mus, -1, 3000) <> -1, 'Mix_FadeInMusic', false)
+    if Mus <> nil then
+            SDLCheck(Mix_FadeInMusic(Mus, -1, 3000) <> -1, 'Mix_FadeInMusic', false)
 end;
 
 procedure SetVolume(vol: LongInt);
@@ -984,7 +985,7 @@ begin
         exit;
 
     if Mus <> nil then
-        Mix_PauseMusic(Mus);
+        Mix_PauseMusic;
 end;
 
 procedure ResumeMusic;
@@ -993,7 +994,7 @@ begin
         exit;
 
     if Mus <> nil then
-        Mix_ResumeMusic(Mus);
+        Mix_ResumeMusic;
 end;
 
 procedure ChangeMusic(musicname: shortstring);

@@ -1,4 +1,4 @@
-package party.hedge.host;
+package org.hedgewars.android;
 
 import android.content.ContentProvider;
 import android.content.ContentValues;
@@ -17,8 +17,9 @@ import java.io.FileNotFoundException;
  * Only files/logs/report.txt can be opened, and only by apps given an explicit grant.
  */
 public class LogProvider extends ContentProvider {
-    static final String AUTHORITY = "party.hedge.host.logs";
-    static final String REPORT_NAME = "hedge-party-log.txt";
+    /** Matches the provider declared in the manifest, which uses the application id. */
+    static final String AUTHORITY = BuildConfig.APPLICATION_ID + ".logs";
+    static final String REPORT_NAME = "hedgewars-log.txt";
 
     static Uri reportUri() {
         return Uri.parse("content://" + AUTHORITY + "/" + REPORT_NAME);

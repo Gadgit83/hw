@@ -1,4 +1,4 @@
-package party.hedge.host;
+package org.hedgewars.android;
 
 import android.app.Activity;
 import android.content.ClipData;
@@ -26,7 +26,7 @@ public final class LogShare {
                 Diag.buildReport(app);
             } catch (Throwable t) {
                 // Share what there is: Diag writes whatever it collected before the failure.
-                android.util.Log.w("HedgeParty", "log report failed", t);
+                android.util.Log.w(Diag.TAG, "log report failed", t);
             } finally {
                 // However the report ended, the button must work again.
                 sharing = false;
@@ -37,12 +37,12 @@ public final class LogShare {
                 send.setType("text/plain");
                 Uri uri = LogProvider.reportUri();
                 send.putExtra(Intent.EXTRA_STREAM, uri);
-                send.putExtra(Intent.EXTRA_SUBJECT, "Hedge Party log " + Diag.versionName(app));
-                send.putExtra(Intent.EXTRA_TEXT, "Hedge Party log from " + Diag.deviceLine());
+                send.putExtra(Intent.EXTRA_SUBJECT, BuildConfig.APP_NAME + " log " + Diag.versionName(app));
+                send.putExtra(Intent.EXTRA_TEXT, BuildConfig.APP_NAME + " log from " + Diag.deviceLine());
                 send.setClipData(ClipData.newRawUri("log", uri));
                 send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
                 try {
-                    a.startActivity(Intent.createChooser(send, "Share the Hedge Party log"));
+                    a.startActivity(Intent.createChooser(send, "Share the " + BuildConfig.APP_NAME + " log"));
                 } catch (Exception e) {
                     onError.accept("Could not open the share sheet: " + e.getMessage());
                 }

@@ -82,7 +82,7 @@ log "building pas2c"
 
 cat > "$P2C_DIR/alt/config.inc" <<'EOC'
 const cNetProtoVersion = 60;
-      cVersionString = '1.1.0-party';
+      cVersionString = '1.1.0';
       cRevisionString = 'android';
       cHashString = 'native';
       cDefaultPathPrefix = '/data/Data';

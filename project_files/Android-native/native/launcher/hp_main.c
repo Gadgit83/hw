@@ -1,4 +1,4 @@
-/* SDL_main for Hedge Party: starts the IPC server, then runs the engine on this thread.
+/* SDL_main for the Android app: starts the IPC server, then runs the engine on this thread.
  *
  * Diagnostics, because the engine was written for a desktop and is quiet on a phone:
  *  - stdout and stderr (the engine's console output) are piped into logcat, tag HW_Engine.
@@ -21,7 +21,7 @@
 
 #include "hp.h"
 
-#define TAG "HedgeParty"
+#define TAG "HWNative"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
 

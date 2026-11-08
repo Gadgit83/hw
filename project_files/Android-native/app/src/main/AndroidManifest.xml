@@ -63,7 +63,7 @@
         <!-- Hands the diagnostic report to mail and messaging apps. -->
         <provider
             android:name=".LogProvider"
-            android:authorities="party.hedge.host.logs"
+            android:authorities="${applicationId}.logs"
             android:exported="false"
             android:grantUriPermissions="true" />
     </application>

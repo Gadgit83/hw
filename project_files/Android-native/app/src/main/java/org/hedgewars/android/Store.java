@@ -1,4 +1,4 @@
-package party.hedge.host;
+package org.hedgewars.android;
 
 import android.content.Context;
 import android.content.SharedPreferences;
@@ -8,12 +8,13 @@ import java.util.Random;
 
 /** Keeps the last setup and the options in the app's preferences (one text blob each). */
 public final class Store {
-    private static final String FILE = "hedgeparty";
+    /** The preferences file. The name is kept from the first builds so an update keeps the saved setup. */
+    static final String PREFS_NAME = "hedgeparty";
 
     private Store() { }
 
     private static SharedPreferences prefs(Context c) {
-        return c.getSharedPreferences(FILE, Context.MODE_PRIVATE);
+        return c.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
     }
 
     public static GameData data(Context c) {

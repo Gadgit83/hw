@@ -36,7 +36,7 @@ ninja -C "$B" | tail -1
 
 log "game config from the app's GameConfig.java"
 mkdir -p "$T/cfg" "$T/user"
-JSRC="$HOST_DIR/app/src/main/java/party/hedge/host"
+JSRC="$HOST_DIR/app/src/main/java/org/hedgewars/android"
 rm -rf "$T/cfg"; mkdir -p "$T/cfg"
 javac -d "$T/cfg" "$JSRC/GameConfig.java" "$JSRC/GameData.java" "$JSRC/Rules.java" "$JSRC/SchemeData.java" \
   "$JSRC/SetupModel.java" "$HOST_DIR/native/host-test/GenConfig.java"
@@ -65,6 +65,6 @@ sleep 3
 alive=no; kill -0 $EP 2>/dev/null && alive=yes
 kill $EP 2>/dev/null; sleep 1; kill $XP 2>/dev/null
 echo "engine still running after ${SECS}s: $alive"
-grep -E "Establishing IPC|engine connected|sent .* config|Generating land|HedgeParty" "$T/engine.log" | head
+grep -E "Establishing IPC|engine connected|sent .* config|Generating land|HWNative" "$T/engine.log" | head
 { grep -ci "segmentation\|abort\|fatal\|AddressSanitizer" "$T/engine.log" || true; } | sed "s/^/crash markers: /"
 echo "screenshot: $T/screenshot.png"

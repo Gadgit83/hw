@@ -1,4 +1,4 @@
-package party.hedge.host;
+package org.hedgewars.android;
 
 import android.app.ActivityManager;
 import android.app.ApplicationExitInfo;
@@ -33,7 +33,7 @@ import java.util.Locale;
  * after a clean end. {@link #buildReport} gathers all of it into one text file to share.
  */
 final class Diag {
-    static final String TAG = "HedgeParty";
+    static final String TAG = "HWNative";
     static final String LAST_ERROR = "last_error.txt";
     static final String GAME_MARKER = "game_running";
     private static final String REPORT = "report.txt";
@@ -386,7 +386,7 @@ final class Diag {
     static File buildReport(Context c) {
         File dir = logsDir(c);
         StringBuilder sb = new StringBuilder();
-        sb.append("Hedge Party log report, ").append(timestamp()).append('\n');
+        sb.append(BuildConfig.APP_NAME).append(" log report, ").append(timestamp()).append('\n');
         sb.append("App ").append(versionName(c)).append('\n');
         sb.append("Engine ").append(BuildConfig.ENGINE_COMMIT).append(" (").append(BuildConfig.ENGINE_BRANCH)
                 .append("), app source ").append(BuildConfig.APP_COMMIT).append('\n');

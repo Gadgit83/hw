@@ -1,4 +1,4 @@
-package party.hedge.host;
+package org.hedgewars.android;
 
 import android.content.Context;
 import android.content.res.AssetManager;

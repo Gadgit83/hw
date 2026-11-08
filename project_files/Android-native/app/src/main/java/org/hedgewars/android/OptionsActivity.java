@@ -1,4 +1,4 @@
-package party.hedge.host;
+package org.hedgewars.android;
 
 import android.app.Activity;
 import android.app.AlertDialog;
@@ -25,8 +25,6 @@ import java.util.List;
 
 /** Options: sound, display and controls, and the advanced and about pages. Changes apply to the next game. */
 public class OptionsActivity extends Activity {
-    private static final String ENGINE_SOURCE = "https://github.com/Gadgit83/hw/tree/android-master";
-    private static final String APP_SOURCE = "https://github.com/Gadgit83/hedgewars-party";
 
     private Ui ui;
     private Options o;
@@ -41,7 +39,7 @@ public class OptionsActivity extends Activity {
         ui = new Ui(this);
         Ui.edgeToEdge(this);
         o = Store.loadOptions(this);
-        tab = getSharedPreferences("hedgeparty", MODE_PRIVATE).getInt("optionsTab", 0);
+        tab = getSharedPreferences(Store.PREFS_NAME, MODE_PRIVATE).getInt("optionsTab", 0);
         if (tab < 0 || tab > 2) tab = 0;
         setContentView(buildFrame());
         show();
@@ -50,7 +48,7 @@ public class OptionsActivity extends Activity {
     @Override
     protected void onPause() {
         Store.saveOptions(this, o);
-        getSharedPreferences("hedgeparty", MODE_PRIVATE).edit().putInt("optionsTab", tab).apply();
+        getSharedPreferences(Store.PREFS_NAME, MODE_PRIVATE).edit().putInt("optionsTab", tab).apply();
         super.onPause();
     }
 
@@ -234,21 +232,21 @@ public class OptionsActivity extends Activity {
 
         LinearLayout about = ui.card();
         about.addView(ui.heading("About"));
-        about.addView(ui.text("Hedge Party " + BuildConfig.VERSION_NAME + " (build " + BuildConfig.VERSION_CODE + ")", 16, Color.WHITE));
+        about.addView(ui.text(BuildConfig.APP_NAME + " " + BuildConfig.VERSION_NAME + " (build " + BuildConfig.VERSION_CODE + ")", 16, Color.WHITE));
         about.addView(infoLine("Game engine", "Hedgewars, " + BuildConfig.ENGINE_COMMIT + " on " + BuildConfig.ENGINE_BRANCH));
         about.addView(infoLine("App source", BuildConfig.APP_COMMIT));
         about.addView(infoLine("Built for", BuildConfig.BUILD_ABIS));
         about.addView(infoLine("This device", Build.MANUFACTURER + " " + Build.MODEL + ", Android " + Build.VERSION.RELEASE
                 + " (" + Build.VERSION.SDK_INT + "), " + Arrays.toString(Build.SUPPORTED_ABIS)));
         about.addView(ui.heading("Licence and source"));
-        about.addView(ui.text("Hedge Party is free software. The game engine is Hedgewars, under the GNU General Public "
+        about.addView(ui.text(BuildConfig.APP_NAME + " is free software. The game engine is Hedgewars, under the GNU General Public "
                 + "Licence version 2; the art and sound are under the GNU Free Documentation Licence. "
-                + "You are entitled to the corresponding source code:", 14, Color.WHITE));
+                + "You are entitled to the corresponding source code, which is the repository this app was built from, "
+                + "engine and app together:", 14, Color.WHITE));
         LinearLayout links = new LinearLayout(this);
         links.setOrientation(LinearLayout.VERTICAL);
-        links.addView(ui.button("Engine source (github.com/Gadgit83/hw, branch android-master)", false, v -> open(ENGINE_SOURCE)), full());
-        links.addView(ui.button("App source (github.com/Gadgit83/hedgewars-party)", false, v -> open(APP_SOURCE)),
-                ui.margins(full(), 0, 6, 0, 0));
+        links.addView(ui.button("Source code (" + BuildConfig.SOURCE_URL.replaceFirst("^https?://", "") + ")", false,
+                v -> open(BuildConfig.SOURCE_URL)), full());
         LinearLayout lic = new LinearLayout(this);
         lic.setOrientation(LinearLayout.HORIZONTAL);
         lic.addView(ui.button("Licence text", false, v -> showFile("COPYING", "Licence")), ui.weight(1f));
@@ -308,7 +306,7 @@ public class OptionsActivity extends Activity {
     }
 
     private void resetSettings() {
-        getSharedPreferences("hedgeparty", MODE_PRIVATE).edit().clear().commit();
+        getSharedPreferences(Store.PREFS_NAME, MODE_PRIVATE).edit().clear().commit();
         o = new Options();
         Toast.makeText(this, "Setup and options reset.", Toast.LENGTH_LONG).show();
         finish();

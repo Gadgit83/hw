@@ -1,7 +1,7 @@
-import party.hedge.host.GameConfig;
-import party.hedge.host.GameData;
-import party.hedge.host.Rules;
-import party.hedge.host.SetupModel;
+import org.hedgewars.android.GameConfig;
+import org.hedgewars.android.GameData;
+import org.hedgewars.android.Rules;
+import org.hedgewars.android.SetupModel;
 
 import java.io.File;
 import java.util.List;

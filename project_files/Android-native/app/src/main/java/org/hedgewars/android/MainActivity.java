@@ -1,4 +1,4 @@
-package party.hedge.host;
+package org.hedgewars.android;
 
 import android.app.Activity;
 import android.app.AlertDialog;
@@ -72,7 +72,7 @@ public class MainActivity extends Activity {
         shown = this;
         ui = new Ui(this);
         Ui.edgeToEdge(this);
-        tab = getSharedPreferences("hedgeparty", MODE_PRIVATE).getInt("tab", TAB_TEAMS);
+        tab = getSharedPreferences(Store.PREFS_NAME, MODE_PRIVATE).getInt("tab", TAB_TEAMS);
         if (tab < 0 || tab > TAB_RULES) tab = TAB_TEAMS;
         setContentView(buildFrame());
         prepareData();
@@ -111,7 +111,7 @@ public class MainActivity extends Activity {
 
     private void saveModel() {
         if (model != null && contentReady) Store.saveSetup(this, model);
-        getSharedPreferences("hedgeparty", MODE_PRIVATE).edit().putInt("tab", tab).apply();
+        getSharedPreferences(Store.PREFS_NAME, MODE_PRIVATE).edit().putInt("tab", tab).apply();
     }
 
     // Frame ---------------------------------------------------------------------------------------
@@ -125,7 +125,7 @@ public class MainActivity extends Activity {
         topBar.setPadding(ui.dp(16), ui.dp(8), ui.dp(16), ui.dp(4));
         LinearLayout titles = new LinearLayout(this);
         titles.setOrientation(LinearLayout.VERTICAL);
-        TextView title = ui.text("Hedge Party", 24, Color.WHITE);
+        TextView title = ui.text(BuildConfig.APP_NAME, 24, Color.WHITE);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         titles.addView(title);
         topBar.addView(titles, ui.weight(1f));

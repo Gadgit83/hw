@@ -1,4 +1,4 @@
-package party.hedge.host;
+package org.hedgewars.android;
 
 import java.io.File;
 import java.io.FileOutputStream;

@@ -1,4 +1,4 @@
-package party.hedge.host;
+package org.hedgewars.android;
 
 import android.content.pm.ActivityInfo;
 import android.os.Build;
@@ -9,7 +9,7 @@ import org.libsdl.app.SDLActivity;
 
 /**
  * Hosts the native engine. SDLActivity loads libSDL2.so and libmain.so and runs SDL_main
- * (host/native/launcher/hp_main.c) on its own thread. The engine reads its game from
+ * (native/launcher/hp_main.c) on its own thread. The engine reads its game from
  * files/game.ipc, which MainActivity wrote before starting this activity.
  *
  * This activity runs in its own process (":game", see the manifest). The engine keeps global

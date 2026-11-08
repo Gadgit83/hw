@@ -5,7 +5,7 @@
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
 #else
-#define LOGI(...) (fprintf(stderr, "[HedgeParty] " __VA_ARGS__), fputc('\n', stderr))
+#define LOGI(...) (fprintf(stderr, "[HWNative] " __VA_ARGS__), fputc('\n', stderr))
 #define LOGE(...) LOGI(__VA_ARGS__)
 #endif
 #include <arpa/inet.h>
@@ -17,7 +17,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-#define TAG "HedgeParty"
+#define TAG "HWNative"
 
 static int g_listen_fd = -1;
 static char g_config_path[1024];

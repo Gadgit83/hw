@@ -4,7 +4,7 @@
 # game style, saving and loading. Needs the staged game data (stage-assets.sh) and the engine checkout.
 . "$(dirname "$0")/common.sh"
 T="$BUILD_DIR/config-test"
-JSRC="$HOST_DIR/app/src/main/java/party/hedge/host"
+JSRC="$HOST_DIR/app/src/main/java/org/hedgewars/android"
 rm -rf "$T"; mkdir -p "$T"
 javac -d "$T" "$JSRC/GameConfig.java" "$JSRC/GameData.java" "$JSRC/Rules.java" "$JSRC/SchemeData.java" \
   "$JSRC/SetupModel.java" "$JSRC/Options.java" "$HOST_DIR/native/host-test/ConfigCheck.java"

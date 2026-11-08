@@ -34,8 +34,15 @@ if (appCommit != 'unknown' && !gitOut(rootDir, 'status', '--porcelain', '--untra
     appCommit += '+local changes'
 }
 
+// Identity of the build. The defaults are those of the first releases; override them to build another flavour,
+// for example  ./gradlew -PappId=org.hedgewars.hedgewars.nativeport -PappName=Hedgewars assembleDebug
+def appId = (project.findProperty('appId') ?: 'party.hedge.host').toString()
+def appName = (project.findProperty('appName') ?: 'Hedge Party').toString()
+// Where the corresponding source of this build can be found (shown under Options, Advanced, About).
+def sourceUrl = (project.findProperty('sourceUrl') ?: 'https://github.com/Gadgit83/hw/tree/android-master').toString()
+
 android {
-    namespace 'party.hedge.host'
+    namespace 'org.hedgewars.android'
     compileSdk 34
     buildFeatures {
         buildConfig true
@@ -43,11 +50,14 @@ android {
     ndkVersion '27.2.12479018'
 
     defaultConfig {
-        applicationId 'party.hedge.host'
+        applicationId appId
         minSdk 24
         targetSdk 34
         versionCode 6
         versionName '0.2.0'
+        resValue 'string', 'app_name', appName
+        buildConfigField 'String', 'APP_NAME', "\"${appName}\""
+        buildConfigField 'String', 'SOURCE_URL', "\"${sourceUrl}\""
         // Shown on the About page and in the log report: which engine and which app source this APK was built from.
         buildConfigField 'String', 'ENGINE_COMMIT', "\"${engineCommit}\""
         buildConfigField 'String', 'ENGINE_BRANCH', "\"${engineBranch}\""

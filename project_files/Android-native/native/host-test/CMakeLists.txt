@@ -25,5 +25,13 @@ target_include_directories(hp_hosttest PRIVATE ${CMAKE_BINARY_DIR}/shim ${HP_ENG
   ${HP_ENGINE_SRC}/misc/liblua ${PD} ${PL} ${SDL2_INCLUDE_DIRS} /usr/include/SDL2)
 target_compile_definitions(hp_hosttest PRIVATE PAS2C=1 HP_GLES1=0 LUA_USE_POSIX PHYSFS_NO_CDROM_SUPPORT=1)
 set_source_files_properties(${PL}/hwpacksmounter.c PROPERTIES COMPILE_OPTIONS "-include;lua.h")
-target_compile_options(hp_hosttest PRIVATE -w -fsigned-char -fno-strict-aliasing -g -O1)
+# Mirror the device build flags: optimised with FORTIFY on. Lua 5.1 is exempt (struct hack on
+# TString, see native/CMakeLists.txt). Note: glibc does not check strchr, so this does NOT
+# reproduce the bionic abort "FORTIFY: strchr: prevented read past end of buffer"; the option
+# only exists to compare. The device-only check is verified by inspecting the Android binary.
+option(HP_FORTIFY_LUA "Keep FORTIFY on for Lua (reproduces the device crash)" OFF)
+target_compile_options(hp_hosttest PRIVATE -w -fsigned-char -fno-strict-aliasing -g -O2 -D_FORTIFY_SOURCE=3)
+if(NOT HP_FORTIFY_LUA)
+  set_source_files_properties(${LUA_SRC} PROPERTIES COMPILE_OPTIONS "-U_FORTIFY_SOURCE;-D_FORTIFY_SOURCE=0")
+endif()
 target_link_libraries(hp_hosttest PRIVATE SDL2 SDL2_image SDL2_mixer SDL2_ttf SDL2_net OpenGL::GL ${HP_RUST_LIB} pthread m dl)

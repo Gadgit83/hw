@@ -55,6 +55,12 @@ file(GLOB LUA_SRC "${HP_ENGINE_SRC}/misc/liblua/*.c")
 list(REMOVE_ITEM LUA_SRC "${HP_ENGINE_SRC}/misc/liblua/lua.c" "${HP_ENGINE_SRC}/misc/liblua/luac.c" "${HP_ENGINE_SRC}/misc/liblua/print.c")
 add_library(lua STATIC ${LUA_SRC})
 target_compile_definitions(lua PRIVATE LUA_USE_POSIX)
+# Lua 5.1 stores a string's bytes directly after its TString header (getstr is "(ts) + 1"), a
+# struct hack. bionic's FORTIFY computes the object size of that pointer as 0 and aborts at the
+# first strchr/memcpy on it ("FORTIFY: strchr: prevented read past end of buffer" in
+# traversetable, seen on a Fairphone 4 as an immediate crash when a game starts). The code is
+# correct, so FORTIFY is switched off for this one library.
+target_compile_options(lua PRIVATE -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0)
 target_include_directories(lua PUBLIC "${HP_ENGINE_SRC}/misc/liblua")
 set_target_properties(lua PROPERTIES POSITION_INDEPENDENT_CODE ON)
 

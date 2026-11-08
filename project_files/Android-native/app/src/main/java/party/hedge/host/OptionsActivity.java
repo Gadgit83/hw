@@ -279,7 +279,9 @@ public class OptionsActivity extends Activity {
     }
 
     private void showFile(String name, String title) {
-        String text = String.join("\n", GameData.readLines(new File(getFilesDir(), "Data/" + name)));
+        StringBuilder sb = new StringBuilder();
+        for (String line : GameData.readLines(new File(getFilesDir(), "Data/" + name))) sb.append(line).append('\n');
+        String text = sb.toString();
         if (text.isEmpty()) text = "The file is not in the game data. Reset the game data to unpack it again.";
         TextView t = ui.text(text, 12, Color.WHITE);
         t.setTypeface(Typeface.MONOSPACE);

@@ -110,6 +110,15 @@ See the `INSTALL.md` file.
 
 Or see our wiki at <https://hedgewars.org/kb/BuildingHedgewars>.
 
+Android (native)
+----------------
+`project_files/Android-native` holds a native Android app: the engine is
+transpiled to C with `tools/pas2c` and run on SDL2 with the engine's touch
+controls, with a game setup screen written for phones. It builds from this
+checkout; see `project_files/Android-native/README.md` for the user guide and
+the build guide. (`project_files/Android-build` is the older, unmaintained
+port; only its touch button artwork is used.)
+
 Source code
 -----------
 Our main repository is located at <https://hg.hedgewars.org/hedgewars/> using

@@ -6,7 +6,7 @@
 command -v cargo >/dev/null || { echo "cargo not found"; exit 1; }
 SRC="$BUILD_DIR/rust-src"
 mkdir -p "$SRC" "$BUILD_DIR/rust"
-cp -a "$HW_ENGINE_DIR/rust/." "$SRC/"
+rsync -a --delete --exclude target "$HW_ENGINE_DIR/rust/" "$SRC/"
 for abi in $ABIS; do
   case "$abi" in
     arm64-v8a) triple=aarch64-linux-android; clang=aarch64-linux-android24-clang ;;

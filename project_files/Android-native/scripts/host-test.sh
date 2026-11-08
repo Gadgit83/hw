@@ -12,8 +12,8 @@ mkdir -p "$T" "$BUILD_DIR/rust-host"
 export CC=clang
 
 log "rust library for the host"
-mkdir -p "$BUILD_DIR/rust-src"; cp -a "$HW_ENGINE_DIR/rust/." "$BUILD_DIR/rust-src/"
-( cd "$BUILD_DIR/rust-src/lib-hwengine-future" && CARGO_TARGET_DIR="$BUILD_DIR/rust-target" cargo build --release >/dev/null 2>&1 )
+mkdir -p "$BUILD_DIR/rust-src"; rsync -a --delete --exclude target "$HW_ENGINE_DIR/rust/" "$BUILD_DIR/rust-src/"
+( cd "$BUILD_DIR/rust-src/lib-hwengine-future" && CARGO_TARGET_DIR="$BUILD_DIR/rust-target" cargo build --release >"$T/cargo.log" 2>&1 ) || { tail -30 "$T/cargo.log"; exit 1; }
 cp "$BUILD_DIR/rust-target/release/libhwengine_future.so" "$BUILD_DIR/rust-host/"
 
 log "pas2c with desktop GL"

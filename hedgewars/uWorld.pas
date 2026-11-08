@@ -2265,8 +2265,19 @@ end;
 procedure onFocusStateChanged;
 begin
 {$IFDEF MOBILE}
+// Losing focus pauses the game; getting it back resumes it, but only if the pause came from
+// losing focus (a pause the player chose stays until the pause button or a tap).
 if (not cHasFocus) and (not isPaused) then
+    begin
     ParseCommand('pause', true);
+    cPausedByFocus:= true;
+    end
+else if cHasFocus and cPausedByFocus then
+    begin
+    cPausedByFocus:= false;
+    if isPaused then
+        ParseCommand('pause', true);
+    end;
 // when created SDL receives an exposure event that calls UndampenAudio at full power, muting audio
 exit;
 {$ENDIF}

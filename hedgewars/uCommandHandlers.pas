@@ -655,6 +655,7 @@ end;
 
 procedure chPause(var s: shortstring);
 begin
+cPausedByFocus:= false; // a pause the player asks for is not undone when focus returns
 if (gameType <> gmtNet) or (s = 'server') then
     isPaused:= not isPaused
     else

@@ -194,6 +194,7 @@ var
     cVolumeDownKey  : boolean;
     cMuteToggle     : boolean; // Mute toggle requested
     cHasFocus       : boolean;
+    cPausedByFocus  : boolean; // mobile: the pause was caused by losing focus, so regaining it resumes
     cSafeInsetL, cSafeInsetT, cSafeInsetR, cSafeInsetB: LongInt; // screen pixels kept clear of rounded corners and cut-outs
     cMenuTarget     : GLfloat; // wanted scale of the weapon menu (0: same as the HUD)
     cMenuScale      : GLfloat; // scale the weapon menu is drawn at right now
@@ -3037,6 +3038,7 @@ begin
     cVolumeDownKey  := false;
     cMuteToggle     := false;
     cHasFocus       := true;
+    cPausedByFocus  := false;
     cInactDelay     := 100;
     ReadyTimeLeft   := 0;
 

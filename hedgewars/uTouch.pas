@@ -643,6 +643,9 @@ end;
 
 function isOnCurrentHog(finger: TTouch_Data): boolean;
 begin
+    isOnCurrentHog:= false;
+    if CurrentHedgehog = nil then exit;
+    if CurrentHedgehog^.Gear = nil then exit;
     isOnCurrentHog:= isNearWorldPoint(hwRound(CurrentHedgehog^.Gear^.X), hwRound(CurrentHedgehog^.Gear^.Y), halfRectSize, finger);
 end;
 

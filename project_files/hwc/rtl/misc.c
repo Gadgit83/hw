@@ -87,8 +87,12 @@ astring fpcrtl_strappendA(astring s, char c)
 
 string255 fpcrtl_strprepend(char c, string255 s)
 {
-    uint8_t newlen = s.len < 255 ? s.len + 1 : 255;
-    memmove(s.str + 1, s.str, newlen); // also move '/0'
+    // str has room for 255 characters (str[0..254]). Move at most 254 so the last
+    // byte written is str[254]; the old code moved newlen (up to 255) bytes and wrote
+    // str[255], one past the end of the string, for strings of 254 or more characters.
+    uint8_t moved = s.len < 254 ? s.len : 254;
+    uint8_t newlen = moved + 1;
+    memmove(s.str + 1, s.str, moved);
     s.str[0] = c;
     s.len = newlen;
 

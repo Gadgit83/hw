@@ -260,6 +260,12 @@ const
     shadowint  = $80 shl AShift;
 begin
 
+// ReloadLines can run before the chat was ever drawn (for example "fullscr" on
+// Android right after loading), when the line metrics are still zero. A zero
+// height makes a one pixel high surface and used to overrun it in Surface2Tex.
+if (ClHeight < 1) or (Padding < 1) then
+    AdjustToUIScale();
+
 FreeAndNilTexture(cl.Tex);
 
 font:= GetChatFont(str);

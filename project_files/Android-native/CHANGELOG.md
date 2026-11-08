@@ -12,6 +12,25 @@ Only some builds were put on a phone, so a version below is a build that was mad
 - The engine reports itself as `1.1.0` (was `1.1.0-party`) in its console output.
 - Names that carried the app's branding into the engine are neutral now: the rumble hook is `hw_device_rumble`, the host test defines are `PAS2C_DESKTOP_GL` and `HW_GLES1`, the weapon menu log line starts with `[Touch]`. No change in behaviour.
 
+## 0.3.0-mp1 (100): two phones play through a relay (test build)
+
+Phase 4 of the multi-phone plan (`docs/tv-viewer-plan.md` in https://github.com/Gadgit83/hedgewars-party): any phone can host, a second phone joins by typed address, each phone runs its own engine with its own teams. Experimental; the owner's two-phone test is `docs/multiphone-test.md`. Nothing about local hotseat games changes.
+
+### Added
+
+- **Relay** (`app/.../net/`, plain Java, no Android classes): lobby over TCP with one JSON object per line, engine links with the engine's own length-byte framing, the Hedgewars server's message whitelist and the team-ownership check for hedgehog speech, an in-memory game log with a hash, per-recipient bounded queues with their own writer threads, and the plan's dropout rule: when a phone is lost the relay sends every other engine the unsynced `F<team>` for each of its teams, with no timestamp, never `f`. It also keeps the turn checksums (`N`), the map digest (`M`) and message counts, and sends every phone a report when the game ends. Port 46633.
+- **TV viewer endpoint** in the relay: WebSocket on port 8766 with the framing and behaviour of the e2e-host bridge (tv/e2e-host in hedgewars-party), so the existing TV viewer page connects unchanged. The host screen shows the address. A one-phone host plays through its own relay and the TV can watch it.
+- **Hosting**: `HostService`, a foreground service (type `connectedDevice`, notification channel, Stop action, wake lock and Wi-Fi lock) that runs the relay in the main process, so it survives the game process.
+- **Network screen** (`NetLobbyActivity`, the Network button on the setup screen): Host network game, Join by address, the list of phones and teams, Ready, Start, and the report of the last game to compare between phones.
+- **Launcher network mode** (`hp_ipc.c`): when `files/net.cfg` exists the launcher joins the game through the relay: the IPC reader only queues, a sender thread writes to the relay, a downstream thread writes the relay's frames to the engine. It writes `files/logs/netgame.txt` with every `N` and `M` that crosses the link in either direction and hashes of both streams. Share log includes it.
+- `GameConfig.teamLines` and `GameConfig.forRecipient` (the setup split: shared lines once, per-team blocks, then `TN` and `erdriven` after the teams a phone does not own).
+- Host tests: `scripts/net-test.sh [basic|dropout|stall|solo]` runs the relay on the JVM and real engines as separate phones under Xvfb (`native/host-test/NetHarness.java`).
+
+### Changed
+
+- Version 0.3.0-mp1, versionCode 100. New permissions: foreground service (connected device), notifications, wake lock, Wi-Fi and network state, multicast state (declared for the foreground service type, and for discovery in a later phase).
+- `host-test.sh` takes `HP_TEST_DISPLAY` for the X display (default `:77`).
+
 ## 0.2.0 (6): setup screen and options
 
 The first build with a real game setup. Also gathers the fixes made after the 0.1.4 build.

@@ -3,7 +3,7 @@
 #  1. build tools/pas2c with the system GHC (apt: ghc; no Hackage packages needed)
 #  2. write the config.inc that CMake would normally generate
 #  3. run pas2c with the PAS2C_ANDROID define (selects the MOBILE code paths)
-# Output: host/build/engine-c/*.c|*.h (gitignored) and host/build/engine-c/.engine-stamp.
+# Output: build/engine-c/*.c|*.h (gitignored) and build/engine-c/.engine-stamp, next to this script's directory.
 #
 # Modes:
 #   gen-engine.sh            always regenerate and write the stamp
@@ -20,15 +20,16 @@ P2C_DIR="$BUILD_DIR/pas2c"
 OUT="${OUT_DIR:-$BUILD_DIR/engine-c}"
 STAMP="$OUT/.engine-stamp"
 
-# The key and the stamp are only meaningful for a git checkout: without git every git call below
-# would fail silently and the key would collapse to the hash of this script. Fail hard instead.
+# The engine is the repository this app is part of. The key and the stamp are only meaningful for a git
+# checkout: without git every git call below would fail silently and the key would collapse to the hash
+# of this script (a source tarball is the typical case). Fail hard instead.
 require_git_engine() {
   local top
   top="$(git -C "$HW_ENGINE_DIR" rev-parse --show-toplevel 2>/dev/null)" || top=""
   # the directory must be the root of its own checkout, not a plain copy inside some other repository
   if [ -z "$top" ] || [ "$(cd "$top" && pwd -P)" != "$(cd "$HW_ENGINE_DIR" && pwd -P)" ]; then
     echo "ENGINE CHECKOUT IS NOT A GIT REPOSITORY: $HW_ENGINE_DIR" >&2
-    echo "The engine C cannot be checked against it. Point HW_ENGINE_DIR at a git checkout of the engine (host/scripts/fetch-deps.sh creates one)." >&2
+    echo "The engine C cannot be checked against it. Build from a git clone of https://github.com/Gadgit83/hw (branch android-master), not from a source archive." >&2
     return 1
   fi
 }
@@ -62,7 +63,7 @@ case "$MODE" in
   --check)
     if stamp_matches; then echo "engine C in $OUT matches engine $(engine_head | cut -c1-9)"; exit 0; fi
     echo "STALE ENGINE C: $OUT was not generated from the current engine checkout ($HW_ENGINE_DIR at $(engine_head | cut -c1-9))." >&2
-    echo "Run host/scripts/gen-engine.sh (or host/scripts/build-apk.sh) to regenerate it before building." >&2
+    echo "Run project_files/Android-native/scripts/gen-engine.sh (or build-apk.sh) to regenerate it before building." >&2
     exit 1 ;;
   --ensure)
     if stamp_matches; then echo "engine C is up to date ($(engine_head | cut -c1-9))"; exit 0; fi

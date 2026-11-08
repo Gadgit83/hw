@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Build the engine's Rust library (map generator, AI helpers) for Android with cargo.
 # Needs: rustup targets aarch64-linux-android / x86_64-linux-android and the NDK.
-# The workspace is copied to host/build/rust-src first so no Cargo.lock lands in the engine checkout.
+# The workspace is copied to build/rust-src first so no Cargo.lock lands in the engine checkout.
 . "$(dirname "$0")/common.sh"
 command -v cargo >/dev/null || { echo "cargo not found"; exit 1; }
 SRC="$BUILD_DIR/rust-src"

@@ -4,10 +4,16 @@ plugins {
 
 // ABIs to build; override with -Pabis=arm64-v8a (or "arm64-v8a,x86_64").
 def abis = (project.findProperty('abis') ?: 'arm64-v8a,x86_64').split(',').collect { it.trim() }
-def sdlJava = file('../third_party/SDL/android-project/app/src/main/java')
+// Where things live. The engine is the repository this directory belongs to (../.. from the Gradle root);
+// third_party/ (the SDL2 clones) and build/ (generated inputs) can be redirected with the same environment
+// variables the scripts use (THIRD_PARTY, BUILD_DIR, HW_ENGINE_DIR).
+def engineDir = new File(System.getenv('HW_ENGINE_DIR') ?: new File(rootDir, '../..').path).canonicalFile
+def thirdParty = new File(System.getenv('THIRD_PARTY') ?: new File(rootDir, 'third_party').path).canonicalFile
+def genDir = new File(System.getenv('BUILD_DIR') ?: new File(rootDir, 'build').path).canonicalFile
+def sdlJava = new File(thirdParty, 'SDL/android-project/app/src/main/java')
 
 // Build information for the About page and the log report: the engine and app commits this APK is built from.
-// Read straight from git at configuration time (the engine checkout is HW_ENGINE_DIR or ../upstream/hw).
+// Read straight from git at configuration time (the engine and the app are one repository).
 def gitOut = { File dir, String... a ->
     try {
         def p = new ProcessBuilder(['git', '-C', dir.absolutePath] + a.toList()).redirectErrorStream(true).start()
@@ -18,14 +24,13 @@ def gitOut = { File dir, String... a ->
         return ''
     }
 }
-def engineDir = new File(System.getenv('HW_ENGINE_DIR') ?: new File(rootDir, '../upstream/hw').path)
 def engineCommit = gitOut(engineDir, 'rev-parse', '--short=9', 'HEAD') ?: 'unknown'
 def engineBranch = gitOut(engineDir, 'rev-parse', '--abbrev-ref', 'HEAD') ?: 'unknown'
 if (engineCommit != 'unknown' && !gitOut(engineDir, 'status', '--porcelain', '--untracked-files=no', '--', 'hedgewars', 'tools/pas2c').isEmpty()) {
     engineCommit += '+local changes'
 }
 def appCommit = gitOut(rootDir, 'rev-parse', '--short=9', 'HEAD') ?: 'unknown'
-if (appCommit != 'unknown' && !gitOut(rootDir, 'status', '--porcelain', '--untracked-files=no').isEmpty()) {
+if (appCommit != 'unknown' && !gitOut(rootDir, 'status', '--porcelain', '--untracked-files=no', '--', '.').isEmpty()) {
     appCommit += '+local changes'
 }
 
@@ -54,7 +59,11 @@ android {
                 arguments '-DANDROID_STL=c++_static',
                           '-DCMAKE_BUILD_TYPE=Release',
                           '-DCMAKE_C_FLAGS_RELEASE=-O2 -DNDEBUG',
-                          '-DCMAKE_SHARED_LINKER_FLAGS=-Wl,-z,max-page-size=16384'
+                          '-DCMAKE_SHARED_LINKER_FLAGS=-Wl,-z,max-page-size=16384',
+                          "-DHP_ENGINE_SRC=${engineDir}",
+                          "-DHP_THIRD_PARTY=${thirdParty}",
+                          "-DHP_ENGINE_C=${genDir}/engine-c",
+                          "-DHP_RUST_DIR=${genDir}/rust"
             }
         }
     }
@@ -70,9 +79,9 @@ android {
         // SDLActivity and friends come straight from the SDL checkout (not copied into this repo).
         java.srcDirs += sdlJava
         // Trimmed game data staged by scripts/stage-assets.sh.
-        assets.srcDirs += file('../build/assets')
+        assets.srcDirs += new File(genDir, 'assets')
         // libhwengine_future.so per ABI, built by scripts/build-rust.sh.
-        jniLibs.srcDirs += file('../build/rust')
+        jniLibs.srcDirs += new File(genDir, 'rust')
     }
 
     androidResources {
@@ -110,14 +119,14 @@ tasks.matching { it.name == 'preBuild' }.configureEach { dependsOn 'checkEngineC
 tasks.matching { it.name == 'preBuild' }.configureEach {
     doFirst {
         def missing = []
-        if (!file('../third_party/SDL/android-project').exists()) missing << 'third_party (scripts/fetch-deps.sh)'
-        if (!file('../build/engine-c/hwengine.c').exists()) missing << 'build/engine-c (scripts/gen-engine.sh)'
-        if (!file('../build/assets/Data').exists()) missing << 'build/assets (scripts/stage-assets.sh)'
+        if (!new File(thirdParty, 'SDL/android-project').exists()) missing << 'third_party (scripts/fetch-deps.sh)'
+        if (!new File(genDir, 'engine-c/hwengine.c').exists()) missing << 'build/engine-c (scripts/gen-engine.sh)'
+        if (!new File(genDir, 'assets/Data').exists()) missing << 'build/assets (scripts/stage-assets.sh)'
         abis.each { abi ->
-            if (!file("../build/rust/${abi}/libhwengine_future.so").exists()) missing << "build/rust/${abi} (scripts/build-rust.sh)"
+            if (!new File(genDir, "rust/${abi}/libhwengine_future.so").exists()) missing << "build/rust/${abi} (scripts/build-rust.sh)"
         }
         if (!missing.isEmpty()) {
-            throw new GradleException("Missing generated inputs: ${missing.join(', ')}. Run host/scripts/build-apk.sh, or the listed scripts first.")
+            throw new GradleException("Missing generated inputs: ${missing.join(', ')}. Run project_files/Android-native/scripts/build-apk.sh, or the listed scripts first.")
         }
     }
 }

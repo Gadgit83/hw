@@ -1,10 +1,10 @@
-# Native build of Hedge Party: SDL2 family + PhysFS + Lua + pas2c engine + launcher.
+# Native build of the Android app: SDL2 family + PhysFS + Lua + pas2c engine + launcher.
 # Driven by Gradle (externalNativeBuild) or directly with the NDK toolchain file.
 cmake_minimum_required(VERSION 3.22)
-project(hedgeparty C)
+project(hedgewars_native C)
 
 set(HP_THIRD_PARTY "${CMAKE_CURRENT_SOURCE_DIR}/../third_party" CACHE PATH "SDL2 family sources")
-set(HP_ENGINE_SRC  "${CMAKE_CURRENT_SOURCE_DIR}/../../upstream/hw" CACHE PATH "Engine fork checkout")
+set(HP_ENGINE_SRC  "${CMAKE_CURRENT_SOURCE_DIR}/../../.." CACHE PATH "Engine checkout (the repository root)")
 set(HP_ENGINE_C    "${CMAKE_CURRENT_SOURCE_DIR}/../build/engine-c" CACHE PATH "pas2c output")
 set(HP_RUST_DIR    "${CMAKE_CURRENT_SOURCE_DIR}/../build/rust" CACHE PATH "libhwengine_future.so per ABI")
 

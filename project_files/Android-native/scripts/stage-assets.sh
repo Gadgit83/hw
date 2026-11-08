@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Stage a trimmed copy of the game data for packaging (host/build/assets/Data).
+# Stage a trimmed copy of the game data for packaging (build/assets/Data).
 # Nothing from the engine checkout is committed to this repository.
 #   HP_MUSIC=lite|full|none   music tracks to keep (default lite: a handful of tracks)
 #   HP_LOCALES=en|all         locale files to keep (default en)

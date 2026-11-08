@@ -1,0 +1,10 @@
+# Generated or downloaded by the build scripts and Gradle
+/build/
+/third_party/
+/.gradle/
+/.cxx/
+/app/build/
+/app/.cxx/
+/local.properties
+*.apk
+*.aab

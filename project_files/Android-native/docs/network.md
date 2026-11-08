@@ -1,12 +1,12 @@
 # Network play: what exists and what could be reused
 
-This is a survey, written while building the 0.2.0 setup screen, of what Hedgewars already has for network play, so that a party mode or a network mode is designed on what exists. Nothing here is built into Hedge Party. Paths are in the engine checkout (https://github.com/Gadgit83/hw, branch `android-master`, which is upstream master plus the Android commits; the checkout is `upstream/hw` here) unless they start with `host/` or `docs/`, and each was checked to exist when this was written. Where something is a reading of the code and was not run, it says so.
+This is a survey, written while building the 0.2.0 setup screen, of what Hedgewars already has for network play, so that a party mode or a network mode is designed on what exists. Nothing here is built into the app. Paths are relative to the repository root (https://github.com/Gadgit83/hw, branch `android-master`, which is upstream master plus the Android commits and this app) unless they start with `project_files/Android-native/`, and each was checked to exist when this was written. Where something is a reading of the code and was not run, it says so.
 
-## Where Hedge Party stands
+## Where the app stands
 
 - The app is hotseat only. One phone runs the engine, all teams play on that phone, and computer teams are played by the engine's AI.
-- The engine runs as a client of a local IPC socket on 127.0.0.1. The launcher (`host/native/launcher/hp_ipc.c`) stands in for the Qt frontend on that socket and serves the game setup from `files/game.ipc`.
-- SDL2_net is linked only because the engine uses it for that local IPC socket (`host/native/CMakeLists.txt`). The app does not open any other connection. (The manifest requests `INTERNET`, which Android requires for any socket, loopback included.)
+- The engine runs as a client of a local IPC socket on 127.0.0.1. The launcher (`project_files/Android-native/native/launcher/hp_ipc.c`) stands in for the Qt frontend on that socket and serves the game setup from `files/game.ipc`.
+- SDL2_net is linked only because the engine uses it for that local IPC socket (`project_files/Android-native/native/CMakeLists.txt`). The app does not open any other connection. (The manifest requests `INTERNET`, which Android requires for any socket, loopback included.)
 - There is no LAN play and no way to find or join another device. Without a relay server of some kind, none of the below works: Hedgewars network games are always client, server, client; two engines never talk to each other directly.
 
 ## How a Hedgewars network game works

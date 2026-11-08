@@ -1,8 +1,8 @@
-# Hedge Party host (native Android)
+# Hedgewars for Android (native)
 
 A native Android build of the Hedgewars engine, with no WebView and no WebAssembly. The Pascal engine is transpiled to C with the upstream `pas2c` tool, compiled with the NDK's clang and run on SDL2. A Java setup screen starts a local hotseat game with two to eight teams, humans or computers, played with the engine's own touch interface.
 
-This is the first step of the party app described in the top-level `README.md`. For now it plays a game on the phone. The lobby, the hub for controller phones and the picture for the TV are not built; the seams for them are marked below, and `../docs/network.md` records what Hedgewars already has for network play.
+This directory is `project_files/Android-native` of https://github.com/Gadgit83/hw, branch `android-master` (upstream Hedgewars master plus the Android changes to the engine). The app is built from the engine in the same checkout, so a change to the engine and the change to the app that needs it travel in one commit. The release builds are named **Hedge Party** (application id `party.hedge.host`); both name and id are build properties, see [App identity](#app-identity). The party mode that the name stands for (a host phone, controller phones, a TV) lives in https://github.com/Gadgit83/hedgewars-party; this app is its host side and, for now, plays a game on the phone. `docs/network.md` records what Hedgewars already has for network play.
 
 Contents: [User guide](#user-guide), [Troubleshooting](#troubleshooting), [Architecture](#architecture), [Build guide](#build-guide), [Verification](#verification-done), [Source layout](#source-layout), [Licence and source offer](#licence-and-source-offer).
 
@@ -11,7 +11,7 @@ Contents: [User guide](#user-guide), [Troubleshooting](#troubleshooting), [Archi
 ### Install
 
 ```
-adb install -r host/app/build/outputs/apk/debug/app-debug.apk
+adb install -r project_files/Android-native/app/build/outputs/apk/debug/app-debug.apk
 ```
 
 or copy the APK to the phone and open it (allow installs from that source when asked). Minimum Android 7.0 (API 24), landscape only, OpenGL ES 1.1 (the engine's mobile renderer; a driver that no longer provides it would fail to start the game). The debug APK is signed with the debug key and is for sideloading only. It is about 100 MB because the game data is inside; see [Size](#size).
@@ -105,7 +105,7 @@ Losing focus (home button, notification shade, phone call) pauses the game and g
 - Rendering uses OpenGL ES 1.1 as in the engine's mobile code path. Performance on low end devices is unmeasured.
 - Effects and music are two levels relative to the master volume; the engine has no separate hardware volume for them.
 - The first start unpacks the data, and the data is stored twice (APK and internal storage).
-- Debug signed APK only. A release build needs a keystore.
+- Debug signed APK only. A release build needs a keystore (see [Releases](#releases)).
 - Not yet checked on a device: see [Verification](#verification-done).
 
 ## Troubleshooting
@@ -122,7 +122,7 @@ Losing focus (home button, notification shade, phone call) pauses the game and g
 
 **A team of computers does nothing.** They play after the map has loaded, when their turn comes. If a game was left running for a long time, the log (Share log) shows lines such as `engine command 'A' (attack start)` for every attack, jump and turn end that the computer made.
 
-**Adb users:** the log tags are `HedgeParty` (launcher and app) and `HW_Engine` (the engine's own output). `adb logcat -s HedgeParty HW_Engine`.
+**Adb users:** the log tags are `HWNative` (launcher and app) and `HW_Engine` (the engine's own output). `adb logcat -s HWNative HW_Engine`.
 
 ## Architecture
 
@@ -209,42 +209,56 @@ Gradle itself is fetched by the committed wrapper (8.14.3, Android Gradle Plugin
 ### From a fresh checkout to an APK
 
 ```
-git clone https://github.com/Gadgit83/hedgewars-party.git
-cd hedgewars-party
-host/scripts/build-apk.sh                 # arm64-v8a and x86_64
-ABIS=arm64-v8a host/scripts/build-apk.sh  # phone only, smaller APK
+git clone -b android-master https://github.com/Gadgit83/hw.git
+cd hw/project_files/Android-native
+scripts/build-apk.sh                 # arm64-v8a and x86_64
+ABIS=arm64-v8a scripts/build-apk.sh  # phone only, smaller APK
 ```
 
-It runs these steps, which can also be run on their own:
+It runs these steps, which can also be run on their own (all paths below are relative to `project_files/Android-native`; the engine is the repository root, `../..`):
 
-1. `fetch-deps.sh` clones the engine fork (`HW_ENGINE_REPO`, branch `HW_ENGINE_BRANCH`, default `Gadgit83/hw` branch `android-master`, into `upstream/hw` or `HW_ENGINE_DIR`) and the SDL2 family at the tags pinned in `versions.env`, into `host/third_party`. Everything is a `git clone`, no archive downloads.
-2. `gen-engine.sh` builds pas2c with GHC and transpiles the engine to `host/build/engine-c`.
+1. `fetch-deps.sh` clones the SDL2 family at the tags pinned in `versions.env` into `third_party/`. Everything is a `git clone`, no archive downloads. To share one cache between several checkouts set `THIRD_PARTY=/some/dir` (the scripts and Gradle both honour it); clones that are already there are used as they are.
+2. `gen-engine.sh` builds pas2c with GHC and transpiles the engine in this checkout to `build/engine-c`.
 3. `build-rust.sh` builds `libhwengine_future.so` with cargo for each ABI (the Rust workspace is synced with `rsync --delete` first, so stale files from an earlier engine revision cannot linger).
-4. `stage-assets.sh` stages the trimmed game data in `host/build/assets`.
-5. `./gradlew assembleDebug` compiles the native code through CMake and packages the APK. When `host/build` is already populated it can be run directly from `host/` (`-Pabis=arm64-v8a` limits the ABIs).
+4. `stage-assets.sh` stages the trimmed game data in `build/assets`.
+5. `./gradlew assembleDebug` compiles the native code through CMake and packages the APK. When `build/` is already populated it can be run directly from this directory (`-Pabis=arm64-v8a` limits the ABIs).
 
-Output: `host/app/build/outputs/apk/debug/app-debug.apk`.
+Output: `app/build/outputs/apk/debug/app-debug.apk`.
+
+#### App identity
+
+The defaults are the Hedge Party release (`party.hedge.host`, so an installed app keeps updating). To build the same sources under another name and id:
+
+```
+./gradlew -PappId=org.example.hedgewars -PappName=Hedgewars -PsourceUrl=https://example.org/source assembleDebug
+```
+
+`appName` is the launcher label and the name shown inside the app and in the log report, `sourceUrl` is the link under Options, Advanced, Licence and source. Two builds with different ids install side by side.
+
+#### Releases
+
+A release is a tag on `android-master` in https://github.com/Gadgit83/hw with the APK attached; the APK is the one built as above from that tag (`-PengineStale=fail`, see below). Until a release keystore exists the APK is signed with the builder's debug key, so updates over an installed build only work when it was signed with the same key.
 
 A release style build, as used for the 0.2.0 APK:
 
 ```
 export ANDROID_HOME=~/android-sdk
-cd host
+cd project_files/Android-native
 ./gradlew --offline clean
 ./gradlew --offline -PengineStale=fail -Pabis=arm64-v8a,x86_64 assembleDebug
 ```
 
-Build from clean (`./gradlew clean`, or delete `host/app/build/outputs/apk` and the packaging intermediates): Android Gradle Plugin can package incrementally in place and leave unreferenced holes in the APK. Check the result with a zip walk (entry data should account for nearly the whole file) and with `apksigner verify --print-certs`.
+Build from clean (`./gradlew clean`, or delete `app/build/outputs/apk` and the packaging intermediates): Android Gradle Plugin can package incrementally in place and leave unreferenced holes in the APK. Check the result with a zip walk (entry data should account for nearly the whole file) and with `apksigner verify --print-certs`.
 
 ### Stale engine C guard
 
-`gen-engine.sh` writes `host/build/engine-c/.engine-stamp` with the engine commit and a key hash of everything pas2c reads: the committed trees of `hedgewars/` and `tools/pas2c`, the uncommitted `git diff`, untracked files there, `gen-engine.sh` itself and `EXTRA_DEFS`. Every Gradle build runs the `checkEngineC` task before `preBuild`, which calls `gen-engine.sh --ensure`: if the stamp does not match the current engine checkout (or is missing) the C is regenerated (needs GHC), otherwise nothing happens. `./gradlew -PengineStale=fail assembleDebug` fails with a `STALE ENGINE C` message instead of regenerating. CMake repeats the check at configure time (`gen-engine.sh --check`, skip with `-DHP_SKIP_ENGINE_CHECK=ON`), the stamp is a configure dependency and the generated `.c` files are globbed with `CONFIGURE_DEPENDS`, so a regeneration is rebuilt by ninja. `gen-engine.sh --check` can also be run by hand. The host test output (`engine-c-host`) is generated separately and always regenerated by `host-test.sh`.
+`gen-engine.sh` writes `build/engine-c/.engine-stamp` with the commit of this checkout and a key hash of everything pas2c reads: the committed trees of `hedgewars/` and `tools/pas2c`, the uncommitted `git diff`, untracked files there, `gen-engine.sh` itself and `EXTRA_DEFS`. Changes elsewhere in the repository (the Java app, the Qt frontend) do not count, as pas2c does not read them. Every Gradle build runs the `checkEngineC` task before `preBuild`, which calls `gen-engine.sh --ensure`: if the stamp does not match the current engine checkout (or is missing) the C is regenerated (needs GHC), otherwise nothing happens. `./gradlew -PengineStale=fail assembleDebug` fails with a `STALE ENGINE C` message instead of regenerating. CMake repeats the check at configure time (`gen-engine.sh --check`, skip with `-DHP_SKIP_ENGINE_CHECK=ON`), the stamp is a configure dependency and the generated `.c` files are globbed with `CONFIGURE_DEPENDS`, so a regeneration is rebuilt by ninja. `gen-engine.sh --check` can also be run by hand. The host test output (`engine-c-host`) is generated separately and always regenerated by `host-test.sh`.
 
-The guard needs a git checkout of the engine: if `HW_ENGINE_DIR` is not the root of a git repository, `gen-engine.sh` (any mode) stops with `ENGINE CHECKOUT IS NOT A GIT REPOSITORY` and exit status 3 instead of computing a meaningless key, and a key that cannot be computed never counts as a match.
+The guard needs a git checkout: if the repository root (or `HW_ENGINE_DIR`, when you point the build at another checkout) is not the root of a git repository, as with an unpacked source archive, `gen-engine.sh` (any mode) stops with `ENGINE CHECKOUT IS NOT A GIT REPOSITORY` and exit status 3 instead of computing a meaningless key, and a key that cannot be computed never counts as a match. Build from a clone.
 
-Deliberate escape hatches, for working on the build itself and not for releases: `./gradlew -x checkEngineC ...` skips the Gradle check, and the CMake option `-DHP_SKIP_ENGINE_CHECK=ON` (a CMake cache variable, for example through the module's `externalNativeBuild` arguments, not an environment variable) skips the CMake one. Both package whatever C is in `host/build/engine-c`, stale or not. Release builds use `-PengineStale=fail` and neither hatch.
+Deliberate escape hatches, for working on the build itself and not for releases: `./gradlew -x checkEngineC ...` skips the Gradle check, and the CMake option `-DHP_SKIP_ENGINE_CHECK=ON` (a CMake cache variable, for example through the module's `externalNativeBuild` arguments, not an environment variable) skips the CMake one. Both package whatever C is in `build/engine-c`, stale or not. Release builds use `-PengineStale=fail` and neither hatch.
 
-The engine commit and the app commit of a build are written into `BuildConfig` and shown in Options, Advanced, About ("+local changes" is added when the checkout had uncommitted changes).
+The commit of a build is written into `BuildConfig` (as the engine commit and the app source commit, which are the same repository) and shown in Options, Advanced, About ("+local changes" is added when the checkout had uncommitted changes).
 
 ### Host tests
 
@@ -262,7 +276,7 @@ No device is needed for these.
 | `HP_TEST_RESTORE=1,3,6,14` | Post `SDL_WINDOWEVENT_RESTORED` at those seconds; the phone sends it right after start-up and after every pause, and the engine answers with `fullscr`, which reloads the video state, the chat lines and every texture |
 | `HP_TEST_SCRIPT` | Timed input injection (touch, focus lost or gained and so on), see `native/host-test/hp_host_main.c` |
 | `HP_TEST_ARGS` | Extra engine options, e.g. `--ui-scale 240 --inset-left 80 --inset-top 40` |
-| `HP_TEST_SHOTS` | Seconds after the start at which extra screenshots `host/build/host-test/shot_<n>.png` are taken |
+| `HP_TEST_SHOTS` | Seconds after the start at which extra screenshots `build/host-test/shot_<n>.png` are taken |
 | `HP_TEST_SIZE` | Window size, e.g. `2340x1080` (default 1280x720) |
 | `HP_TEST_SOUND=1` | Run with sound on, using the SDL dummy audio driver, instead of off |
 
@@ -306,12 +320,12 @@ Most of it is game data (112 MB staged, compressed little because the images and
 | `scripts/` | Reproducible build steps, `gen-schemes.py`, `config-test.sh`, `host-test.sh` |
 | `third_party/`, `build/` | Downloaded and generated, gitignored |
 
-The engine changes (pas2c friendly constructs, the `PAS2C_ANDROID` define, GLES 1.1 context, SDL2_mixer binding fixes, two small changes that pas2c needs for current upstream, the touch HUD, the sound level options and the rumble hook) are commits on branch `android-master` of https://github.com/Gadgit83/hw, which is upstream master plus those commits. They are not patch files and no upstream code is committed here. The engine therefore tracks upstream master (see `../docs/decisions.md`, D2). The older branch `android-legacy-1bbc396` of https://github.com/Gadgit83/hw (base `1bbc396d3`, the commit WebWars also uses) is kept as a fallback and is no longer used by the scripts by default. It can still be built by setting `HW_ENGINE_BRANCH=android-legacy-1bbc396`.
+The engine changes (pas2c friendly constructs, the `PAS2C_ANDROID` define, GLES 1.1 context, SDL2_mixer binding fixes, two small changes that pas2c needs for current upstream, the touch HUD, the sound level options and the rumble hook) are ordinary commits on `android-master`, which is upstream Hedgewars master plus those commits and this directory. `git log master..android-master` lists them; `master` follows upstream. The branch `upstream-android` of the same repository holds the same work cut into a series that is meant for an upstream pull request (see its commit messages).
 
 Because the Rust library now owns the `hwFloat` fixed-point maths, collision tests and gear checksums, the simulation is the same code as upstream's, which keeps replays and determinism in line with desktop Hedgewars. The pas2c C code calls it through ordinary function calls into `libhwengine_future.so`. These calls cannot be inlined across the library boundary: a microbenchmark on an x86_64 desktop measured about 3 ns per `hwFloat` operation (multiply plus add pair: 6.3 ns). Not measured: engine frame times on a phone.
 
 ## Licence and source offer
 
-The engine is Hedgewars, GPL version 2 (art and sound GFDL, see `Data/COPYING` and `Data/CREDITS` inside the APK, also reachable from Options, Advanced). SDL2 and its satellite libraries are zlib licensed, stb_vorbis is public domain, FreeType is under the FreeType licence, PhysFS is zlib licensed, Lua is MIT licensed.
+The engine is Hedgewars, GPL version 2 (art and sound GFDL, see `Data/COPYING` and `Data/CREDITS` inside the APK, also reachable from Options, Advanced). SDL2 and its satellite libraries are zlib licensed, stb_vorbis is public domain, FreeType is under the FreeType licence, PhysFS is zlib licensed, Lua is MIT licensed. The Java app, the launcher and the build scripts in this directory are part of the repository and under its licence, the GPL version 2 (`COPYING` in the repository root).
 
-Because the APK ships GPL code, the corresponding source must be offered to everyone who receives it. The engine source, including the changes made for this port, is the `android-master` branch of https://github.com/Gadgit83/hw. The Android app, launcher and build scripts are in https://github.com/Gadgit83/hedgewars-party. Both links are in the app (Options, Advanced). The app is named Hedge Party and does not use the Hedgewars name or logo.
+Because the APK ships GPL code, the corresponding source must be offered to everyone who receives it. For a Hedge Party APK the corresponding source is this repository at the commit shown under Options, Advanced, About: https://github.com/Gadgit83/hw, branch `android-master` (engine, the changes made for this port, the app, the launcher and the build scripts in one place). The link is in the app (Options, Advanced). The release app is named Hedge Party and does not use the Hedgewars name or logo; a build under another name is set with `-PappName` (see [App identity](#app-identity)), and anyone distributing a derivative must respect the same rule.

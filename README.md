@@ -110,6 +110,16 @@ See the `INSTALL.md` file.
 
 Or see our wiki at <https://hedgewars.org/kb/BuildingHedgewars>.
 
+Android (native)
+----------------
+This branch carries a native Android app in `project_files/Android-native`: the
+engine is transpiled to C with `tools/pas2c` and run on SDL2 with the engine's
+touch controls, with a game setup screen written for phones. It builds from this
+checkout. See `project_files/Android-native/README.md` for the user guide, the
+build guide and the licence and source notice. Releases of the app (Hedge Party)
+are tagged on the `android-master` branch of <https://github.com/Gadgit83/hw>.
+The older port in `project_files/Android-build` is unmaintained; only its touch button artwork is used.
+
 Source code
 -----------
 Our main repository is located at <https://hg.hedgewars.org/hedgewars/> using

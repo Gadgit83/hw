@@ -136,6 +136,10 @@ public class MainActivity extends Activity {
         topBar.addView(tabs.view, Ui.lp(ui.dp(380), ViewGroup.LayoutParams.WRAP_CONTENT));
         LinearLayout optionsBox = new LinearLayout(this);
         optionsBox.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
+        optionsBox.addView(ui.button("Network", false, v -> {
+            saveModel();
+            startActivity(new Intent(this, NetLobbyActivity.class));
+        }), ui.margins(Ui.lp(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT), 0, 0, 8, 0));
         optionsBox.addView(ui.button("Options", false, v -> startActivity(new Intent(this, OptionsActivity.class))));
         topBar.addView(optionsBox, ui.weight(1f));
         root.addView(topBar);
@@ -757,6 +761,7 @@ public class MainActivity extends Activity {
         try {
             List<String> lines = GameConfig.build(model, data, new Random());
             GameConfig.write(new File(getFilesDir(), "game.ipc"), lines);
+            new File(getFilesDir(), "net.cfg").delete();       // a local game: no relay link (see NetLobbyActivity)
         } catch (Exception e) {
             status.setText("Could not write the game setup: " + e);
             return;

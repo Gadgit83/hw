@@ -396,6 +396,9 @@ final class Diag {
         section(sb, "Game setup sent to the engine (files/game.ipc)", readTail(ipc, 16 * 1024));
         sb.append("Game marker present: ").append(previousGameUnclean(c)).append('\n');
 
+        section(sb, "Network game on this phone (files/net.cfg present: " + new File(c.getFilesDir(), "net.cfg").exists()
+                + ", hosting: " + NetSession.hosting + ", joined: " + NetSession.joined + ", target: " + NetSession.target + ")",
+                NetDiag.report(c));
         section(sb, "Last error", readTail(new File(dir, LAST_ERROR), 4000));
         section(sb, "Recent process exits", exitReasons(c));
         section(sb, "Native crash of the game process (tombstone)", nativeTombstone(c));

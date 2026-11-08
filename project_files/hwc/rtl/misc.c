@@ -3,6 +3,7 @@
 #include <stdarg.h>
 #include <string.h>
 #include <assert.h>
+#include <stdint.h>
 
 char strbuf[512];
 
@@ -228,3 +229,10 @@ void fpcrtl_glShaderSource(GLuint shader, GLsizei count,/* const dropped for pas
     glShaderSource(shader, count, (const char * const *)string, length);
 }
 #endif
+
+// The engine calls this device hook (uUtils.pas, PAS2C builds only). Frontends that can vibrate, such as the
+// Android launcher, provide a strong definition that replaces this no-op; other builds need it to link.
+__attribute__((weak)) void hw_device_rumble(int32_t ms)
+{
+    (void)ms;
+}

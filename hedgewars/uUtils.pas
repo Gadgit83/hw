@@ -115,6 +115,9 @@ procedure AudioServicesPlaySystemSound(num: LongInt); cdecl; external;
 function  sanitizeForLog(s: shortstring): shortstring;
 function  sanitizeCharForLog(c: char): shortstring;
 
+// Short vibration of the device (mobile builds only; a no-op elsewhere). Presentation only.
+procedure DeviceRumble(ms: LongInt);
+
 procedure initModule(isNotPreview: boolean);
 procedure freeModule;
 
@@ -836,6 +839,22 @@ begin
         pfsClose(f);
         f:= nil;
         end;
+end;
+
+{$IFDEF PAS2C}
+const HedgePartyLibName = 'hedgeparty';
+
+// provided by the Android launcher (host/native/launcher/hp_main.c)
+procedure hp_rumble(ms: LongInt); cdecl; external HedgePartyLibName;
+{$ENDIF}
+
+procedure DeviceRumble(ms: LongInt);
+begin
+{$IFDEF PAS2C}
+    hp_rumble(ms);
+{$ELSE}
+    ms:= ms; // avoid compiler hint
+{$ENDIF}
 end;
 
 procedure initModule(isNotPreview: boolean);

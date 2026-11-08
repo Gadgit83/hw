@@ -891,6 +891,8 @@ with mobileRecord do
     if (performRumble <> nil) and (not fastUntilLag) then
         performRumble(kSystemSoundID_Vibrate);
 {$ENDIF}
+if not fastUntilLag then
+    DeviceRumble(40);
 end;
 
 procedure doStepChunk(Gear: PVisualGear; Steps: Longword);

@@ -44,11 +44,11 @@ DATA="$BUILD_DIR/assets/Data"
 java -cp "$T/cfg" GenConfig "$T/game.ipc" "$DATA" 4242 "${HP_TEST_SCENARIO:-two}"
 
 log "run for ${SECS}s under Xvfb"
-export DISPLAY=:77
+export DISPLAY="${HP_TEST_DISPLAY:-:77}"
 [ -n "${HP_TEST_SOUND:-}" ] && export SDL_AUDIODRIVER=dummy
 export ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=0:abort_on_error=0:halt_on_error=1}"
 SIZE="${HP_TEST_SIZE:-1280x720}"; SW="${SIZE%x*}"; SH="${SIZE#*x}"
-Xvfb :77 -screen 0 ${SIZE}x24 >/dev/null 2>&1 &
+Xvfb "$DISPLAY" -screen 0 ${SIZE}x24 >/dev/null 2>&1 &
 XP=$!
 sleep 1
 "$B/hp_hosttest" "$DATA" "$T/user" "$T/game.ipc" "$SW" "$SH" >"$T/engine.log" 2>&1 &

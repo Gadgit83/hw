@@ -1027,10 +1027,17 @@ begin
     else
         ZoomValue:= zoom;
 
+{$IFDEF MOBILE}
+    // the camera can be dragged while paused
+    if (not isAFK) and (GameType <> gmtRecord) then
+        MoveCamera
+{$ELSE}
     if (not isPaused) and (not isAFK) and (GameType <> gmtRecord) then
         MoveCamera
     else if (isPaused) then
-        CameraBounds;
+        CameraBounds
+{$ENDIF}
+    ;
 
     if cStereoMode = smNone then
         begin

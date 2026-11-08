@@ -110,5 +110,13 @@ set_target_properties(hwengine_c PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 # ---- libmain.so: SDL_main entry + in-process IPC server -----------------------
 add_library(main SHARED launcher/hp_main.c launcher/hp_ipc.c)
+# Insurance, same idea as for Lua: pas2c strings are 255-byte records addressed through a
+# pointer to a 256-byte union (len + str[255]) and the generated code treats them as one
+# object, so bionic's FORTIFY object-size checks can abort on perfectly valid accesses
+# (and on struct hacks like Lua's TString). Switch FORTIFY off for the code we generate or
+# wrote (launcher, pas2c engine, fpcrtl); PhysFS, SDL and FreeType keep it.
+foreach(t main hwengine_c fpcrtl)
+  target_compile_options(${t} PRIVATE -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0)
+endforeach()
 target_link_libraries(main PRIVATE hwengine_c SDL2::SDL2 GLESv1_CM log m dl)
 target_link_options(main PRIVATE -Wl,--no-undefined)

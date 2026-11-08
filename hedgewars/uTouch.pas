@@ -39,7 +39,7 @@ function convertToCursorX(x: LongInt): LongInt;
 function convertToCursorY(y: LongInt): LongInt;
 
 function addFinger(x,y: Longword; id: TSDL_FingerId): PTouch_Data;
-function updateFinger(x,y,dx,dy: Longword; id: TSDL_FingerId): PTouch_Data;
+function updateFinger(x,y,dx,dy: LongInt; id: TSDL_FingerId): PTouch_Data;
 procedure deleteFinger(id: TSDL_FingerId);
 
 procedure onTouchClick(finger: TTouch_Data);
@@ -89,7 +89,8 @@ var
 procedure onTouchDown(x, y: Single; pointerId: TSDL_FingerId);
 var
     finger: PTouch_Data;
-    xr, yr, tmp: LongWord;
+    xr, yr: LongInt;
+    tmp: LongWord;
 begin
 xr:= round(x * cScreenWidth);
 yr:= round(y * cScreenHeight);
@@ -209,7 +210,7 @@ procedure onTouchMotion(x, y, dx, dy: Single; pointerId: TSDL_FingerId);
 var
     finger, secondFinger: PTouch_Data;
     currentPinchDelta, zoom : Single;
-    xr, yr, dxr, dyr: LongWord;
+    xr, yr, dxr, dyr: LongInt;
 begin
 xr:= round(x * cScreenWidth);
 yr:= round(y * cScreenHeight);
@@ -259,7 +260,7 @@ procedure onTouchUp(x,y: Single; pointerId: TSDL_FingerId);
 var
     finger: PTouch_Data;
     widget: POnScreenWidget;
-    xr, yr: LongWord;
+    xr, yr: LongInt;
 begin
 xr:= round(x * cScreenWidth);
 yr:= round(y * cScreenHeight);
@@ -399,7 +400,7 @@ addFinger:= @fingers[pointerCount];
 inc(pointerCount);
 end;
 
-function updateFinger(x, y, dx, dy: Longword; id: TSDL_FingerId): PTouch_Data;
+function updateFinger(x, y, dx, dy: LongInt; id: TSDL_FingerId): PTouch_Data;
 var finger : PTouch_Data;
 begin
 finger:= findFinger(id);
@@ -420,7 +421,8 @@ procedure deleteFinger(id: TSDL_FingerId);
 var
     index : Longword;
 begin
-
+if pointerCount = 0 then
+    exit;
 dec(pointerCount);
 for index := 0 to pointerCount do
     begin

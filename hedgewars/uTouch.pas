@@ -57,6 +57,7 @@ function calculateDelta(finger1, finger2: TTouch_Data): LongInt;
 function getSecondFinger(finger: TTouch_Data): PTouch_Data;
 function isOnRect(rect: TSDL_Rect; finger: TTouch_Data): boolean;
 function isOnRect(x,y,w,h: LongInt; finger: TTouch_Data): boolean;
+function isOnUIRect(rect: TSDL_Rect; finger: TTouch_Data; scale: GLfloat): boolean;
 function isOnWidget(widget: TOnScreenWidget; finger: TTouch_Data): boolean;
 procedure printFinger(finger: TTouch_Data);
 implementation
@@ -93,6 +94,8 @@ var
     xr, yr: LongInt;
     tmp: LongWord;
 begin
+rectSize:= round(baseRectSize * cUIScale);
+halfRectSize:= rectSize shr 1;
 xr:= round(x * cScreenWidth);
 yr:= round(y * cScreenHeight);
 
@@ -344,10 +347,10 @@ begin
 
 if bShowAmmoMenu then
     begin
-    if isOnRect(AmmoRect, finger) then
+    if isOnUIRect(AmmoRect, finger, cMenuScale) then
         begin
-        CursorPoint.X:= finger.x;
-        CursorPoint.Y:= finger.y;
+        CursorPoint.X:= round(finger.x / cMenuScale);
+        CursorPoint.Y:= round(finger.y / cMenuScale);
         ParseTeamCommand('put');
         end
     else
@@ -641,9 +644,19 @@ begin
                (cScreenHeight - finger.y < y + h);
 end;
 
+// Hit test for things drawn in UI units (the touch HUD): see UISwapIn in uWorld.
+function isOnUIRect(rect: TSDL_Rect; finger: TTouch_Data; scale: GLfloat): boolean;
+var fx, fy: LongInt;
+begin
+    fx:= round(finger.x / scale);
+    fy:= round((cScreenHeight - finger.y) / scale);
+    isOnUIRect:= (fx > rect.x) and (fx < rect.x + rect.w) and
+                 (fy > rect.y) and (fy < rect.y + rect.h);
+end;
+
 function isOnWidget(widget: TOnScreenWidget; finger: TTouch_Data): boolean;
 begin
-    isOnWidget:= widget.show and isOnRect(widget.active, finger);
+    isOnWidget:= widget.show and isOnUIRect(widget.active, finger, cUIScale);
 end;
 
 procedure printFinger(finger: TTouch_Data);
@@ -664,8 +677,8 @@ begin
     for index := 0 to (cMaxFingers-1) do
         fingers[index].id := noFingerId;
 
-    rectSize:= baseRectSize;
-    halfRectSize:= baseRectSize shr 1;
+    rectSize:= round(baseRectSize * cUIScale);
+    halfRectSize:= rectSize shr 1;
 end;
 
 procedure freeModule;

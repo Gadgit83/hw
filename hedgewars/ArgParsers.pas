@@ -107,6 +107,7 @@ begin
     WriteLn(stdout, '  --no-healthtag: Disable hedgehog health tags');
     WriteLn(stdout, '  --translucent-tags: Enable translucent name and health tags');
     WriteLn(stdout, '  --chat-size [default chat size in percent]');
+    WriteLn(stdout, '  --ui-scale [touch HUD scale in percent], --inset-left/top/right/bottom [safe area in pixels]');
     WriteLn(stdout, '  --showfps: Show frames per second');
     WriteLn(stdout, '');
     WriteLn(stdout, 'Miscellaneous:');
@@ -244,13 +245,14 @@ begin
 end;
 
 function parseParameter(cmd:string; arg:string; var paramIndex:LongInt): Boolean;
-const reallyAll: array[0..37] of shortstring = (
+const reallyAll: array[0..43] of shortstring = (
                 '--prefix', '--user-prefix', '--locale', '--fullscreen-width', '--fullscreen-height', '--width',
                 '--height', '--maximized', '--frame-interval', '--volume','--nomusic', '--nosound', '--nodampen',
                 '--fullscreen', '--showfps', '--altdmg', '--low-quality', '--raw-quality', '--stereo', '--nick',
                 '--zoom',
   {internal}    '--internal', '--port', '--recorder', '--landpreview',
-  {misc}        '--stats-only', '--gci', '--help','--protocol', '--no-teamtag','--no-hogtag','--no-healthtag','--translucent-tags','--lua-test','--no-holiday-silliness','--chat-size', '--prefix64', '--user-prefix64');
+  {misc}        '--stats-only', '--gci', '--help','--protocol', '--no-teamtag','--no-hogtag','--no-healthtag','--translucent-tags','--lua-test','--no-holiday-silliness','--chat-size', '--prefix64', '--user-prefix64',
+  {android}     '--ui-scale', '--inset-left', '--inset-top', '--inset-right', '--inset-bottom', '--menu-scale');
 var cmdIndex: byte;
 begin
     parseParameter:= false;
@@ -301,6 +303,12 @@ begin
         {--chat-size}           35 : cDefaultChatScale := 1.0 * getLongIntParameter(arg, paramIndex, parseParameter) / 100;
         {--prefix64}            36: PathPrefix := DecodeBase64(getstringParameter(arg, paramIndex, parseParameter));
         {--user-prefix64}       37: UserPathPrefix := DecodeBase64(getstringParameter(arg, paramIndex, parseParameter));
+        {--ui-scale}            38: cUIScale := 1.0 * getLongIntParameter(arg, paramIndex, parseParameter) / 100;
+        {--inset-left}          39: cSafeInsetL := getLongIntParameter(arg, paramIndex, parseParameter);
+        {--inset-top}           40: cSafeInsetT := getLongIntParameter(arg, paramIndex, parseParameter);
+        {--inset-right}         41: cSafeInsetR := getLongIntParameter(arg, paramIndex, parseParameter);
+        {--inset-bottom}        42: cSafeInsetB := getLongIntParameter(arg, paramIndex, parseParameter);
+        {--menu-scale}          43: cMenuTarget := 1.0 * getLongIntParameter(arg, paramIndex, parseParameter) / 100;
     else
         begin
         //Assume the first "non parameter" is the demo file, anything else is invalid

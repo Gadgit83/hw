@@ -63,3 +63,19 @@ android {
         checkReleaseBuilds false
     }
 }
+
+// Fail early, with a pointer, when the generated inputs are missing.
+tasks.matching { it.name == 'preBuild' }.configureEach {
+    doFirst {
+        def missing = []
+        if (!file('../third_party/SDL/android-project').exists()) missing << 'third_party (scripts/fetch-deps.sh)'
+        if (!file('../build/engine-c/hwengine.c').exists()) missing << 'build/engine-c (scripts/gen-engine.sh)'
+        if (!file('../build/assets/Data').exists()) missing << 'build/assets (scripts/stage-assets.sh)'
+        abis.each { abi ->
+            if (!file("../build/rust/${abi}/libhwengine_future.so").exists()) missing << "build/rust/${abi} (scripts/build-rust.sh)"
+        }
+        if (!missing.isEmpty()) {
+            throw new GradleException("Missing generated inputs: ${missing.join(', ')}. Run host/scripts/build-apk.sh, or the listed scripts first.")
+        }
+    }
+}

@@ -17,11 +17,16 @@ rsync -a \
   --exclude 'CMakeLists.txt' \
   --exclude 'Fonts/wqy-zenhei.ttc' \
   --exclude 'Missions/' \
-  --exclude 'misc/' \
+  --include 'misc/keys.csv' --exclude 'misc/*' \
   --exclude '*.ts' --exclude '*.qm' \
   --exclude '*preview*.png' \
   --exclude 'Music/' \
   "$SRC/" "$OUT/"
+
+# Mobile-only artwork (on-screen touch buttons, ammo menu sheets) lives in the Android port's assets.
+# Only files missing from the desktop data are taken.
+MOBILE="$HW_ENGINE_DIR/project_files/Android-build/SDL-android-project/assets/Data"
+rsync -a --ignore-existing --exclude '*preview*' --exclude 'Music/' --exclude 'Locale/' --exclude 'Maps/' "$MOBILE/" "$OUT/"
 
 # Locales: the engine always loads en.txt first; other languages are optional.
 if [ "$HP_LOCALES" = "en" ]; then

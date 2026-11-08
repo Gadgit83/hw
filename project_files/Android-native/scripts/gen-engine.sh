@@ -7,7 +7,8 @@
 . "$(dirname "$0")/common.sh"
 command -v ghc >/dev/null || { echo "ghc not found (apt-get install ghc)"; exit 1; }
 P2C_DIR="$BUILD_DIR/pas2c"
-OUT="$BUILD_DIR/engine-c"
+# EXTRA_DEFS (e.g. "-d HP_DESKTOP_GL") and OUT_DIR serve the host smoke test (scripts/host-test.sh).
+OUT="${OUT_DIR:-$BUILD_DIR/engine-c}"
 mkdir -p "$P2C_DIR/obj" "$P2C_DIR/alt" "$OUT"
 
 log "building pas2c"
@@ -25,5 +26,5 @@ EOC
 
 log "pas2c: Pascal -> C"
 "$P2C_DIR/pas2c" -n hwengine -i "$HW_ENGINE_DIR/hedgewars" -o "$OUT" -a "$P2C_DIR/alt" \
-    -d ENDIAN_LITTLE -d DEBUGFILE -d PAS2C_ANDROID >"$P2C_DIR/pas2c.log" 2>&1 || { tail -20 "$P2C_DIR/pas2c.log"; exit 1; }
+    -d ENDIAN_LITTLE -d DEBUGFILE -d PAS2C_ANDROID ${EXTRA_DEFS:-} >"$P2C_DIR/pas2c.log" 2>&1 || { tail -20 "$P2C_DIR/pas2c.log"; exit 1; }
 echo "generated $(ls "$OUT"/*.c | wc -l) C files in $OUT"

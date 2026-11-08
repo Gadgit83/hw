@@ -1,0 +1,142 @@
+plugins {
+    id 'com.android.application'
+}
+
+// ABIs to build; override with -Pabis=arm64-v8a (or "arm64-v8a,x86_64").
+def abis = (project.findProperty('abis') ?: 'arm64-v8a,x86_64').split(',').collect { it.trim() }
+// Where things live. The engine is the repository this directory belongs to (../.. from the Gradle root);
+// third_party/ (the SDL2 clones) and build/ (generated inputs) can be redirected with the same environment
+// variables the scripts use (THIRD_PARTY, BUILD_DIR, HW_ENGINE_DIR).
+def engineDir = new File(System.getenv('HW_ENGINE_DIR') ?: new File(rootDir, '../..').path).canonicalFile
+def thirdParty = new File(System.getenv('THIRD_PARTY') ?: new File(rootDir, 'third_party').path).canonicalFile
+def genDir = new File(System.getenv('BUILD_DIR') ?: new File(rootDir, 'build').path).canonicalFile
+def sdlJava = new File(thirdParty, 'SDL/android-project/app/src/main/java')
+
+// Build information for the About page and the log report: the engine and app commits this APK is built from.
+// Read straight from git at configuration time (the engine and the app are one repository).
+def gitOut = { File dir, String... a ->
+    try {
+        def p = new ProcessBuilder(['git', '-C', dir.absolutePath] + a.toList()).redirectErrorStream(true).start()
+        def t = p.inputStream.text.trim()
+        p.waitFor()
+        return p.exitValue() == 0 ? t : ''
+    } catch (Exception ignored) {
+        return ''
+    }
+}
+def engineCommit = gitOut(engineDir, 'rev-parse', '--short=9', 'HEAD') ?: 'unknown'
+def engineBranch = gitOut(engineDir, 'rev-parse', '--abbrev-ref', 'HEAD') ?: 'unknown'
+if (engineCommit != 'unknown' && !gitOut(engineDir, 'status', '--porcelain', '--untracked-files=no', '--', 'hedgewars', 'tools/pas2c').isEmpty()) {
+    engineCommit += '+local changes'
+}
+def appCommit = gitOut(rootDir, 'rev-parse', '--short=9', 'HEAD') ?: 'unknown'
+if (appCommit != 'unknown' && !gitOut(rootDir, 'status', '--porcelain', '--untracked-files=no', '--', '.').isEmpty()) {
+    appCommit += '+local changes'
+}
+
+// Identity of the build. Override it to build another flavour of the same sources, for example
+//   ./gradlew -PappId=org.example.hedgewars -PappName="Hedgewars test" assembleDebug
+def appId = (project.findProperty('appId') ?: 'org.hedgewars.hedgewars.nativeapp').toString()
+def appName = (project.findProperty('appName') ?: 'Hedgewars').toString()
+// Where the corresponding source of this build can be found (shown under Options, Advanced, About).
+def sourceUrl = (project.findProperty('sourceUrl') ?: 'https://hg.hedgewars.org/hedgewars/').toString()
+
+android {
+    namespace 'org.hedgewars.android'
+    compileSdk 34
+    buildFeatures {
+        buildConfig true
+    }
+    ndkVersion '27.2.12479018'
+
+    defaultConfig {
+        applicationId appId
+        minSdk 24
+        targetSdk 34
+        versionCode 1
+        versionName '0.1.0'
+        resValue 'string', 'app_name', appName
+        buildConfigField 'String', 'APP_NAME', "\"${appName}\""
+        buildConfigField 'String', 'SOURCE_URL', "\"${sourceUrl}\""
+        // Shown on the About page and in the log report: which engine and which app source this APK was built from.
+        buildConfigField 'String', 'ENGINE_COMMIT', "\"${engineCommit}\""
+        buildConfigField 'String', 'ENGINE_BRANCH', "\"${engineBranch}\""
+        buildConfigField 'String', 'APP_COMMIT', "\"${appCommit}\""
+        buildConfigField 'String', 'BUILD_ABIS', "\"${abis.join(', ')}\""
+        ndk { abiFilters(*abis) }
+        externalNativeBuild {
+            cmake {
+                arguments '-DANDROID_STL=c++_static',
+                          '-DCMAKE_BUILD_TYPE=Release',
+                          '-DCMAKE_C_FLAGS_RELEASE=-O2 -DNDEBUG',
+                          '-DCMAKE_SHARED_LINKER_FLAGS=-Wl,-z,max-page-size=16384',
+                          "-DHP_ENGINE_SRC=${engineDir}",
+                          "-DHP_THIRD_PARTY=${thirdParty}",
+                          "-DHP_ENGINE_C=${genDir}/engine-c",
+                          "-DHP_RUST_DIR=${genDir}/rust"
+            }
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path '../native/CMakeLists.txt'
+            version '3.22.1'
+        }
+    }
+
+    sourceSets.main {
+        // SDLActivity and friends come straight from the SDL checkout (not copied into this repo).
+        java.srcDirs += sdlJava
+        // Trimmed game data staged by scripts/stage-assets.sh.
+        assets.srcDirs += new File(genDir, 'assets')
+        // libhwengine_future.so per ABI, built by scripts/build-rust.sh.
+        jniLibs.srcDirs += new File(genDir, 'rust')
+    }
+
+    androidResources {
+        // Already compressed formats: store as they are so first-run extraction is fast.
+        noCompress += ['ogg', 'png', 'ttf', 'wav', 'lua', 'txt', 'cfg', 'yaml', 'toml']
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+        }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    lint {
+        abortOnError false
+        checkReleaseBuilds false
+    }
+}
+
+// The engine C must come from the current engine checkout. By default a stale or missing
+// build/engine-c is regenerated (needs GHC); -PengineStale=fail makes the build stop instead.
+def engineStale = (project.findProperty('engineStale') ?: 'regenerate')
+tasks.register('checkEngineC', Exec) {
+    group = 'build'
+    description = 'Regenerates (or rejects) engine C that does not match the engine checkout'
+    workingDir file('..')
+    commandLine 'bash', 'scripts/gen-engine.sh', engineStale == 'fail' ? '--check' : '--ensure'
+}
+tasks.matching { it.name == 'preBuild' }.configureEach { dependsOn 'checkEngineC' }
+
+// Fail early, with a pointer, when the generated inputs are missing.
+tasks.matching { it.name == 'preBuild' }.configureEach {
+    doFirst {
+        def missing = []
+        if (!new File(thirdParty, 'SDL/android-project').exists()) missing << 'third_party (scripts/fetch-deps.sh)'
+        if (!new File(genDir, 'engine-c/hwengine.c').exists()) missing << 'build/engine-c (scripts/gen-engine.sh)'
+        if (!new File(genDir, 'assets/Data').exists()) missing << 'build/assets (scripts/stage-assets.sh)'
+        abis.each { abi ->
+            if (!new File(genDir, "rust/${abi}/libhwengine_future.so").exists()) missing << "build/rust/${abi} (scripts/build-rust.sh)"
+        }
+        if (!missing.isEmpty()) {
+            throw new GradleException("Missing generated inputs: ${missing.join(', ')}. Run project_files/Android-native/scripts/build-apk.sh, or the listed scripts first.")
+        }
+    }
+}

@@ -283,6 +283,7 @@ var
     finger: PTouch_Data;
     widget: POnScreenWidget;
     xr, yr: LongInt;
+    resumed: boolean;
 begin
 xr:= round(x * cScreenWidth);
 yr:= round(y * cScreenHeight);
@@ -291,16 +292,26 @@ finger:= updateFinger(xr, yr, 0, 0, pointerId);
 if finger = nil then
     exit;
 
+resumed:= false;
+
 //Check for onTouchClick event
 if not(fingerHasMoved(finger^)) then
     begin
-    // tapping anywhere but on the pause button itself (which toggles on touch down) resumes a paused game
-    if isPaused and (finger^.pressedWidget <> @pauseButton) then
+    // a tap that started on no widget resumes a paused game (the pause button toggles on touch down,
+    // and a finger held on a widget before the pause does not resume on release); the resuming tap
+    // does not also act as a click
+    if isPaused and (finger^.pressedWidget = nil) then
+        begin
         ParseCommand('pause', true);
-    if (RealTicks - finger^.timeSinceDown) < clickTime then
-        onTouchClick(finger^)
-    else
-        onTouchLongClick(finger^);
+        resumed:= true;
+        end;
+    if not resumed then
+        begin
+        if (RealTicks - finger^.timeSinceDown) < clickTime then
+            onTouchClick(finger^)
+        else
+            onTouchLongClick(finger^);
+        end;
     end;
 
 if aimingCrosshair then

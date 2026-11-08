@@ -237,6 +237,10 @@ game to freeze if one online player minimizes Hedgewars. *)
                                 //This call is used to reinitialize the glcontext and reload the textures
                                 ParseCommand('fullscr '+intToStr(LongInt(cFullScreen)), true);
 {$ENDIF}
+{$IFDEF ANDROID_NATIVE}
+                                //The GL context may have been lost while paused: reload the textures
+                                ParseCommand('fullscr '+intToStr(LongInt(cFullScreen)), true);
+{$ENDIF}
                                 end;
                         SDL_WINDOWEVENT_MAXIMIZED:
                                 cWindowedMaximized:= true;

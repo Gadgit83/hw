@@ -35,6 +35,11 @@
     {$DEFINE Java_Prefix:= 'Java_org_hedgewars_hedgeroid_EngineProtocol_PascalExports_'}
 {$ENDIF}
 
+{$IFDEF PAS2C_ANDROID}
+    {$DEFINE ANDROID_NATIVE}
+    {$DEFINE MOBILE}
+{$ENDIF}
+
 {$IFDEF IPHONEOS}
     {$DEFINE MOBILE}
 {$ENDIF}

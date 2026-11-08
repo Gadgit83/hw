@@ -6,15 +6,22 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.graphics.Color;
 import android.graphics.Typeface;
+import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.text.InputType;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.WindowInsets;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import java.io.File;
 import java.util.ArrayList;
@@ -22,6 +29,8 @@ import java.util.List;
 
 /** Minimal setup screen: number of teams, their names, then start a hotseat game. */
 public class MainActivity extends Activity {
+    private static final int BG = Color.rgb(34, 51, 38);
+
     private static final int MIN_TEAMS = 2;
     private static final int MAX_TEAMS = 4;
 
@@ -29,6 +38,10 @@ public class MainActivity extends Activity {
     private final LinearLayout[] rows = new LinearLayout[MAX_TEAMS];
     private TextView status;
     private Button start;
+    private LinearLayout problemBox;
+    private TextView problemText;
+    private final Handler ui = new Handler(Looper.getMainLooper());
+    private volatile boolean sharing;
     private int teamCount = 2;
     private SharedPreferences prefs;
 
@@ -46,9 +59,59 @@ public class MainActivity extends Activity {
         shown = this;
         prefs = getSharedPreferences("setup", MODE_PRIVATE);
         teamCount = Math.max(MIN_TEAMS, Math.min(MAX_TEAMS, prefs.getInt("teams", 2)));
+        setupEdgeToEdge();
         setContentView(buildUi());
         refreshRows();
         prepareData();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        refreshProblem();
+        // The game process may still be shutting down when this screen comes back: look again shortly.
+        ui.postDelayed(this::refreshProblem, 900);
+    }
+
+    /**
+     * Draws behind the system bars and the camera cut-out, with the window background filling
+     * everything. buildUi then pads the content by the insets, so nothing sits under a bar
+     * or the cut-out and no black bands appear.
+     */
+    private void setupEdgeToEdge() {
+        android.view.Window w = getWindow();
+        w.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(BG));
+        w.setStatusBarColor(Color.TRANSPARENT);
+        w.setNavigationBarColor(BG);
+        if (Build.VERSION.SDK_INT >= 30) {
+            w.setDecorFitsSystemWindows(false);
+        } else {
+            w.getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                    | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION);
+        }
+        if (Build.VERSION.SDK_INT >= 28) {
+            w.getAttributes().layoutInDisplayCutoutMode =
+                    android.view.WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+        }
+    }
+
+    /** Insets to keep clear of: system bars, the keyboard and the display cut-out. */
+    private static int[] safeInsets(WindowInsets in) {
+        int l, t, r, b;
+        if (Build.VERSION.SDK_INT >= 30) {
+            android.graphics.Insets i = in.getInsets(WindowInsets.Type.systemBars()
+                    | WindowInsets.Type.displayCutout() | WindowInsets.Type.ime());
+            l = i.left; t = i.top; r = i.right; b = i.bottom;
+        } else {
+            l = in.getSystemWindowInsetLeft(); t = in.getSystemWindowInsetTop();
+            r = in.getSystemWindowInsetRight(); b = in.getSystemWindowInsetBottom();
+            if (Build.VERSION.SDK_INT >= 28 && in.getDisplayCutout() != null) {
+                android.view.DisplayCutout dc = in.getDisplayCutout();
+                l = Math.max(l, dc.getSafeInsetLeft()); t = Math.max(t, dc.getSafeInsetTop());
+                r = Math.max(r, dc.getSafeInsetRight()); b = Math.max(b, dc.getSafeInsetBottom());
+            }
+        }
+        return new int[] { l, t, r, b };
     }
 
     @Override
@@ -62,11 +125,11 @@ public class MainActivity extends Activity {
     }
 
     private View buildUi() {
-        LinearLayout root = new LinearLayout(this);
+        final LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setBackgroundColor(Color.rgb(34, 51, 38));
-        root.setPadding(dp(32), dp(16), dp(32), dp(16));
         root.setGravity(Gravity.CENTER_HORIZONTAL);
+        final int padX = dp(32), padY = dp(16);
+        root.setPadding(padX, padY, padX, padY);
 
         TextView title = new TextView(this);
         title.setText("Hedge Party");
@@ -125,13 +188,97 @@ public class MainActivity extends Activity {
         sp.topMargin = dp(12);
         root.addView(start, sp);
 
+        problemBox = new LinearLayout(this);
+        problemBox.setOrientation(LinearLayout.VERTICAL);
+        problemBox.setGravity(Gravity.CENTER_HORIZONTAL);
+        problemBox.setVisibility(View.GONE);
+        problemBox.setPadding(dp(12), dp(8), dp(12), dp(8));
+        problemBox.setBackgroundColor(Color.rgb(74, 46, 40));
+        problemText = new TextView(this);
+        problemText.setTextColor(Color.rgb(255, 214, 190));
+        problemText.setGravity(Gravity.CENTER_HORIZONTAL);
+        problemBox.addView(problemText);
+        Button shareLast = new Button(this);
+        shareLast.setText("Share last log");
+        shareLast.setOnClickListener(v -> shareLog());
+        problemBox.addView(shareLast);
+        LinearLayout.LayoutParams pp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        pp.topMargin = dp(12);
+        root.addView(problemBox, pp);
+
+        LinearLayout foot = new LinearLayout(this);
+        foot.setOrientation(LinearLayout.HORIZONTAL);
+        foot.setGravity(Gravity.CENTER_VERTICAL);
         status = new TextView(this);
         status.setTextColor(Color.rgb(200, 220, 200));
-        root.addView(status);
+        foot.addView(status);
+        Button shareLog = new Button(this);
+        shareLog.setText("Share log");
+        shareLog.setTextSize(12);
+        shareLog.setAllCaps(false);
+        shareLog.setOnClickListener(v -> shareLog());
+        LinearLayout.LayoutParams fp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        fp.leftMargin = dp(16);
+        foot.addView(shareLog, fp);
+        root.addView(foot);
 
-        android.widget.ScrollView sv = new android.widget.ScrollView(this);
-        sv.addView(root);
+        // Fills the window even when the content is short; the insets become padding.
+        final ScrollView sv = new ScrollView(this);
+        sv.setFillViewport(true);
+        sv.setBackgroundColor(BG);
+        sv.addView(root, new ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        sv.setOnApplyWindowInsetsListener((v, in) -> {
+            int[] i = safeInsets(in);
+            root.setPadding(padX + i[0], padY + i[1], padX + i[2], padY + i[3]);
+            return in;
+        });
         return sv;
+    }
+
+    /** Shows why the last game failed, if it did, and offers the log. */
+    private void refreshProblem() {
+        if (problemBox == null || Diag.gameProcessAlive(this)) return;
+        String err = Diag.lastError(this);
+        boolean unclean = Diag.previousGameUnclean(this);
+        if (err == null && !unclean) {
+            problemBox.setVisibility(View.GONE);
+            return;
+        }
+        problemText.setText(err != null
+                ? "The last game stopped with a problem:\n" + err
+                : "The last game did not end cleanly.");
+        problemBox.setVisibility(View.VISIBLE);
+    }
+
+    /** Builds the report off the UI thread, then offers it to mail and messaging apps. */
+    private void shareLog() {
+        if (sharing) return;
+        sharing = true;
+        Toast.makeText(this, "Collecting the log...", Toast.LENGTH_SHORT).show();
+        final Context app = getApplicationContext();
+        new Thread(() -> {
+            Diag.buildReport(app);
+            ui.post(() -> {
+                sharing = false;
+                if (isDestroyed() || isFinishing()) return;
+                Intent send = new Intent(Intent.ACTION_SEND);
+                send.setType("text/plain");
+                Uri uri = LogProvider.reportUri();
+                send.putExtra(Intent.EXTRA_STREAM, uri);
+                send.putExtra(Intent.EXTRA_SUBJECT, "Hedge Party log " + Diag.versionName(app));
+                send.putExtra(Intent.EXTRA_TEXT, "Hedge Party log from " + Diag.deviceLine());
+                send.setClipData(android.content.ClipData.newRawUri("log", uri));
+                send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                try {
+                    startActivity(Intent.createChooser(send, "Share the Hedge Party log"));
+                } catch (Exception e) {
+                    status.setText("Could not open the share sheet: " + e.getMessage());
+                }
+            });
+        }, "log-report").start();
     }
 
     private void refreshRows() {
@@ -220,6 +367,7 @@ public class MainActivity extends Activity {
             status.setText("Could not write the game setup: " + e);
             return;
         }
+        Diag.clearGameState(this);
         startActivity(new Intent(this, GameActivity.class));
     }
 }

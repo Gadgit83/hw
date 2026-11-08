@@ -12,3 +12,7 @@
 int hp_ipc_start(const char *config_path);
 /* Wait for the server thread to finish (the engine has closed the socket). */
 void hp_ipc_join(void);
+
+/* Called from the server thread when the engine reports a fatal error ('E' message). The text
+ * is NUL terminated and valid only during the call. Optional; the desktop test leaves it unset. */
+void hp_ipc_set_error_handler(void (*handler)(const char *message));

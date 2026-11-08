@@ -28,6 +28,12 @@ static int g_client_fd = -1;
 /* Set by hp_ipc_join so a connection accepted during shutdown is closed rather than served. */
 static int g_stopping;
 static pthread_mutex_t g_fd_lock = PTHREAD_MUTEX_INITIALIZER;
+static void (*g_error_handler)(const char *message);
+
+void hp_ipc_set_error_handler(void (*handler)(const char *message))
+{
+    g_error_handler = handler;
+}
 
 static int read_full(int fd, void *buf, size_t n)
 {
@@ -122,6 +128,13 @@ static void *server_thread(void *arg)
             /* The engine asks a question; answer with '!' as the Qt frontend does. */
             static const unsigned char ok[2] = { 1, '!' };
             if (write_full(fd, ok, sizeof ok)) break;
+        } else if (len > 1 && msg[0] == 'E') {
+            /* The engine reports a fatal error and is about to exit the process. */
+            char text[256];
+            memcpy(text, msg + 1, (size_t)len - 1);
+            text[len - 1] = 0;
+            LOGE("engine error: %s", text);
+            if (g_error_handler) g_error_handler(text);
         }
         /* Everything else (ticks, stats, resize notices) is only drained. */
     }

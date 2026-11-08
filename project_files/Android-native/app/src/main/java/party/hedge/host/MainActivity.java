@@ -128,8 +128,7 @@ public class MainActivity extends Activity {
         final LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setGravity(Gravity.CENTER_HORIZONTAL);
-        final int padX = dp(32), padY = dp(16);
-        root.setPadding(padX, padY, padX, padY);
+        root.setPadding(dp(32), dp(16), dp(32), dp(16));
 
         TextView title = new TextView(this);
         title.setText("Hedge Party");
@@ -230,9 +229,20 @@ public class MainActivity extends Activity {
         sv.setBackgroundColor(BG);
         sv.addView(root, new ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        // The insets (bars, cut-out and the keyboard) are padding on the ScrollView itself, not on
+        // its content: the scrolling viewport then ends above the keyboard, so a focused team
+        // name field can always be scrolled into view. With decorFitsSystemWindows(false) (API 30+)
+        // the system no longer resizes the window for the keyboard.
+        sv.setClipToPadding(true);
         sv.setOnApplyWindowInsetsListener((v, in) -> {
             int[] i = safeInsets(in);
-            root.setPadding(padX + i[0], padY + i[1], padX + i[2], padY + i[3]);
+            v.setPadding(i[0], i[1], i[2], i[3]);
+            // Once the new padding is laid out, bring the focused field back on screen.
+            v.post(() -> {
+                View f = v.findFocus();
+                if (f != null) f.requestRectangleOnScreen(
+                        new android.graphics.Rect(0, 0, f.getWidth(), f.getHeight()), false);
+            });
             return in;
         });
         return sv;
@@ -260,9 +270,16 @@ public class MainActivity extends Activity {
         Toast.makeText(this, "Collecting the log...", Toast.LENGTH_SHORT).show();
         final Context app = getApplicationContext();
         new Thread(() -> {
-            Diag.buildReport(app);
+            try {
+                Diag.buildReport(app);
+            } catch (Throwable t) {
+                // Share what there is: Diag writes whatever it collected before the failure.
+                android.util.Log.w("HedgeParty", "log report failed", t);
+            } finally {
+                // However the report ended, the button must work again.
+                ui.post(() -> sharing = false);
+            }
             ui.post(() -> {
-                sharing = false;
                 if (isDestroyed() || isFinishing()) return;
                 Intent send = new Intent(Intent.ACTION_SEND);
                 send.setType("text/plain");

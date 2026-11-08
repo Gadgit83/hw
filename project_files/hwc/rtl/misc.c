@@ -230,8 +230,9 @@ void fpcrtl_glShaderSource(GLuint shader, GLsizei count,/* const dropped for pas
 }
 #endif
 
-// The engine calls this device hook (uUtils.pas, PAS2C builds only). Frontends that can vibrate, such as the
-// Android launcher, provide a strong definition that replaces this no-op; other builds need it to link.
+// Called by the engine's DeviceRumble (uUtils.pas) under PAS2C. Only the Android launcher
+// provides a real vibration (project_files/Android-native/native/launcher/hp_main.c); its
+// strong definition overrides this weak no-op wherever it is linked in. Desktop builds keep it.
 __attribute__((weak)) void hw_device_rumble(int32_t ms)
 {
     (void)ms;

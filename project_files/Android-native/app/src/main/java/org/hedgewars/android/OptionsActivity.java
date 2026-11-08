@@ -8,6 +8,7 @@ import android.graphics.Typeface;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.text.TextUtils;
 import android.util.DisplayMetrics;
 import android.view.Gravity;
 import android.view.View;
@@ -64,13 +65,17 @@ public class OptionsActivity extends SetupActivity {
         title.setTypeface(Typeface.DEFAULT_BOLD);
         title.setSingleLine(true);
         topBar.addView(title, ui.margins(Ui.lp(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT), 12, 0, 12, 0));
-        tabs = ui.tabs(new String[] { "Sound", "Display and controls", "Advanced" }, tab, i -> {
+        tabs = ui.tabs(new String[] { "Sound", "Display", "Advanced" }, tab, i -> {
             tab = i;
             show();
         });
         topBar.addView(tabs.view, Ui.lp(ui.dp(440), ViewGroup.LayoutParams.WRAP_CONTENT));
         notice = ui.hint("Changes apply to the next game you start.");
         notice.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
+        notice.setSingleLine(true);
+        notice.setEllipsize(TextUtils.TruncateAt.END);
+        // Too narrow for the notice beside the tabs: leave it out rather than wrap it.
+        if (getResources().getConfiguration().screenWidthDp < 800) notice.setVisibility(View.GONE);
         topBar.addView(notice, ui.margins(ui.weight(1f), 12, 0, 4, 0));
         root.addView(topBar);
 

@@ -205,6 +205,13 @@ public class MainActivity extends SetupActivity {
         return getResources().getConfiguration().screenWidthDp;
     }
 
+    /** Screen width minus the left and right padding actually applied to the list (insets and gutter). */
+    private int usableWidthDp() {
+        float density = getResources().getDisplayMetrics().density;
+        int padPx = root.getPaddingLeft() + root.getPaddingRight() + holder.getPaddingLeft() + holder.getPaddingRight();
+        return Math.round(getResources().getConfiguration().screenWidthDp - padPx / density);
+    }
+
     // Data ----------------------------------------------------------------------------------------
 
     /** Extract the game data on first run, off the UI thread. Also used by the Retry button. */
@@ -388,9 +395,10 @@ public class MainActivity extends SetupActivity {
         head.addView(add, Ui.lp(ViewGroup.LayoutParams.WRAP_CONTENT, ui.dp(Ui.TOUCH_DP)));
         holder.addView(head);
 
-        // Three columns on a phone held sideways, so up to six teams are in view at once.
-        int w = contentWidthDp();
-        int cols = w >= 800 ? 3 : w >= 520 ? 2 : 1;
+        // Three columns on a phone held sideways, so up to six teams are in view at once. The width is what
+        // is left after the insets and the list padding, not the whole screen.
+        int w = usableWidthDp();
+        int cols = w >= 840 ? 3 : w >= 520 ? 2 : 1;
         LinearLayout grid = null;
         for (int i = 0; i < model.teams.size(); i++) {
             if (i % cols == 0) {

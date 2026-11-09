@@ -161,10 +161,14 @@ if isOnWidget(arrowDown, finger^) then
 
 // A network game cannot pause (the pause command only toggles away-from-keyboard there), so the button is not drawn
 // and not pressable; leaving goes through the Back key.
-if (GameType <> gmtNet) and isOnWidget(pauseButton, finger^) then
+if isOnWidget(pauseButton, finger^) then
     begin
-    WriteLnToConsole('[Touch] pressed pause');
-    ParseCommand('pause', true);
+    if GameType <> gmtNet then
+        begin
+        WriteLnToConsole('[Touch] pressed pause');
+        ParseCommand('pause', true);
+        end;
+    // In a network game the press is still consumed, so a tap in the old pause corner is not a map press or click.
     moveCursor:= false;
     finger^.pressedWidget:= @pauseButton;
     exit;

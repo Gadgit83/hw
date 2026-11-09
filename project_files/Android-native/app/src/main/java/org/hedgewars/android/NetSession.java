@@ -58,6 +58,7 @@ final class NetSession {
 
         @Override public void onStart(RelayClient.StartInfo s) {
             inGame = true;
+            notice = "";
             Listener l = listener;
             if (l != null && lobbyVisible) {
                 l.startGame(s);
@@ -76,6 +77,8 @@ final class NetSession {
             toYouHash = org.hedgewars.android.net.Json.str(m, "toYouHash", "");
             toYouMsgs = org.hedgewars.android.net.Json.num(m, "toYouMsgs", 0);
             relayLogHash = org.hedgewars.android.net.Json.str(m, "logHash", "");
+            // A phone that was dropped or left earlier keeps that message; otherwise say how the game ended.
+            if (notice.isEmpty()) notice = endNotice(org.hedgewars.android.net.Json.str(m, "reason", ""), hosting);
             Context c = HpApp.appContext;
             if (c != null) NetDiag.saveSession(c, relaySummary + "\nStream the relay sent this phone: " + toYouMsgs
                     + " messages, hash " + toYouHash + "\nGame log hash at the relay: " + relayLogHash + "\n");
@@ -96,6 +99,17 @@ final class NetSession {
             ping();
         }
     };
+
+    /**
+     * What a phone is told when the game ends: the host that chose to end it sees "You ended the game", the other phones
+     * "The host ended the game"; a game that simply finished says nothing; any other reason (a desync, every engine gone)
+     * is shown as it is.
+     */
+    static String endNotice(String reason, boolean iAmHost) {
+        if (reason == null || reason.isEmpty() || reason.equals("every engine finished")) return "";
+        if (reason.equals(Relay.HOST_ENDED)) return iAmHost ? "You ended the game." : "The host ended the game.";
+        return "The game ended: " + reason;
+    }
 
     /** A notification that opens the Network screen, which then starts the waiting game. */
     static void notifyStart(Context c) {
@@ -151,6 +165,7 @@ final class NetSession {
         hosting = isHost;
         target = host + ":" + port;
         acquireLocks(c);
+        if (isHost) startTicker();
         ping();
     }
 
@@ -201,24 +216,105 @@ final class NetSession {
 
     // Addresses -------------------------------------------------------------------------------
 
-    /** True for Wi-Fi, hotspot and Ethernet interfaces (wlan*, swlan*, ap*, eth*); not cellular (rmnet*), VPN (tun*) or others. */
+    /**
+     * True for Wi-Fi, hotspot and Ethernet interfaces (wlan*, swlan*, eth*, and the hotspot's ap0, ap1, ...); not cellular
+     * (rmnet*), VPN (tun*), Wi-Fi Direct (p2p*) or anything else that merely starts with "ap" (apn0, appp0).
+     */
     static boolean isLanInterface(String name) {
-        return name != null && (name.startsWith("wlan") || name.startsWith("swlan") || name.startsWith("ap") || name.startsWith("eth"));
+        if (name == null) return false;
+        if (name.startsWith("wlan") || name.startsWith("swlan") || name.startsWith("eth")) return true;
+        return name.length() > 2 && name.startsWith("ap") && Character.isDigit(name.charAt(2));
     }
 
-    /** The phone's IPv4 addresses on Wi-Fi, hotspot or Ethernet, for the host screen. Empty when there is none. */
+    /** The phone's IPv4 addresses on Wi-Fi, hotspot or Ethernet, for the host screen. Empty when there is none. Not for the UI thread. */
     static List<String> localAddresses() {
         List<String> out = new ArrayList<>();
+        java.util.Enumeration<NetworkInterface> all;
         try {
-            for (NetworkInterface ni : Collections.list(NetworkInterface.getNetworkInterfaces())) {
+            all = NetworkInterface.getNetworkInterfaces();
+        } catch (Exception e) {
+            return out;
+        }
+        if (all == null) return out;
+        for (NetworkInterface ni : Collections.list(all)) {
+            // One interface that cannot be read (it vanished, or the platform refuses) must not hide the others.
+            try {
                 if (!ni.isUp() || ni.isLoopback() || !isLanInterface(ni.getName())) continue;
                 for (InetAddress a : Collections.list(ni.getInetAddresses())) {
                     if (!(a instanceof Inet4Address) || a.isLoopbackAddress() || a.isLinkLocalAddress()) continue;
                     out.add(a.getHostAddress());
                 }
+            } catch (Exception ignored) {
             }
-        } catch (Exception ignored) {
         }
         return out;
+    }
+
+    // Host screen data, read by a background ticker --------------------------------------------
+
+    /**
+     * What the host screen shows about the machine and the relay. Made on a background thread (listing the network
+     * interfaces and taking the relay's lock are not for the UI thread); the screen only reads the last snapshot.
+     */
+    static final class HostInfo {
+        final List<String> addresses;
+        final int viewerPort, viewers;
+        final String viewerError, live;
+        final List<String> viewerLines;
+
+        HostInfo(List<String> addresses, int viewerPort, int viewers, String viewerError, String live, List<String> viewerLines) {
+            this.addresses = addresses;
+            this.viewerPort = viewerPort;
+            this.viewers = viewers;
+            this.viewerError = viewerError;
+            this.live = live;
+            this.viewerLines = viewerLines;
+        }
+
+        String key() {
+            return addresses + "|" + viewerPort + "|" + viewers + "|" + viewerError + "|" + live + "|" + viewerLines;
+        }
+    }
+
+    /** The last snapshot, or null before the first one is made. */
+    static volatile HostInfo hostInfo;
+    /** Tests switch the ticker off and set {@link #hostInfo} themselves. */
+    static volatile boolean tickerOff;
+    private static Thread ticker;
+
+    /** Starts the ticker if it is not running. It ends by itself when this phone no longer hosts. */
+    static synchronized void startTicker() {
+        if (tickerOff || (ticker != null && ticker.isAlive())) return;
+        ticker = new Thread(() -> {
+            List<String> addr = new ArrayList<>();
+            long addrAt = 0;
+            String last = "";
+            while (hosting || joined) {
+                long now = System.currentTimeMillis();
+                if (hosting) {
+                    if (now - addrAt > 5000 || addrAt == 0) {
+                        addr = localAddresses();
+                        addrAt = now;
+                    }
+                    Relay r = HostService.relay;
+                    HostInfo info;
+                    if (r == null) info = new HostInfo(addr, -1, 0, "", "", new ArrayList<>());
+                    else {
+                        List<String> vl = r.viewerLines();
+                        info = new HostInfo(addr, r.viewerPort(), vl.size(), r.viewerError(), r.liveText(), vl);
+                    }
+                    hostInfo = info;
+                    String k = info.key();
+                    if (!k.equals(last)) {
+                        last = k;
+                        ping();
+                    }
+                }
+                try { Thread.sleep(1000); } catch (InterruptedException e) { return; }
+            }
+            hostInfo = null;
+        }, "net-ticker");
+        ticker.setDaemon(true);
+        ticker.start();
     }
 }

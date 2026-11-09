@@ -23,6 +23,8 @@ final class Outbox {
     private final Thread thread;
     private final Runnable onError;
     long sentItems, sentBytes;
+    /** Why the writer stopped, when a write failed (null when the owner closed it or it is still running). */
+    private volatile String failure;
 
     Outbox(String name, int maxItems, int maxBytes, boolean held, Runnable onError) {
         this.maxItems = maxItems;
@@ -70,6 +72,15 @@ final class Outbox {
         return q.size();
     }
 
+    /** The write error that ended this box (for example "Broken pipe"), or null: a closed box with no failure was closed by its owner. */
+    String failure() {
+        return failure;
+    }
+
+    synchronized boolean isClosed() {
+        return closed;
+    }
+
     private void run() {
         try {
             for (;;) {
@@ -99,6 +110,7 @@ final class Outbox {
                 if (!more) o.flush();
             }
         } catch (Throwable e) {
+            if (!(e instanceof InterruptedException)) failure = String.valueOf(e.getMessage() != null ? e.getMessage() : e);
             synchronized (this) { closed = true; }
             if (onError != null) onError.run();
         }

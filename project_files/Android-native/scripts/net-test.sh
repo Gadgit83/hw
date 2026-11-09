@@ -12,6 +12,13 @@
 #               desync detection fires (a harness that cannot fail would prove nothing)
 #   solo        one phone with three teams        viewer1  the same with the TV viewer from the start
 #   viewer2     two phones, the TV viewer (viewer-sim.js + a spectator engine) joins late
+#   viewer3     one phone, a short game (low health) played to a NORMAL game over with the viewer connected from the start:
+#               the viewer and its spectator engine must see the game over, no desync, a round trip measured for the viewer
+#   viewerflap  the viewer connects, is killed, reconnects, is killed, reconnects (three sessions, backlog each time); the
+#               last must see the game over; the two kills must be logged as lost connections, never as "too slow"
+#   hostquit    two phones; the host's engine gets Escape then Y (what the app's Back confirmation sends) after a few turns:
+#               clean engine exit, the relay ends the game for everyone with "The host ended the game"
+#   joinerquit  the same on phone B: clean exit, the relay says B quit, B is told "You left the game."
 #   malformed   no engines: hostile and malformed input to the relay (JSON bombs, huge lines, bad UTF-8, bad WebSocket
 #               frames, hostile team fields, silence-rule arming, host role, caps); the relay must stay up
 #   all         every scenario above in turn, with a summary at the end
@@ -32,7 +39,7 @@
 SCEN="${1:-basic}"
 if [ "$SCEN" = all ]; then
   rc=0; summary=""
-  for s in malformed basic basic3 dropout dropout3 stall slowstart negcontrol solo viewer1 viewer2; do
+  for s in malformed basic basic3 dropout dropout3 stall slowstart negcontrol solo viewer1 viewer2 viewer3 viewerflap hostquit joinerquit; do
     "$0" "$s" > "$BUILD_DIR/host-test-net-$s.log" 2>&1; r=$?
     res="$(grep '^RESULT:' "$BUILD_DIR/host-test-net-$s.log" | tail -1)"
     summary+="$(printf '%-11s exit %d  %s' "$s" "$r" "${res:-(no result line)}")"$'\n'

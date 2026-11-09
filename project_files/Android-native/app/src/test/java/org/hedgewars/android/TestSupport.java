@@ -68,6 +68,8 @@ final class TestSupport {
         set(NetSession.class, "lobbyVisible", false);
         set(NetSession.class, "client", null);
         set(NetSession.class, "listener", null);
+        set(NetSession.class, "hostInfo", null);
+        set(NetSession.class, "tickerOff", true);            // no background thread: a test sets hostInfo itself
     }
 
     private static void set(Class<?> k, String name, Object v) throws Exception {

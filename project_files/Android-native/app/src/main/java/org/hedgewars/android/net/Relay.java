@@ -56,6 +56,8 @@ public final class Relay {
 
     private static final int S_SETUP = 0, S_STARTING = 1, S_PLAYING = 2;
     /** Phones in one lobby, connections in their handshake or lobby, and TV viewers, at most. */
+    /** The end reason when the host's player leaves the game screen with Quit: the game ends for everyone. */
+    public static final String HOST_ENDED = "The host ended the game";
     public static final int MAX_PLAYERS = 8, MAX_CONNECTIONS = 32, MAX_VIEWERS = 16;
     /** A line of the setup is one engine message: a length byte, so at most 255 bytes; the viewer's first message counts them in one byte. */
     public static final int MAX_SETUP_LINE = 255, MAX_SETUP_LINES = 255;
@@ -68,6 +70,13 @@ public final class Relay {
         public int port = PHONE_PORT;
         /** TV viewer WebSocket port; 0 picks a free one, -1 turns the viewer endpoint off. */
         public int viewerPort = VIEWER_PORT;
+        /** If the viewer port is still in use (a stop that is not finished yet), how many more times to try, and how long between tries. */
+        public int viewerBindRetries = 10;
+        public long viewerBindRetryMs = 1000;
+        /** How often each viewer is sent a WebSocket ping to measure the round trip. */
+        public long viewerPingMs = 2000;
+        /** Frames that may wait in one viewer's outbound queue before the viewer is dropped as too slow. */
+        public int viewerQueueItems = 20000;
         public GameData data;
         public Supplier<SetupModel> hostSetup;
         public String build = "dev";
@@ -100,7 +109,8 @@ public final class Relay {
 
     private final Config cfg;
     private final Object lock = new Object();
-    private ServerSocket server, viewerServer;
+    private ServerSocket server;
+    private volatile ServerSocket viewerServer;
     private final List<Viewer> viewers = new ArrayList<>();
     private String viewerError = "";
     private int viewersEver;
@@ -124,8 +134,14 @@ public final class Relay {
 
     public void start() throws IOException {
         server = new ServerSocket();
-        server.setReuseAddress(true);
-        server.bind(new InetSocketAddress(cfg.port));
+        try {
+            server.setReuseAddress(true);
+            server.bind(new InetSocketAddress(cfg.port));
+        } catch (IOException e) {
+            try { server.close(); } catch (IOException ignored) { }
+            server = null;
+            throw e;
+        }
         running = true;
         acceptThread = new Thread(this::acceptLoop, "relay-accept");
         acceptThread.setDaemon(true);
@@ -134,26 +150,56 @@ public final class Relay {
         watchThread.setDaemon(true);
         watchThread.start();
         log("relay listening on port " + server.getLocalPort());
-        if (cfg.viewerPort >= 0) {
-            try {
-                viewerServer = new ServerSocket();
-                viewerServer.setReuseAddress(true);
-                viewerServer.bind(new InetSocketAddress(cfg.viewerPort));
-                Thread vt = new Thread(this::viewerAcceptLoop, "relay-viewer-accept");
-                vt.setDaemon(true);
-                vt.start();
-                log("TV viewer endpoint (WebSocket) on port " + viewerServer.getLocalPort());
-            } catch (IOException e) {
-                viewerServer = null;
-                viewerError = "The TV viewer port " + cfg.viewerPort + " could not be opened (" + e.getMessage() + "); phones still work.";
-                log(viewerError);
-            }
+        if (cfg.viewerPort >= 0 && !bindViewer()) {
+            // The port is often still held for a moment by the relay that was just stopped: try again for a while
+            // instead of giving up for the whole hosting session.
+            Thread rt = new Thread(this::viewerBindRetry, "relay-viewer-bind");
+            rt.setDaemon(true);
+            rt.start();
+        }
+    }
+
+    /** Tries to open the TV viewer port once. On failure viewerError says why. */
+    private boolean bindViewer() {
+        ServerSocket vs = null;
+        try {
+            vs = new ServerSocket();
+            vs.setReuseAddress(true);
+            vs.bind(new InetSocketAddress(cfg.viewerPort));
+            if (!running) { vs.close(); return true; }
+            viewerServer = vs;
+            viewerError = "";
+            final ServerSocket accepting = vs;
+            Thread vt = new Thread(() -> viewerAcceptLoop(accepting), "relay-viewer-accept");
+            vt.setDaemon(true);
+            vt.start();
+            log("TV viewer endpoint (WebSocket) on port " + vs.getLocalPort());
+            return true;
+        } catch (IOException e) {
+            try { if (vs != null) vs.close(); } catch (IOException ignored) { }
+            viewerError = "The TV viewer port " + cfg.viewerPort + " could not be opened (" + e.getMessage() + "); trying again.";
+            log(viewerError);
+            return false;
+        }
+    }
+
+    private void viewerBindRetry() {
+        for (int i = 1; i <= cfg.viewerBindRetries && running; i++) {
+            try { Thread.sleep(cfg.viewerBindRetryMs); } catch (InterruptedException e) { return; }
+            if (!running) return;
+            if (bindViewer()) { log("TV viewer port opened on try " + (i + 1)); return; }
+        }
+        if (running) {
+            viewerError = "The TV viewer port " + cfg.viewerPort + " could not be opened after " + (cfg.viewerBindRetries + 1)
+                    + " tries (is another host or app using it?); phones still work.";
+            log(viewerError);
         }
     }
 
     /** The TV viewer WebSocket port, or -1 when the endpoint is off or could not be opened. */
     public int viewerPort() {
-        return viewerServer == null ? -1 : viewerServer.getLocalPort();
+        ServerSocket vs = viewerServer;
+        return vs == null || vs.isClosed() ? -1 : vs.getLocalPort();
     }
 
     public String viewerError() {
@@ -166,6 +212,15 @@ public final class Relay {
         }
     }
 
+    /** One line per TV watching now: its address, round trip to the relay (from the WebSocket pings) and how many frames wait in its outbound queue. */
+    public List<String> viewerLines() {
+        synchronized (lock) {
+            List<String> out = new ArrayList<>();
+            for (Viewer v : viewers) out.add(viewerLine(v));
+            return out;
+        }
+    }
+
     public int port() {
         return server == null ? -1 : server.getLocalPort();
     }
@@ -173,8 +228,8 @@ public final class Relay {
     public void stop() {
         running = false;
         try { if (server != null) server.close(); } catch (IOException ignored) { }
-        try { if (viewerServer != null) viewerServer.close(); } catch (IOException ignored) { }
-        synchronized (lock) { closeViewers(); }
+        try { ServerSocket vs = viewerServer; if (vs != null) vs.close(); } catch (IOException ignored) { }
+        synchronized (lock) { closeViewers("the host stopped hosting"); }
         List<Player> all;
         synchronized (lock) {
             all = new ArrayList<>(players.values());
@@ -324,6 +379,8 @@ public final class Relay {
         final Set<Integer> mSeen = new HashSet<>();
         long maxGapMs;
         String endReason = "";
+        /** One line for each TV viewer that has left (or was still watching at the end): round trip, queue depth, why it ended. */
+        final List<String> viewerReport = new ArrayList<>();
     }
 
     /** What happened in a finished game, in one object that the app shows and the tests compare. */
@@ -336,6 +393,7 @@ public final class Relay {
         public final List<String> digests = new ArrayList<>();
         public final List<String> events = new ArrayList<>();
         public final List<String> perPlayer = new ArrayList<>();
+        public final List<String> viewers = new ArrayList<>();
         public String endReason = "";
         public final Map<Integer, String> toHashByPlayer = new HashMap<>();
         public final Map<Integer, Long> toMsgsByPlayer = new HashMap<>();
@@ -352,6 +410,11 @@ public final class Relay {
             b.append("Turn checksums (N), ").append(digests.size()).append(":\n");
             for (String d : digests) b.append("  ").append(d).append('\n');
             for (String s : perPlayer) b.append(s).append('\n');
+            if (viewers.isEmpty()) b.append("TV viewers: none\n");
+            else {
+                b.append("TV viewers (round trip is relay to TV and back, measured with a WebSocket ping every 2 s that waits behind the queued frames; \"behind\" is frames waiting in that TV's outbound queue):\n");
+                for (String v : viewers) b.append("  ").append(v).append('\n');
+            }
             if (events.isEmpty()) b.append("Events: none (no dropout, no desync report)\n");
             else {
                 b.append("Events:\n");
@@ -874,7 +937,7 @@ public final class Relay {
         g.logMsgs++;
         if (!viewers.isEmpty()) {
             byte[] wf = Ws.frame(2, f);
-            for (Viewer v : new ArrayList<>(viewers)) if (!v.out.offer(wf)) dropViewer(v, "too slow");
+            for (Viewer v : new ArrayList<>(viewers)) if (!v.out.offer(wf)) dropViewer(v, whyRefused(v));
         }
         for (final Player q : players.values()) {
             if (q == from || q.dropped || q.finished || q.engineOut == null) continue;
@@ -915,8 +978,16 @@ public final class Relay {
                     return;
                 }
                 dropPlayer(p, "desync reported (" + p.fatal + ")");
+            } else if (p.host && p.quit) {
+                // The host chose "End the game for everyone" on its game screen: the game ends on every phone.
+                game.events.add(p.name + " (the host) ended the game");
+                log(p.name + " (the host) quit: ending the game for everyone");
+                endGame(HOST_ENDED);
+                return;
+            } else if (p.quit) {
+                dropPlayer(p, "the player quit", "You left the game.");
             } else {
-                dropPlayer(p, p.quit ? "the player quit" : "its engine link closed");
+                dropPlayer(p, "its engine link closed");
             }
             checkEnd();
         }
@@ -924,6 +995,11 @@ public final class Relay {
 
     /** Lock held. Sends the unsynced team-gone message F<team> for each of the phone's teams (plan section 2.8). */
     private void dropPlayer(Player p, String why) {
+        dropPlayer(p, why, "You were dropped from the game: " + why);
+    }
+
+    /** {@code toPlayer} is what the dropped phone itself is told (a phone that quit is not "dropped"). */
+    private void dropPlayer(Player p, String why, String toPlayer) {
         Game g = game;
         if (g == null || p.dropped) return;
         p.dropped = true;
@@ -943,7 +1019,7 @@ public final class Relay {
             }
         }
         for (Runnable r : after) r.run();
-        sendLobby(p, Json.obj("t", "dropped", "reason", "You were dropped from the game: " + why));
+        sendLobby(p, Json.obj("t", "dropped", "reason", toPlayer));
         if (state == S_STARTING) maybeOpenGate();
         else updateArmed(g, System.currentTimeMillis());
         broadcastStateLocked();
@@ -999,12 +1075,14 @@ public final class Relay {
             Player pl = players.get(d.player);
             s.digests.add("turn " + d.seq + ": " + d.checksum + " tick " + d.tick + " from " + (pl == null ? "?" : pl.name));
         }
+        closeViewers(reason.equals(HOST_ENDED) ? "the host ended the game" : "the game ended");
+        s.viewers.addAll(g.viewerReport);
         s.events.addAll(g.events);
         s.endReason = reason;
         for (Player q : players.values()) {
             s.perPlayer.add("Phone " + q.name + ": sent to it " + q.toMsgs + " messages (hash " + q.toHash.hex()
                     + "), received from it " + q.fromRaw + " (" + q.fromKept + " forwarded, " + q.fromDropped + " not on the whitelist or not its team)"
-                    + (q.dropped ? ", dropped" : q.finished ? ", finished" : ""));
+                    + (q.dropped ? ", dropped" : q.finished ? ", finished" : q.quit ? ", quit" : ""));
             s.toHashByPlayer.put(q.id, q.toHash.hex());
             s.toMsgsByPlayer.put(q.id, q.toMsgs);
         }
@@ -1022,7 +1100,6 @@ public final class Relay {
             sendLobby(q, sum);
             q.closeEngineLater();
         }
-        closeViewers();
         game = null;
         state = S_SETUP;
         // Drop phones whose lobby link is gone; everyone else goes back to the lobby, not ready.
@@ -1094,6 +1171,7 @@ public final class Relay {
                     lastPing = now;
                     for (Player q : players.values()) sendLobby(q, Json.obj("t", "ping"));
                 }
+                pingViewers(now);
                 if (state == S_SETUP) {
                     for (Player q : new ArrayList<>(players.values())) {
                         if (!q.host && now - q.lobbyRx > cfg.lobbySilenceMs) {
@@ -1167,13 +1245,69 @@ public final class Relay {
         Socket sock;
         Outbox out;
         String from = "";
-        boolean closed;
+        final long joinedAt = System.currentTimeMillis();
+        /** WebSocket ping statistics (the pings wait behind the frames already queued, so a long queue shows up as a long round trip). */
+        long pingsSent, pongs;
+        double lastRttMs = -1, sumRttMs, minRttMs = -1, maxRttMs = -1;
+        int maxQueue;
     }
 
-    private void viewerAcceptLoop() {
-        while (running) {
+    /** Lock held. */
+    private String viewerLine(Viewer v) {
+        int q = v.out.queued();
+        if (q > v.maxQueue) v.maxQueue = q;
+        StringBuilder b = new StringBuilder(v.from).append(": ");
+        if (v.pongs == 0) b.append("round trip not measured yet (").append(v.pingsSent).append(" pings sent)");
+        else b.append(String.format(java.util.Locale.ROOT, "round trip %.1f ms (average %.1f, best %.1f, worst %.1f, %d pongs of %d pings)",
+                v.lastRttMs, v.sumRttMs / v.pongs, v.minRttMs, v.maxRttMs, v.pongs, v.pingsSent));
+        b.append(", ").append(q).append(" frames behind (deepest ").append(v.maxQueue).append("), watching for ")
+                .append((System.currentTimeMillis() - v.joinedAt) / 1000).append(" s");
+        return b.toString();
+    }
+
+    /** Lock held. Why a frame could not be queued for the viewer: a connection that failed or closed is not a slow one. */
+    private String whyRefused(Viewer v) {
+        String f = v.out.failure();
+        if (f != null) return "connection lost (write failed: " + f + ")";
+        if (v.out.isClosed()) return "connection closed";
+        return "too slow: its outbound queue overflowed at " + v.out.queued() + " frames";
+    }
+
+    /** Lock held. The pong for the ping sent at {@code sentNanos}. */
+    private void onPong(Viewer v, byte[] payload) {
+        if (payload.length != 8) return;
+        long sent = 0;
+        for (byte x : payload) sent = (sent << 8) | (x & 0xff);
+        double ms = (System.nanoTime() - sent) / 1e6;
+        if (ms < 0 || ms > 3600_000) return;
+        v.pongs++;
+        v.lastRttMs = ms;
+        v.sumRttMs += ms;
+        if (v.minRttMs < 0 || ms < v.minRttMs) v.minRttMs = ms;
+        if (ms > v.maxRttMs) v.maxRttMs = ms;
+    }
+
+    private long lastViewerPing;
+
+    /** Lock held. Called by the watchdog: pings every viewer once per {@code viewerPingMs}. */
+    private void pingViewers(long now) {
+        if (viewers.isEmpty() || now - lastViewerPing < cfg.viewerPingMs) return;
+        lastViewerPing = now;
+        for (Viewer v : viewers) {
+            byte[] p = new byte[8];
+            long t = System.nanoTime();
+            for (int k = 7; k >= 0; k--) { p[k] = (byte) t; t >>>= 8; }
+            v.out.offer(Ws.frame(9, p));
+            v.pingsSent++;
+            int q = v.out.queued();
+            if (q > v.maxQueue) v.maxQueue = q;
+        }
+    }
+
+    private void viewerAcceptLoop(ServerSocket vsock) {
+        while (running && !vsock.isClosed()) {
             try {
-                final Socket s = viewerServer.accept();
+                final Socket s = vsock.accept();
                 try {
                     s.setTcpNoDelay(true);
                     if (viewerConns.incrementAndGet() > MAX_VIEWERS) {
@@ -1190,7 +1324,7 @@ public final class Relay {
                     try { s.close(); } catch (IOException ignored) { }
                 }
             } catch (IOException e) {
-                if (running) log("viewer accept failed: " + e);
+                if (running && !vsock.isClosed()) log("viewer accept failed: " + e);
             } catch (Throwable e) {
                 log("viewer accept failed: " + e);
             }
@@ -1205,6 +1339,7 @@ public final class Relay {
      */
     private void viewerConnection(Socket s) {
         Viewer v = null;
+        String why = "connection ended";
         try {
             s.setSoTimeout(10000);
             InputStream in = new java.io.BufferedInputStream(s.getInputStream(), 4096);
@@ -1236,7 +1371,8 @@ public final class Relay {
                 os.flush();
                 me.sock = s;
                 me.from = String.valueOf(s.getRemoteSocketAddress());
-                me.out = new Outbox("relay-viewer-out", 20000, 16 << 20, false, () -> viewerLost(me));
+                me.out = new Outbox("relay-viewer-out", cfg.viewerQueueItems, 16 << 20, false,
+                        () -> viewerLost(me, "connection lost (write failed: " + me.out.failure() + ")"));
                 me.out.attach(os);
                 byte[] first = viewerBacklog();
                 me.out.offer(Ws.frame(2, first));
@@ -1248,38 +1384,58 @@ public final class Relay {
             v = me;
             s.setSoTimeout(0);
             changed();
-            Ws.readClient(in, reply -> me.out.offer(reply));
+            boolean closeFrame = Ws.readClient(in, reply -> me.out.offer(reply), pong -> {
+                synchronized (lock) { onPong(me, pong); }
+            });
+            why = closeFrame ? "the TV closed the connection" : "the TV disconnected (end of stream)";
             // The client closed (and its close frame was echoed): let the echo out before the socket goes.
             me.out.closeWhenDrained();
             try { Thread.sleep(200); } catch (InterruptedException ignored) { }
         } catch (Throwable e) {
-            log("viewer connection: " + e);
+            // A reset or a half frame is the TV going away (killed, Wi-Fi lost), not slowness.
+            String m = String.valueOf(e.getMessage());
+            boolean gone = e instanceof java.net.SocketException || e instanceof java.io.EOFException || m.contains("stream ended inside a frame");
+            why = gone ? "connection lost (" + m + ")" : "error: " + e;
+            if (v == null) log("viewer connection from " + s.getRemoteSocketAddress() + " ended: " + e);
         }
-        if (v != null) viewerLost(v);
+        if (v != null) viewerLost(v, why);
         else try { s.close(); } catch (IOException ignored) { }
     }
 
-    private void viewerLost(Viewer v) {
+    /** The viewer's connection ended (read side, or the writer failed). */
+    private void viewerLost(Viewer v, String why) {
         synchronized (lock) {
-            if (!viewers.remove(v)) return;
+            if (!retire(v, why)) return;
             v.out.close();
             try { v.sock.close(); } catch (IOException ignored) { }
-            log("viewer " + v.from + " left");
         }
         changed();
     }
 
     /** Lock held. */
     private void dropViewer(Viewer v, String why) {
-        if (!viewers.remove(v)) return;
-        log("viewer " + v.from + " dropped: " + why);
+        if (!retire(v, why)) return;
         v.out.close();
         try { v.sock.close(); } catch (IOException ignored) { }
     }
 
+    /** Lock held. Takes the viewer out of the list and records its statistics and why it ended; false if it was already gone. */
+    private boolean retire(Viewer v, String why) {
+        if (!viewers.remove(v)) return false;
+        String line = viewerLine(v) + "; ended: " + why;
+        Game g = game;
+        if (g != null) {
+            g.viewerReport.add(line);
+            g.events.add("TV viewer " + v.from + " left (" + why + ")");
+        }
+        log("viewer " + v.from + " left: " + why);
+        return true;
+    }
+
     /** Lock held. Sends a close frame after everything queued and lets go of every viewer. */
-    private void closeViewers() {
+    private void closeViewers(String why) {
         for (Viewer v : new ArrayList<>(viewers)) {
+            retire(v, why);
             v.out.offer(Ws.frame(8, new byte[0]));
             v.out.closeWhenDrained();
             final Socket vs = v.sock;
@@ -1289,7 +1445,6 @@ public final class Relay {
             t.setDaemon(true);
             t.start();
         }
-        viewers.clear();
     }
 
     // Viewer stream (framing of plan section 4, for the TV that joins later) ------------------

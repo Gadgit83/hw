@@ -41,7 +41,24 @@ static void *restore_thread(void *arg)
  *   down:<finger>:<x>:<y>   move:<finger>:<x>:<y>   up:<finger>:<x>:<y>   (x, y normalised 0..1, as SDL2 gives them)
  *   focuslost  focusgained  minimized  restored      (window events, as the phone sends them)
  *   ipc:<text>                                         (a message to the engine as the frontend sends it, e.g. ipc:FGood Night: that team left)
+ *   waitfile:<path>                                    (blocks the script until the file exists: the shell or the net-test harness decides when)
+ *   key:esc  key:y                                     (a key press and release, as GameActivity sends for Back and the confirm in a network game)
  *   log:<text>                                         (marks the engine log, for the shell driver) */
+static void push_key(SDL_Keycode sym, SDL_Scancode sc)
+{
+    for (int down = 1; down >= 0; down--) {
+        SDL_Event e;
+        memset(&e, 0, sizeof e);
+        e.type = down ? SDL_KEYDOWN : SDL_KEYUP;
+        e.key.state = down ? SDL_PRESSED : SDL_RELEASED;
+        e.key.keysym.sym = sym;
+        e.key.keysym.scancode = sc;
+        e.key.windowID = 1;
+        SDL_PushEvent(&e);
+        usleep(30000);
+    }
+}
+
 static void push_finger(Uint32 type, int id, float x, float y, float *px, float *py)
 {
     SDL_Event e;
@@ -87,6 +104,9 @@ static void *script_thread(void *arg)
         else if (!strncmp(act, "move:", 5) && sscanf(act + 5, "%d:%f:%f", &id, &x, &y) == 3) push_finger(SDL_FINGERMOTION, id, x, y, &px[id & 15], &py[id & 15]);
         else if (!strncmp(act, "up:", 3) && sscanf(act + 3, "%d:%f:%f", &id, &x, &y) == 3) push_finger(SDL_FINGERUP, id, x, y, &px[id & 15], &py[id & 15]);
         else if (!strncmp(act, "ipc:", 4)) fprintf(stderr, "[hosttest] ipc send %s -> %d\n", act + 4, hp_ipc_send(act + 4));
+        else if (!strncmp(act, "waitfile:", 9)) { for (int i = 0; i < 20000 && access(act + 9, F_OK) != 0; i++) usleep(50000); }
+        else if (!strcmp(act, "key:esc")) push_key(SDLK_ESCAPE, SDL_SCANCODE_ESCAPE);
+        else if (!strcmp(act, "key:y")) push_key(SDLK_y, SDL_SCANCODE_Y);
         else if (!strcmp(act, "focuslost")) push_window(SDL_WINDOWEVENT_FOCUS_LOST);
         else if (!strcmp(act, "focusgained")) push_window(SDL_WINDOWEVENT_FOCUS_GAINED);
         else if (!strcmp(act, "minimized")) push_window(SDL_WINDOWEVENT_MINIMIZED);

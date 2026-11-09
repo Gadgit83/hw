@@ -4,6 +4,30 @@ All notable changes to the native Android app (`project_files/Android-native`), 
 
 Only some builds were put on a phone, so a version below is a build that was made, not necessarily one that was released. Releases are tags on `android-master` with the APK attached; there is none yet.
 
+## 0.3.0-tv3 (104): leaving a network game, TV round trip (test build)
+
+Fixes from the phone-hosts, TV-watches device test of 0.3.0-tv2 (13 turns, passed), plus the reviewer's leftovers. `HP_PROFILE=test`, versionName `0.3.0-tv3-test`. 0.3.0-tv2 (103) moved the relay's and the lobby client's socket work off the UI thread (StrictMode in test builds).
+
+### Fixed
+
+- **Back in a network game did nothing; quitting needed a raw Escape then Y.** Back on the game screen of a network game now asks in the app: "Leave the game?" (a joining phone) or "End the game for everyone?" (the host), with "Keep playing" as the other answer (Back again also means keep playing). The game keeps running while the question is up, as a network game cannot pause. On yes the engine gets Escape then Y, the same path as typing them, so it sends its quit message and exits cleanly (engine log `engine returned 0`, the relay logs the quit). `GameActivity` falls back to closing the screen after 10 s if the engine does not answer. A local game is unchanged: Back is still forwarded as Escape. The role (host or joining phone) is written into `net.cfg` as `role=`; the launcher ignores the line.
+- **The pause button did nothing in a network game.** The engine's pause command only toggles away-from-keyboard there (`chPause`, and only when a remote team is playing), so the button looked dead. It is now neither drawn nor pressable in network games (own engine commit, two guarded lines in `uTouch.pas` and `uWorld.pas`, touch interface only); leaving goes through Back. Local games keep the button.
+- **Wrong wording after the host quit.** "You were dropped from the game: the player quit" is gone. The host that ends the game sees "You ended the game."; the other phones see "The host ended the game." (the host's quit now ends the game for everyone: relay end reason `The host ended the game`, event "(the host) ended the game"); a joining phone that quits is told "You left the game."; a phone that is dropped is still told why. The launcher shows a relay reason after "The game ended:" unless it is the host's.
+- **A TV that disconnected was logged as "dropped: too slow".** A viewer that closes, is reset or fails a write is now logged and reported as having left, with the reason ("the TV closed the connection", "the TV disconnected (end of stream)", "connection lost (...)"); only a full outbound queue is "too slow", and the log says at how many frames.
+- **Host restart race.** `HostService` waits for the relay stop that is still running before it binds the ports again, and retries the phone port a few times; the relay retries the TV viewer port (10 times, 1 s apart) instead of giving up for the whole hosting session. A failed bind no longer leaves a socket open.
+- **`RelayClient`.** A refusal or a host close now go through `close(why)` (they left the writer thread running); `close` is idempotent and reports the end once; the writer task catches any `Throwable` and closes the client.
+- **Network screen.** The addresses, the TV count, the live counters and the new per-TV figures are read by a background ticker (`NetSession.hostInfo`, once a second), not on the UI thread; the screen shows "Looking for the Wi-Fi address..." until the first snapshot. The Wi-Fi filter reads each interface in its own `try` (one unreadable interface no longer hides the others) and matches the hotspot `ap0`, `ap1` but not `apn0`.
+
+### Added
+
+- **TV lag measurement, relay side.** Every ~2 s the relay sends each viewer a WebSocket ping with a timestamp; the viewer's pong gives the round trip. The host screen's TV section shows, for each TV, last/average/best/worst round trip, the frames waiting in its outbound queue (and the deepest it reached) and how long it has been watching; the end-of-game report (and Share log) has a "TV viewers" section with the same figures and why each TV left. The ping waits behind the frames already queued, so a TV that falls behind shows a longer round trip. This is the relay-to-TV part only; the time the TV page needs to draw (true render lag) needs the viewer page to report it: follow-up.
+- `scripts/net-test.sh` scenarios `viewer3` (a short game played to a normal game over with the viewer connected: the viewer and its spectator engine must see the game over, no desync, a round trip measured), `viewerflap` (the viewer disconnects and reconnects twice, each time with the backlog, and the two departures must be logged as lost connections, never "too slow"), `hostquit` and `joinerquit` (Escape then Y injected into the engine: clean exit, the right reason at the relay and on the other phone). The host test launcher gets `key:esc`, `key:y` and `waitfile:` script actions. `RelayTests` (scenario `malformed`) gained the ping/round trip, disconnect classification, real overflow, port retry, quit wording and client close checks.
+- UI smoke test: the host screen's TV section, the Back confirmation (both texts, both answers, the role read from `net.cfg`), the end-of-game wording and the interface filter.
+
+### Changed
+
+- Version 0.3.0-tv3, versionCode 104.
+
 ## 0.3.0-tv1 (102): one phone hosts, the TV watches (test build)
 
 Combines `android-master` 0.2.3, `multiphone` 0.3.0-mp2 and the test profile into one small APK for the owner's phone and TV test (`HP_PROFILE=test`, application id `party.hedge.host.test`, versionName `0.3.0-tv1-test`).

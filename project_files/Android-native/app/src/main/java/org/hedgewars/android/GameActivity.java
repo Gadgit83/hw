@@ -112,13 +112,47 @@ public class GameActivity extends SDLActivity {
         android.os.Process.killProcess(android.os.Process.myPid());
     }
 
+    private android.app.AlertDialog backDialog;
+    private boolean quitting;
+    private final android.os.Handler uiHandler = new android.os.Handler(android.os.Looper.getMainLooper());
+
     /**
-     * The engine has no Android back button handling, so the system Back key is forwarded as
-     * Escape, which opens its pause/quit dialog. Leaving the game finishes the activity.
+     * The engine has no Android back button handling. In a local game the system Back key is forwarded as Escape, which
+     * opens the engine's own quit question. In a network game that question is easy to miss and the pause button does
+     * nothing useful, so Back asks in the app ({@link BackConfirm}); on "yes" the engine is quit the way a player does
+     * it, Escape then Y, so it sends its quit message and ends cleanly. The game keeps running while the question is up:
+     * a network game cannot pause.
      */
     @Override
     public void onBackPressed() {
-        SDLActivity.onNativeKeyDown(KeyEvent.KEYCODE_ESCAPE);
-        SDLActivity.onNativeKeyUp(KeyEvent.KEYCODE_ESCAPE);
+        int role = BackConfirm.role(getFilesDir());
+        if (role == BackConfirm.LOCAL) {
+            SDLActivity.onNativeKeyDown(KeyEvent.KEYCODE_ESCAPE);
+            SDLActivity.onNativeKeyUp(KeyEvent.KEYCODE_ESCAPE);
+            return;
+        }
+        if (quitting) return;
+        if (backDialog != null && backDialog.isShowing()) {
+            backDialog.dismiss();                    // Back again means "keep playing"
+            return;
+        }
+        backDialog = BackConfirm.show(this, role == BackConfirm.HOST, this::quitEngine);
+    }
+
+    private static void tap(int keyCode) {
+        SDLActivity.onNativeKeyDown(keyCode);
+        SDLActivity.onNativeKeyUp(keyCode);
+    }
+
+    /** Escape opens the engine's quit question, Y confirms it; if the engine was already asking, a second round settles it. */
+    private void quitEngine() {
+        if (quitting) return;
+        quitting = true;
+        tap(KeyEvent.KEYCODE_ESCAPE);
+        uiHandler.postDelayed(() -> tap(KeyEvent.KEYCODE_Y), 300);
+        uiHandler.postDelayed(() -> { if (!isFinishing()) tap(KeyEvent.KEYCODE_ESCAPE); }, 2000);
+        uiHandler.postDelayed(() -> { if (!isFinishing()) tap(KeyEvent.KEYCODE_Y); }, 2300);
+        // The engine did not answer: leave anyway (the host then sees this phone dropped).
+        uiHandler.postDelayed(() -> { if (!isFinishing()) finish(); }, 10000);
     }
 }

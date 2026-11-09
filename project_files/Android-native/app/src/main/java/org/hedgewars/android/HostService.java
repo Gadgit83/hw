@@ -33,6 +33,8 @@ public class HostService extends Service {
     /** Why hosting failed, or "". Cleared by {@link #begin()} before a start is requested, so a screen never reads an old failure. */
     static volatile String error = "";
     static volatile boolean starting;
+    /** The relay stop that is still running on its own thread, if any. A new start waits for it: both want the same ports. */
+    private static volatile Thread stopping;
     /** Counts start requests; a failure of an earlier attempt never overwrites the state of a later one. */
     private static int generation;
     /**
@@ -96,8 +98,14 @@ public class HostService extends Service {
                     NetSession.ping();
                 }
             };
+            // A stop that was asked for a moment ago closes its sockets on another thread; binding the same ports before
+            // it is done fails with "address already in use".
+            Thread st = stopping;
+            if (st != null) {
+                try { st.join(10000); } catch (InterruptedException ignored) { Thread.currentThread().interrupt(); }
+            }
             Relay r = new Relay(cfg);
-            r.start();
+            startWithRetry(r);
             hostSecret = cfg.hostSecret;
             relay = r;
             NetSession.acquireLocks(app);
@@ -113,6 +121,19 @@ public class HostService extends Service {
         } finally {
             starting = false;
             NetSession.ping();
+        }
+    }
+
+    /** Opens the phone port; if it is still in use, tries a few more times (the viewer port retries inside the relay). */
+    private static void startWithRetry(Relay r) throws IOException {
+        for (int attempt = 1; ; attempt++) {
+            try {
+                r.start();
+                return;
+            } catch (java.net.BindException e) {
+                if (attempt >= 5) throw e;
+                try { Thread.sleep(600); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); throw e; }
+            }
         }
     }
 
@@ -152,6 +173,7 @@ public class HostService extends Service {
         if (r != null) {
             Thread t = new Thread(r::stop, "host-stop");
             t.setDaemon(true);
+            stopping = t;
             t.start();
         }
     }

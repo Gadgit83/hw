@@ -29,6 +29,8 @@ public final class RelayClient {
         public List<String> lines = new ArrayList<>();
         public String host = "";
         public int port;
+        /** This phone is the one that hosts (its Quit ends the game for everyone). */
+        public boolean asHost;
     }
 
     public interface Handler {
@@ -54,6 +56,8 @@ public final class RelayClient {
     private Socket socket;
     private OutputStream out;
     private volatile boolean closed;
+    /** Taken only to decide who closes; never while writing, so close() never waits for a stalled write. */
+    private final Object closeLock = new Object();
     private List<SetupModel.Team> teams;
 
     public RelayClient(String host, int port, String name, String build, boolean isHost, List<SetupModel.Team> teams, Handler h) {
@@ -124,7 +128,9 @@ public final class RelayClient {
                 if (closed) return;
                 try {
                     send(m);
-                } catch (IOException e) {
+                } catch (Throwable e) {
+                    // Any failure (an IOException, a null stream after a failed connect, an Error) ends the client: a writer that
+                    // died silently would leave the screen believing it is still connected.
                     close("The connection to the host was lost.");
                 }
             });
@@ -154,9 +160,12 @@ public final class RelayClient {
         close(null);
     }
 
+    /** Idempotent: the first call closes and (when {@code reason} is not null) tells the handler; later calls do nothing. */
     private void close(String reason) {
-        if (closed) return;
-        closed = true;
+        synchronized (closeLock) {
+            if (closed) return;
+            closed = true;
+        }
         writer.shutdown();
         final Socket sock = socket;
         // Closing a socket can block on some platforms, and this may be called from the UI thread: close it on its own thread.
@@ -188,14 +197,15 @@ public final class RelayClient {
                         for (Object o : Json.list(m, "lines")) s.lines.add(String.valueOf(o));
                         s.host = host;
                         s.port = port;
+                        s.asHost = isHost;
                         handler.onStart(s);
                         break;
                     }
                     case "summary": handler.onSummary(m); break;
                     case "notice": handler.onNotice(Json.str(m, "text", "")); break;
                     case "ping": trySend(Json.obj("t", "pong")); break;
-                    case "refuse": why = Json.str(m, "reason", "Refused by the host."); closed = true; handler.onClosed(why); return;
-                    case "closed": why = Json.str(m, "reason", "The host left."); closed = true; handler.onClosed(why); return;
+                    case "refuse": close(Json.str(m, "reason", "Refused by the host.")); return;
+                    case "closed": close(Json.str(m, "reason", "The host left.")); return;
                     case "dropped": handler.onNotice(Json.str(m, "reason", "You were dropped.")); break;
                     default: break;
                 }
@@ -204,10 +214,7 @@ public final class RelayClient {
             if (closed) return;
             why = "The connection to the host was lost (" + e + ").";
         }
-        if (!closed) {
-            closed = true;
-            handler.onClosed(why);
-        }
+        close(why);
     }
 
     // Starting the engine ---------------------------------------------------------------------
@@ -226,6 +233,7 @@ public final class RelayClient {
             w.write("token=" + s.token + "\n");
             w.write("nick=" + s.nick.replace('\n', ' ') + "\n");
             w.write("diag=" + diagPath + "\n");
+            w.write("role=" + (s.asHost ? "host" : "player") + "\n");          // read by GameActivity (the launcher ignores it)
         }
     }
 }

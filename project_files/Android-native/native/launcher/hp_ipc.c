@@ -328,7 +328,10 @@ static void *down_thread(void *arg)
                 memcpy(t, msg + 2, (size_t)len - 2);
                 t[len - 2] = 0;
                 char m[300];
-                snprintf(m, sizeof m, "The host ended the game: %s", t);
+                /* The relay's reason is shown to the player: "The host ended the game" is a sentence of its own, anything else
+                 * (a desync, every engine gone) follows "The game ended:". */
+                if (!strncmp(t, "The host ended the game", 23)) snprintf(m, sizeof m, "%s", t);
+                else snprintf(m, sizeof m, "The game ended: %s", t);
                 net_lost(m);
             }
             continue;

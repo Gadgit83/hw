@@ -28,6 +28,15 @@ import java.util.concurrent.TimeUnit;
  *              nobody may be dropped and the games must agree
  *   solo       one phone with three teams, no joiner           viewer1    solo with the TV viewer from the start
  *   viewer2    two phones, the TV viewer joins late
+ *   viewer3    one phone, a short game (low health) with the TV viewer from the start, played to a NORMAL game over (no quit);
+ *              the viewer must see the game over, no desync, the relay must have measured a round trip for it
+ *   viewerflap one phone, a short game; the TV viewer connects, is killed, connects again, is killed and connects a third time
+ *              (each time a new viewer-sim and spectator engine, so each joins with the backlog); the last one must see the game over;
+ *              the relay must log two departures as lost connections, never as "too slow"
+ *   hostquit   two phones; at turn NET_TURNS_BEFORE_KILL the host phone's engine gets Escape then Y, exactly what the app's
+ *              Back confirmation sends: the host's engine must exit cleanly (0) and the relay must end the game for everyone
+ *              with "The host ended the game" (the other phone is told by the launcher)
+ *   joinerquit the same on phone B: B's engine exits 0, the relay says B quit (not dropped by force), A is unaffected
  *   negcontrol two phones, the relay deliberately alters one byte of the first turn checksum N sent to phone B: the
  *              desync detection MUST fire (this scenario passes only if it does)
  * Prints a verdict line "RESULT: PASS" or "RESULT: FAIL"; the exit code is 0 only for PASS (for negcontrol: only if the
@@ -96,7 +105,8 @@ public class NetHarness {
         }
 
         public void onSummary(Map<String, Object> m) { summary = m; gotSummary.countDown(); }
-        public void onNotice(String t) { System.out.println("[harness] " + name + " notice: " + t); }
+        volatile String lastNotice = "";
+        public void onNotice(String t) { lastNotice = t; System.out.println("[harness] " + name + " notice: " + t); }
         public void onClosed(String r) { closed = r; System.out.println("[harness] " + name + " lobby closed: " + r); }
     }
 
@@ -125,15 +135,20 @@ public class NetHarness {
         hostModel.rules.value[Rules.V_TURN_TIME] = 10;
         hostModel.rules.value[Rules.V_HEALTH] = 40;
         hostModel.rules.value[Rules.V_SUDDEN] = 1;
+        if (scenario.equals("viewer3") || scenario.equals("viewerflap")) {
+            // a short game that still reaches a normal game over: little health, short turns
+            hostModel.rules.value[Rules.V_HEALTH] = Integer.parseInt(System.getenv().getOrDefault("NET_HEALTH", "15"));
+            hostModel.rules.value[Rules.V_TURN_TIME] = 8;
+        }
 
         List<SetupModel.Team> aTeams = new ArrayList<>(), bTeams = new ArrayList<>(), cTeams = new ArrayList<>();
         aTeams.add(team(d, rnd, "Alpha One", 0, 0, aTeams));
         aTeams.add(team(d, rnd, "Alpha Bot", 1, 5, aTeams));
         bTeams.add(team(d, rnd, "Bravo One", 0, 0, bTeams));        // same colour as Alpha One on purpose
         bTeams.add(team(d, rnd, "Bravo Bot", 2, 3, bTeams));
-        if (scenario.equals("solo") || scenario.equals("viewer1")) { aTeams.add(team(d, rnd, "Alpha Three", 3, 4, aTeams)); bTeams.clear(); }
+        if (scenario.equals("solo") || scenario.startsWith("viewer1") || scenario.equals("viewer3") || scenario.equals("viewerflap")) { aTeams.add(team(d, rnd, "Alpha Three", 3, 4, aTeams)); bTeams.clear(); }
         java.util.Set<String> known = new java.util.HashSet<>(java.util.Arrays.asList("basic", "basic3", "dropout", "dropout3", "stall",
-                "slowstart", "solo", "viewer1", "viewer2", "negcontrol"));
+                "slowstart", "solo", "viewer1", "viewer2", "viewer3", "viewerflap", "hostquit", "joinerquit", "negcontrol"));
         if (!known.contains(scenario)) {
             System.out.println("[harness] unknown scenario '" + scenario + "'; known: " + new java.util.TreeSet<>(known));
             System.exit(2);
@@ -167,8 +182,9 @@ public class NetHarness {
                 return f;
             };
         }
+        final List<String> relayLog = new java.util.concurrent.CopyOnWriteArrayList<>();
         cfg.listener = new Relay.Listener() {
-            public void log(String line) { System.out.println("[relay] " + line); }
+            public void log(String line) { relayLog.add(line); System.out.println("[relay] " + line); }
             public void changed() { }
         };
         Relay relay = new Relay(cfg);
@@ -177,8 +193,12 @@ public class NetHarness {
         // NET_INPUT=1: the human teams get scripted touch input (walk, jump, fire), see inputScript.
         String script = System.getenv("NET_SCRIPT");
         if (script == null && System.getenv("NET_INPUT") != null) script = inputScript(400);
-        Phone pa = new Phone("Phone A", root.resolve("phoneA"), true, aTeams, hosttest, data, script);
-        Phone pb = new Phone("Phone B", root.resolve("phoneB"), false, bTeams, hosttest, data, script);
+        // hostquit / joinerquit: the quitter's engine waits for a file the harness creates, then gets Escape and Y (the app's Back confirmation).
+        boolean quitScenario = scenario.equals("hostquit") || scenario.equals("joinerquit");
+        Path quitFlag = root.resolve("quit.now");
+        String quitScript = "0:waitfile:" + quitFlag + ";0:key:esc;600:key:y";
+        Phone pa = new Phone("Phone A", root.resolve("phoneA"), true, aTeams, hosttest, data, scenario.equals("hostquit") ? quitScript : script);
+        Phone pb = new Phone("Phone B", root.resolve("phoneB"), false, bTeams, hosttest, data, scenario.equals("joinerquit") ? quitScript : script);
         Phone pc = new Phone("Phone C", root.resolve("phoneC"), false, cTeams, hosttest, data, script);
         pa.client = new RelayClient("127.0.0.1", relay.port(), "Phone A", "harness", true, aTeams, pa).hostSecret(cfg.hostSecret);
         if (scenario.equals("slowstart")) pb.extraEnv.put("HP_NET_TX_DELAY_MS", System.getenv().getOrDefault("NET_DELAY_MS", "30000"));
@@ -207,27 +227,39 @@ public class NetHarness {
 
         long t0 = System.currentTimeMillis();
         boolean killed = false;
-        // TV viewer (scenarios viewer1 and viewer2): the existing e2e-host spectator test. viewer-sim.js plays the TV page
+        // TV viewer (scenarios viewer*): the existing e2e-host spectator test. viewer-sim.js plays the TV page
         // (WebSocket client, TL->TN and erdriven, pushes into) pc_host spec, a second desktop engine as the TV's engine.
+        // viewerflap runs three such sessions one after the other, killing the first two.
         boolean wantViewer = scenario.startsWith("viewer");
-        int viewerAfter = Integer.parseInt(System.getenv().getOrDefault("NET_VIEWER_AFTER_TURNS", scenario.equals("viewer2") ? "3" : "0"));
-        Process specProc = null, simProc = null;
+        boolean flap = scenario.equals("viewerflap");
+        int viewerAfter = Integer.parseInt(System.getenv().getOrDefault("NET_VIEWER_AFTER_TURNS", scenario.equals("viewer2") ? "3" : flap ? "1" : "0"));
+        final int[] killAt = flap ? new int[] { viewerAfter + 1, viewerAfter + 3 } : new int[0];
         final String specPort = System.getenv().getOrDefault("NET_SPEC_PORT", "18770");
-        Path vdir = root.resolve("viewer");
+        final List<ViewerRun> runs = new ArrayList<>();
+        ViewerRun cur = null;
+        long reconnectAt = 0;
         while (System.currentTimeMillis() - t0 < timeout * 1000) {
             if (pa.gotSummary.await(1, TimeUnit.SECONDS)) break;
-            if (wantViewer && specProc == null && relay.turns() >= viewerAfter && relay.viewerPort() > 0) {
-                Files.createDirectories(vdir.resolve("user"));
-                ProcessBuilder sp = new ProcessBuilder(System.getenv("NET_PCHOST"), "spec", data, vdir.resolve("user").toString(), "-", specPort, vdir.toString());
-                sp.environment().put("SDL_AUDIODRIVER", "dummy");
-                sp.redirectErrorStream(true).redirectOutput(vdir.resolve("spec.log").toFile());
-                specProc = sp.start();
-                Thread.sleep(1500);
-                ProcessBuilder np = new ProcessBuilder("node", System.getenv("NET_VIEWER_SIM"), "--url", "ws://127.0.0.1:" + relay.viewerPort(),
-                        "--spec", "127.0.0.1:" + specPort, "--out", vdir.resolve("result.json").toString(), "--max", "600");
-                np.redirectErrorStream(true).redirectOutput(vdir.resolve("viewer-sim.log").toFile());
-                simProc = np.start();
-                System.out.println("[harness] === TV viewer (viewer-sim.js + spectator engine) connected after " + relay.turns() + " turn checksums ===");
+            if (wantViewer && relay.viewerPort() > 0) {
+                int n = runs.size();
+                if (cur == null) {
+                    int need = n == 0 ? viewerAfter : (flap && n < 3 ? killAt[n - 1] + 1 : Integer.MAX_VALUE);
+                    if (relay.turns() >= need && System.currentTimeMillis() >= reconnectAt) {
+                        cur = new ViewerRun(root.resolve("viewer" + (flap ? "-" + (n + 1) : "")), n + 1, data, specPort, relay.viewerPort());
+                        cur.start();
+                        runs.add(cur);
+                        System.out.println("[harness] === TV viewer session " + (n + 1) + " (viewer-sim.js + spectator engine) connected after " + relay.turns() + " turn checksums ===");
+                    }
+                } else if (flap && n <= killAt.length && relay.turns() >= killAt[n - 1]) {
+                    System.out.println("[harness] === TV viewer session " + n + " killed (SIGKILL of viewer-sim and its spectator engine) after " + relay.turns() + " turn checksums ===");
+                    cur.kill();
+                    cur = null;
+                    reconnectAt = System.currentTimeMillis() + 1500;
+                }
+            }
+            if (quitScenario && !Files.exists(quitFlag) && relay.turns() >= killAfterTurns) {
+                System.out.println("[harness] === " + scenario + ": " + (scenario.equals("hostquit") ? "the host" : "phone B") + " confirms 'leave the game' (Escape then Y) after " + relay.turns() + " turn checksums ===");
+                Files.write(quitFlag, new byte[] { 1 });
             }
             if (!killed && (scenario.startsWith("dropout") || scenario.equals("stall")) && relay.turns() >= killAfterTurns) {
                 killed = true;
@@ -250,28 +282,11 @@ public class NetHarness {
                     + (p.proc.exitValue() > 128 ? " (signal " + (p.proc.exitValue() - 128) + ")" : "")));
             if (p.proc.isAlive()) { exits.put(p.name, -1); p.proc.destroyForcibly(); } else exits.put(p.name, p.proc.exitValue());
         }
-        if (simProc != null) {
-            if (!simProc.waitFor(40, TimeUnit.SECONDS)) simProc.destroyForcibly();
-            if (specProc.isAlive()) specProc.waitFor(20, TimeUnit.SECONDS);
-            System.out.println("\n================ TV VIEWER ================");
-            String res = Files.exists(vdir.resolve("result.json")) ? new String(Files.readAllBytes(vdir.resolve("result.json"))) : "(no result.json)";
-            for (String key : new String[] { "setupLines", "setupTransformedLines", "sawSpectateLine", "backlogMessages", "liveFrames", "liveMessages", "nonWhitelisted", "badFraming", "finishedBecause", "closed", "firstMessageBytes" })
-                System.out.println("viewer-sim " + key + ": " + jsonField(res, key));
-            System.out.println("viewer-sim message counts by type: " + jsonField(res, "counts"));
-            String sl = new String(Files.readAllBytes(vdir.resolve("spec.log")));
-            String el = "";
-            try (java.util.stream.Stream<Path> w = Files.walk(vdir.resolve("user"))) {
-                for (Path f : (Iterable<Path>) w.filter(x -> x.toString().endsWith(".log"))::iterator) el += new String(Files.readAllBytes(f));
-            }
-            System.out.println("spectator engine: 'Desync detected' " + count(el + sl, "Desync detected") + ", 'does not match' " + count(el + sl, "does not match")
-                    + ", 'Unexpected protocol' " + count(el + sl, "Unexpected protocol") + ", 'queue error' " + count(el + sl, "queue error")
-                    + ", turn-end checksums compared (got cmd N) " + count(el, "got cmd \"N\"") + ", " + grep(sl, "engine returned") + ", game over seen: " + sl.contains("game over ('q') seen"));
-            String sres = el + sl;
-            if (count(sres, "Desync detected") + count(sres, "does not match") + count(sres, "Unexpected protocol") + count(sres, "queue error") > 0) fails.add("the spectator engine reported a desync, a mismatch, an unexpected protocol or a queue error");
-            if (!sl.contains("game over ('q') seen")) fails.add("the spectator engine did not see the game over");
-            if (!jsonField(res, "nonWhitelisted").matches("0|\\[\\]|\\{\\}|-")) fails.add("the viewer saw non-whitelisted messages: " + jsonField(res, "nonWhitelisted"));
-            if (!jsonField(res, "badFraming").matches("0|false|\\[\\]|-")) fails.add("the viewer saw bad framing: " + jsonField(res, "badFraming"));
-            System.out.println("spectator engine map digest check: " + grep(el, "CheckLandDigest") + " | " + grep(el, "landcheck"));
+        if (wantViewer && runs.isEmpty()) fails.add("the TV viewer never connected (the game was too short or the viewer port was closed)");
+        if (flap && runs.size() < 3) fails.add("only " + runs.size() + " of the 3 TV viewer sessions started (the game ended too early)");
+        for (ViewerRun vr : runs) {
+            if (!vr.killed) vr.finish();
+            vr.report(fails, vr.idx > 1);
         }
         System.out.println("\n[harness] game over seen by the host's lobby link: " + over);
         Relay.GameSummary gs = relay.lastSummary();
@@ -345,7 +360,8 @@ public class NetHarness {
         System.out.println("viewer backlog framing available after the game: " + (vb == null ? "no (game cleared)" : vb.length + " bytes"));
 
         // Verdict ---------------------------------------------------------------------------------
-        boolean droppedScenario = scenario.startsWith("dropout") || scenario.equals("stall");
+        boolean droppedScenario = scenario.startsWith("dropout") || scenario.equals("stall") || scenario.equals("joinerquit");
+        boolean hostQuit = scenario.equals("hostquit");
         int desyncLines = 0;
         for (int v : desyncs.values()) desyncLines += v;
         boolean relayDesync = false;
@@ -365,8 +381,48 @@ public class NetHarness {
             Integer ex = exits.get(p.name);
             boolean isVictim = droppedScenario && p == victim;
             if (ex == null) { fails.add(p.name + ": its engine never started"); continue; }
-            if (!isVictim && ex != 0) fails.add(p.name + ": engine exit code " + ex + " (expected 0)");
-            if (!isVictim && !Boolean.TRUE.equals(streamOk.get(p.name))) fails.add(p.name + ": the relay's stream and the launcher's received stream differ");
+            boolean cutByHost = hostQuit && p != pa;                           // the other phone's engine is cut off by the host's quit
+            if (quitScenario && p == (hostQuit ? pa : pb) && ex != 0) fails.add(p.name + ": quit by Escape then Y but the engine exit code is " + ex + " (a clean quit is 0)");
+            if (!isVictim && !cutByHost && ex != 0) fails.add(p.name + ": engine exit code " + ex + " (expected 0)");
+            if (!isVictim && !cutByHost && !Boolean.TRUE.equals(streamOk.get(p.name))) fails.add(p.name + ": the relay's stream and the launcher's received stream differ");
+        }
+        if (quitScenario) {
+            Phone q = hostQuit ? pa : pb;
+            String ql = Files.exists(q.dir.resolve("engine.log")) ? new String(Files.readAllBytes(q.dir.resolve("engine.log"))) : "";
+            String nl = Files.exists(q.dir.resolve("netgame.txt")) ? new String(Files.readAllBytes(q.dir.resolve("netgame.txt"))) : "";
+            System.out.println("quit check: " + q.name + " engine log: " + grep(ql, "engine returned") + "; launcher: " + grep(nl, "CONTROL") + " / SUMMARY " + (nl.contains("SUMMARY") ? "written" : "missing"));
+            if (!ql.contains("engine returned 0")) fails.add(q.name + ": the engine log does not show a clean exit ('engine returned 0')");
+        }
+        if (hostQuit) {
+            if (!gs.endReason.equals(Relay.HOST_ENDED)) fails.add("end reason '" + gs.endReason + "', expected '" + Relay.HOST_ENDED + "'");
+            boolean ev = false;
+            for (String e : gs.events) if (e.contains("(the host) ended the game")) ev = true;
+            if (!ev) fails.add("no 'the host ended the game' event");
+            for (String e : gs.events) if (e.contains("dropped")) fails.add("the host's quit was reported as a dropout: " + e);
+            String bl = Files.exists(pb.dir.resolve("netgame.txt")) ? new String(Files.readAllBytes(pb.dir.resolve("netgame.txt"))) : "";
+            String bres = Files.exists(pb.dir.resolve("engine.log")) ? new String(Files.readAllBytes(pb.dir.resolve("engine.log"))) : "";
+            System.out.println("quit check: Phone B launcher: " + grep(bl, "LINK ") + "; engine: " + grep(bres, "engine returned"));
+            if (!bl.contains("The host ended the game")) fails.add("Phone B was not told 'The host ended the game'");
+            if (pa.lastNotice.contains("dropped")) fails.add("the host phone was told it was dropped: " + pa.lastNotice);
+        } else if (scenario.equals("joinerquit")) {
+            System.out.println("quit check: Phone B was told: '" + pb.lastNotice + "'");
+            if (!pb.lastNotice.contains("You left the game")) fails.add("Phone B was not told 'You left the game.' (" + pb.lastNotice + ")");
+            for (String e : gs.events) if (e.contains("Phone B dropped")) System.out.println("quit check: relay event: " + e);
+        }
+        if (wantViewer) {
+            boolean rtt = false;
+            for (String v : gs.viewers) if (v.contains("pongs of")) rtt = true;
+            if (!rtt) fails.add("the relay measured no round trip for any TV viewer (the viewer must answer the WebSocket ping): " + gs.viewers);
+            for (String l : relayLog) if (l.contains("too slow") && l.contains("viewer")) fails.add("a viewer was reported too slow: " + l);
+            int joined = 0, lost = 0;
+            for (String e : gs.events) {
+                if (e.startsWith("TV viewer joined")) joined++;
+                if (e.startsWith("TV viewer ") && e.contains(" left (") && (e.contains("connection lost") || e.contains("disconnected") || e.contains("closed the connection"))) lost++;
+            }
+            System.out.println("TV viewer events in the relay report: " + joined + " joined, " + lost + " left because the TV went away");
+            if (flap && joined != 3) fails.add("expected 3 TV viewer joins, the relay saw " + joined);
+            if (flap && lost != 2) fails.add("expected 2 departures as lost connections, the relay saw " + lost);
+            if (!scenario.equals("viewer2") && !scenario.equals("viewer1") && !gs.endReason.contains("every engine finished")) fails.add("the game did not reach a normal game over: " + gs.endReason);
         }
         if (droppedScenario) {
             boolean dropEvent = false, injected = false;
@@ -374,7 +430,7 @@ public class NetHarness {
             if (!dropEvent) fails.add(victim.name + " was not reported dropped");
             if (!injected) fails.add("no team-gone F was injected");
             for (Phone p : phones) if (p != victim) for (String e : gs.events) if (e.contains(p.name + " dropped")) fails.add(p.name + " was dropped wrongly: " + e);
-        } else {
+        } else if (!hostQuit) {
             for (String e : gs.events) if (e.contains("dropped")) fails.add("unexpected dropout: " + e);
             if (!gs.endReason.contains("every engine finished")) fails.add("the game did not end by every engine finishing: " + gs.endReason);
         }
@@ -382,6 +438,73 @@ public class NetHarness {
         System.out.println(fails.isEmpty() ? "RESULT: PASS (0 Desync detected, " + gs.digests.size() + " turn checksums identical on all " + phones.length + " phones)"
                 : "RESULT: FAIL " + fails);
         System.exit(fails.isEmpty() ? 0 : 1);
+    }
+
+
+    /** One TV viewer session: viewer-sim.js (the TV page's stand-in) feeding a spectator engine, both from hedgewars-party's e2e-host. */
+    static final class ViewerRun {
+        final Path dir;
+        final int idx;
+        final String data, specPort;
+        final int wsPort;
+        Process spec, sim;
+        boolean killed;
+
+        ViewerRun(Path dir, int idx, String data, String specPort, int wsPort) {
+            this.dir = dir; this.idx = idx; this.data = data; this.specPort = specPort; this.wsPort = wsPort;
+        }
+
+        void start() throws Exception {
+            Files.createDirectories(dir.resolve("user"));
+            ProcessBuilder sp = new ProcessBuilder(System.getenv("NET_PCHOST"), "spec", data, dir.resolve("user").toString(), "-", specPort, dir.toString());
+            sp.environment().put("SDL_AUDIODRIVER", "dummy");
+            sp.redirectErrorStream(true).redirectOutput(dir.resolve("spec.log").toFile());
+            spec = sp.start();
+            Thread.sleep(1500);
+            ProcessBuilder np = new ProcessBuilder("node", System.getenv("NET_VIEWER_SIM"), "--url", "ws://127.0.0.1:" + wsPort,
+                    "--spec", "127.0.0.1:" + specPort, "--out", dir.resolve("result.json").toString(), "--max", "600");
+            np.redirectErrorStream(true).redirectOutput(dir.resolve("viewer-sim.log").toFile());
+            sim = np.start();
+        }
+
+        /** The TV is switched off or loses the network: both processes die at once (SIGKILL), no close frame. */
+        void kill() throws Exception {
+            killed = true;
+            sim.destroyForcibly();
+            spec.destroyForcibly();
+            sim.waitFor(10, TimeUnit.SECONDS);
+            spec.waitFor(10, TimeUnit.SECONDS);
+        }
+
+        void finish() throws Exception {
+            if (!sim.waitFor(40, TimeUnit.SECONDS)) sim.destroyForcibly();
+            if (spec.isAlive()) spec.waitFor(20, TimeUnit.SECONDS);
+            if (spec.isAlive()) spec.destroyForcibly();
+        }
+
+        void report(List<String> fails, boolean joinedLate) throws Exception {
+            System.out.println("\n================ TV VIEWER session " + idx + (killed ? " (killed by the harness)" : "") + " ================");
+            if (killed) return;
+            String res = Files.exists(dir.resolve("result.json")) ? new String(Files.readAllBytes(dir.resolve("result.json"))) : "(no result.json)";
+            for (String key : new String[] { "setupLines", "setupTransformedLines", "sawSpectateLine", "backlogMessages", "liveFrames", "liveMessages", "nonWhitelisted", "badFraming", "finishedBecause", "closed", "firstMessageBytes" })
+                System.out.println("viewer-sim " + key + ": " + jsonField(res, key));
+            System.out.println("viewer-sim message counts by type: " + jsonField(res, "counts"));
+            String sl = new String(Files.readAllBytes(dir.resolve("spec.log")));
+            String el = "";
+            try (java.util.stream.Stream<Path> w = Files.walk(dir.resolve("user"))) {
+                for (Path f : (Iterable<Path>) w.filter(x -> x.toString().endsWith(".log"))::iterator) el += new String(Files.readAllBytes(f));
+            }
+            System.out.println("spectator engine: 'Desync detected' " + count(el + sl, "Desync detected") + ", 'does not match' " + count(el + sl, "does not match")
+                    + ", 'Unexpected protocol' " + count(el + sl, "Unexpected protocol") + ", 'queue error' " + count(el + sl, "queue error")
+                    + ", turn-end checksums compared (got cmd N) " + count(el, "got cmd \"N\"") + ", " + grep(sl, "engine returned") + ", game over seen: " + sl.contains("game over ('q') seen"));
+            String sres = el + sl, who = "TV viewer session " + idx + ": ";
+            if (count(sres, "Desync detected") + count(sres, "does not match") + count(sres, "Unexpected protocol") + count(sres, "queue error") > 0) fails.add(who + "the spectator engine reported a desync, a mismatch, an unexpected protocol or a queue error");
+            if (!sl.contains("game over ('q') seen")) fails.add(who + "the spectator engine did not see the game over");
+            if (!jsonField(res, "nonWhitelisted").matches("0|\\[\\]|\\{\\}|-")) fails.add(who + "the viewer saw non-whitelisted messages: " + jsonField(res, "nonWhitelisted"));
+            if (!jsonField(res, "badFraming").matches("0|false|\\[\\]|-")) fails.add(who + "the viewer saw bad framing: " + jsonField(res, "badFraming"));
+            if (joinedLate && (!jsonField(res, "sawSpectateLine").equals("true") || jsonField(res, "backlogMessages").matches("0|-"))) fails.add(who + "a viewer that joined late did not get e$spectate 1 and a backlog");
+            System.out.println("spectator engine map digest check: " + grep(el, "CheckLandDigest") + " | " + grep(el, "landcheck"));
+        }
     }
 
     /** Taps on the touch HUD (fractions of the screen, as the host launcher injects them): walk right, jump, aim and fire, walk left. */

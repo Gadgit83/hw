@@ -69,6 +69,7 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
         NetSession.listener = this;
         NetSession.lobbyVisible = true;
         NetSession.cancelStartNotification(this);
+        if (NetSession.hosting) NetSession.startTicker();
         sendForeground(true);
         getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         RelayClient.StartInfo s = NetSession.pendingStart;
@@ -210,27 +211,40 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
         LinearLayout card = ui.card();
         boolean host = NetSession.hosting;
         if (host) {
-            List<String> addr = NetSession.localAddresses();
+            // All of this comes from a snapshot that a background ticker makes: listing the interfaces and reading the
+            // relay take locks and must not run on the UI thread.
+            NetSession.HostInfo hi = NetSession.hostInfo;
+            List<String> addr = hi == null ? new java.util.ArrayList<String>() : hi.addresses;
             StringBuilder a = new StringBuilder();
             for (String s : addr) a.append(a.length() == 0 ? "" : "   or   ").append(s).append(':').append(Relay.PHONE_PORT);
-            Relay rl = HostService.relay;
             // The TV address first and biggest: a one-phone host with the TV watching is the main use.
             card.addView(ui.heading("TV viewer address"));
-            if (rl != null && rl.viewerPort() > 0) {
+            if (hi == null) {
+                card.addView(ui.hint("Looking for the Wi-Fi address..."));
+            } else if (hi.viewerPort > 0) {
                 StringBuilder w = new StringBuilder();
-                for (String s : addr) w.append(w.length() == 0 ? "" : "\n").append("ws://").append(s).append(':').append(rl.viewerPort());
+                for (String s : addr) w.append(w.length() == 0 ? "" : "\n").append("ws://").append(s).append(':').append(hi.viewerPort);
                 TextView tv = ui.text(addr.isEmpty() ? NO_WIFI : w.toString(), 28, Color.WHITE);
                 tv.setTypeface(Typeface.DEFAULT_BOLD);
                 tv.setTextIsSelectable(true);
                 card.addView(tv);
-                card.addView(ui.hint("TVs watching now: " + rl.viewerCount() + ". The TV viewer connects here (open its page with ?ws="
-                        + (addr.isEmpty() ? "ws://IP:" + rl.viewerPort() : "ws://" + addr.get(0) + ":" + rl.viewerPort())
+                card.addView(ui.hint("TVs watching now: " + hi.viewers + ". The TV viewer connects here (open its page with ?ws="
+                        + (addr.isEmpty() ? "ws://IP:" + hi.viewerPort : "ws://" + addr.get(0) + ":" + hi.viewerPort)
                         + ", or set HW_WS_URL in the page). It retries by itself until a game is started. There is no automatic discovery yet."));
+                for (String vl : hi.viewerLines) {
+                    TextView t = ui.text("TV " + vl, 12, Color.WHITE);
+                    t.setTypeface(Typeface.MONOSPACE);
+                    card.addView(t);
+                }
+                if (!hi.viewerLines.isEmpty()) {
+                    card.addView(ui.hint("Round trip is relay to TV and back (a WebSocket ping every 2 s). Frames behind is the TV's queue at the relay: "
+                            + "it grows when the TV cannot keep up. It does not include the time the TV needs to draw."));
+                }
             } else {
-                card.addView(coloured(rl == null ? "The TV viewer endpoint is not running." : rl.viewerError(), Ui.DANGER));
+                card.addView(coloured(hi.viewerError.isEmpty() ? "The TV viewer endpoint is not running." : hi.viewerError, Ui.DANGER));
             }
             card.addView(ui.heading("Hosting: address for other phones"));
-            TextView big = ui.text(addr.isEmpty() ? NO_WIFI : a.toString(), 18, Color.WHITE);
+            TextView big = ui.text(hi == null ? "..." : addr.isEmpty() ? NO_WIFI : a.toString(), 18, Color.WHITE);
             big.setTypeface(Typeface.DEFAULT_BOLD);
             card.addView(big);
             card.addView(ui.hint("Other phones type this address (Join by address). Not needed for a one-phone game with the TV."));
@@ -241,8 +255,8 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
         String phase = st == null ? "connecting..." : Json.str(st, "state", "");
         boolean playing = "playing".equals(phase) || NetSession.inGame;
         card.addView(ui.hint("State: " + (playing ? "game running" : "lobby (setting up)")));
-        Relay r = HostService.relay;
-        if (host && r != null && playing) card.addView(ui.hint(r.liveText()));
+        NetSession.HostInfo live = NetSession.hostInfo;
+        if (host && live != null && playing && !live.live.isEmpty()) card.addView(ui.hint(live.live));
         card.addView(ui.heading("Phones and teams"));
         if (st != null) {
             long you = Json.num(st, "you", -1);

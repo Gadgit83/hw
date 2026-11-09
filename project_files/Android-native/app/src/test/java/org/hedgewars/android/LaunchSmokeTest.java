@@ -307,4 +307,78 @@ public class LaunchSmokeTest {
         b.onBackPressed();
         assertTrue("without a connection Back closes the screen", b.isFinishing());
     }
+
+    /** The host screen shows what the ticker found: a TV address, and for each TV its round trip and queue depth. */
+    @Test
+    public void netLobbyActivity_hostState_tvSection() throws Exception {
+        TestSupport.installData(app());
+        netState(LOBBY.replace("\"you\":2", "\"you\":1"), true);
+        java.util.List<String> lines = java.util.Arrays.asList(
+                "/192.168.1.106:36617: round trip 12.3 ms (average 15.0, best 9.0, worst 41.0, 5 pongs of 5 pings), 3 frames behind (deepest 7), watching for 12 s");
+        NetSession.hostInfo = new NetSession.HostInfo(java.util.Arrays.asList("192.168.1.57"), 8766, 1, "", "Game 1: 4 turns, log 120 messages", lines);
+        String text = launch(NetLobbyActivity.class, null, 600);
+        assertTrue("TV address is shown: " + text, text.contains("ws://192.168.1.57:8766") && text.contains("TVs watching now: 1"));
+        assertTrue("per-TV round trip and queue depth are shown: " + text,
+                text.contains("192.168.1.106") && text.contains("round trip 12.3 ms") && text.contains("3 frames behind"));
+        // Without a snapshot (before the first tick) the screen says so instead of claiming there is no Wi-Fi.
+        NetSession.hostInfo = null;
+        String early = launch(NetLobbyActivity.class, null, 300);
+        assertTrue("before the first snapshot: " + early, early.contains("Looking for the Wi-Fi address") && !early.contains("No Wi-Fi"));
+        // A TV viewer port that could not be opened is shown as a problem.
+        NetSession.hostInfo = new NetSession.HostInfo(java.util.Arrays.asList("192.168.1.57"), -1, 0, "The TV viewer port 8766 could not be opened", "", new java.util.ArrayList<String>());
+        String bad = launch(NetLobbyActivity.class, null, 300);
+        assertTrue("viewer port error shown: " + bad, bad.contains("could not be opened"));
+        System.out.println("SDK " + android.os.Build.VERSION.SDK_INT + ": NetLobbyActivity TV section ok");
+    }
+
+    /** The question Back asks in a network game: both states (joined phone, host), both answers, and the role read from net.cfg. */
+    @Test
+    public void gameBackConfirm_dialogStates() throws Exception {
+        TestSupport.installData(app());
+        Activity a = Robolectric.buildActivity(NetLobbyActivity.class, null).create().start().resume().visible().get();
+        for (boolean host : new boolean[] { false, true }) {
+            final boolean[] yes = { false };
+            android.app.AlertDialog d = BackConfirm.show(a, host, () -> yes[0] = true);
+            org.robolectric.shadows.ShadowAlertDialog sd = org.robolectric.Shadows.shadowOf(d);
+            String title = String.valueOf(sd.getTitle()), msg = String.valueOf(sd.getMessage());
+            assertTrue("title for " + (host ? "host" : "player") + ": " + title, title.equals(host ? "End the game for everyone?" : "Leave the game?"));
+            assertTrue("message: " + msg, host ? msg.contains("every phone") && msg.contains("TV") : msg.contains("carry on"));
+            assertTrue(msg.contains("keeps running"));
+            assertTrue(d.getButton(android.content.DialogInterface.BUTTON_POSITIVE).getText().toString().equals(host ? "End the game" : "Leave"));
+            assertTrue(d.getButton(android.content.DialogInterface.BUTTON_NEGATIVE).getText().toString().equals("Keep playing"));
+            d.getButton(android.content.DialogInterface.BUTTON_NEGATIVE).performClick();
+            assertFalse("Keep playing does not quit", yes[0]);
+            android.app.AlertDialog d2 = BackConfirm.show(a, host, () -> yes[0] = true);
+            d2.getButton(android.content.DialogInterface.BUTTON_POSITIVE).performClick();
+            assertTrue("the positive button quits", yes[0]);
+        }
+        java.io.File dir = app().getFilesDir();
+        new java.io.File(dir, "net.cfg").delete();
+        assertTrue("no net.cfg is a local game", BackConfirm.role(dir) == BackConfirm.LOCAL);
+        java.nio.file.Files.write(new java.io.File(dir, "net.cfg").toPath(), "host=1.2.3.4\nport=46633\ntoken=x\nrole=player\n".getBytes("UTF-8"));
+        assertTrue(BackConfirm.role(dir) == BackConfirm.PLAYER);
+        java.nio.file.Files.write(new java.io.File(dir, "net.cfg").toPath(), "host=1.2.3.4\nport=46633\ntoken=x\nrole=host\n".getBytes("UTF-8"));
+        assertTrue(BackConfirm.role(dir) == BackConfirm.HOST);
+        java.nio.file.Files.write(new java.io.File(dir, "net.cfg").toPath(), "host=1.2.3.4\nport=46633\ntoken=x\n".getBytes("UTF-8"));
+        assertTrue("a net.cfg from an older build is a joining phone", BackConfirm.role(dir) == BackConfirm.PLAYER);
+        // writeGameFiles records the role
+        org.hedgewars.android.net.RelayClient.StartInfo si = new org.hedgewars.android.net.RelayClient.StartInfo();
+        si.host = "127.0.0.1"; si.port = 46633; si.token = "t"; si.nick = "n"; si.asHost = true;
+        org.hedgewars.android.net.RelayClient.writeGameFiles(new java.io.File(dir, "game.ipc"), new java.io.File(dir, "net.cfg"), si, "/x");
+        assertTrue("the host's net.cfg says role=host", BackConfirm.role(dir) == BackConfirm.HOST);
+        new java.io.File(dir, "net.cfg").delete();
+        System.out.println("SDK " + android.os.Build.VERSION.SDK_INT + ": Back confirmation dialog states ok");
+    }
+
+    /** What each phone is told when the game ends or it leaves, and the interface filter. */
+    @Test
+    public void netSession_wordingAndInterfaces() {
+        assertTrue(NetSession.endNotice("The host ended the game", true).equals("You ended the game."));
+        assertTrue(NetSession.endNotice("The host ended the game", false).equals("The host ended the game."));
+        assertTrue("a game that simply finished says nothing", NetSession.endNotice("every engine finished", false).isEmpty());
+        assertTrue(NetSession.endNotice("Desync between A and B", false).startsWith("The game ended: Desync"));
+        assertTrue(NetSession.isLanInterface("wlan0") && NetSession.isLanInterface("ap0") && NetSession.isLanInterface("swlan0") && NetSession.isLanInterface("eth0"));
+        assertFalse("apn0 is not a hotspot", NetSession.isLanInterface("apn0"));
+        assertFalse(NetSession.isLanInterface("ap") || NetSession.isLanInterface("rmnet_data0") || NetSession.isLanInterface("tun0") || NetSession.isLanInterface("p2p-wlan0-0") || NetSession.isLanInterface(null));
+    }
 }

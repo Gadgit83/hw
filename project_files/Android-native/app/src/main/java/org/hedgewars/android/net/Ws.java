@@ -78,12 +78,18 @@ final class Ws {
      * Reads client frames until the client closes or the stream ends. A ping is answered with a pong that carries the
      * same payload, a close frame is echoed (with its status code) before returning; text and binary frames are
      * ignored (viewers are read-only). A negative or oversized length ends the connection with an IOException.
+     * Returns true when the client sent a close frame, false when the stream simply ended.
      * {@code reply} receives the frames to send back.
      */
-    static void readClient(InputStream in, java.util.function.Consumer<byte[]> reply) throws IOException {
+    static boolean readClient(InputStream in, java.util.function.Consumer<byte[]> reply) throws IOException {
+        return readClient(in, reply, null);
+    }
+
+    /** As above; {@code pong} (may be null) receives the payload of every pong frame the client sends. */
+    static boolean readClient(InputStream in, java.util.function.Consumer<byte[]> reply, java.util.function.Consumer<byte[]> pong) throws IOException {
         for (;;) {
             int b0 = in.read();
-            if (b0 < 0) return;
+            if (b0 < 0) return false;
             int b1 = need(in);
             long len = b1 & 0x7f;
             if (len == 126) len = (need(in) << 8) | need(in);
@@ -102,9 +108,10 @@ final class Ws {
             int op = b0 & 0x0f;
             if (op == 8) {
                 reply.accept(frame(8, p.length >= 2 ? new byte[] { p[0], p[1] } : new byte[0]));
-                return;
+                return true;
             }
             if (op == 9) reply.accept(frame(10, p.length > 125 ? java.util.Arrays.copyOf(p, 125) : p));
+            else if (op == 10 && pong != null) pong.accept(p);
         }
     }
 }

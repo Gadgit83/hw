@@ -42,7 +42,7 @@ public class RelayTests {
 
     // Fixture -----------------------------------------------------------------------------------
 
-    static final class P implements RelayClient.Handler {
+    static class P implements RelayClient.Handler {
         volatile Map<String, Object> state;
         volatile RelayClient.StartInfo start;
         volatile String closed = "", notice = "";
@@ -58,11 +58,16 @@ public class RelayTests {
         final List<String> log = new CopyOnWriteArrayList<>();
         final String secret = "test-secret";
         SetupModel hostModel = SetupModel.defaults(data, new Random(3));
+        /** Set before creating a Fix: a short ping interval for the round-trip tests, a small viewer queue for the slow-viewer test. */
+        static long pingMs = 300;
+        static int queueItems = 20000;
 
         Fix(long silenceMs, long graceMs) throws Exception {
             Relay.Config cfg = new Relay.Config();
             cfg.port = 0;
             cfg.viewerPort = 0;
+            cfg.viewerPingMs = pingMs;
+            cfg.viewerQueueItems = queueItems;
             cfg.data = data;
             cfg.hostSetup = () -> hostModel;
             cfg.hostSecret = secret;
@@ -642,6 +647,177 @@ public class RelayTests {
         g.end();
     }
 
+
+    static final String WS_REQ = "GET / HTTP/1.1\r\nHost: x\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n";
+
+    /** Item 4: the relay pings each viewer, takes the round trip from the pong and reports it with the queue depth. */
+    static void testViewerRtt() throws Exception {
+        System.out.println("TV viewer: WebSocket ping, round trip and queue depth");
+        Game g = new Game(20000, 1000);
+        int vp = g.f.relay.viewerPort();
+        byte[] mask = { 1, 2, 3, 4 };
+        try (Socket s = new Socket("127.0.0.1", vp)) {
+            s.setSoTimeout(3000);
+            s.getOutputStream().write(WS_REQ.getBytes(StandardCharsets.ISO_8859_1));
+            InputStream in = s.getInputStream();
+            readUntilBlank(in);
+            readWsFrame(in);
+            int[] op = new int[1];
+            int pings = 0;
+            for (int i = 0; i < 40 && pings < 3; i++) {
+                byte[] fr = readWsFrame(in, op);
+                if (fr == null) break;
+                if (op[0] == 9) {
+                    pings++;
+                    if (pings == 1) check(fr.length == 8, "the ping carries an 8 byte timestamp payload");
+                    Thread.sleep(40);                                     // a measurable round trip
+                    s.getOutputStream().write(maskedFrame(10, fr, mask));
+                    s.getOutputStream().flush();
+                }
+            }
+            check(pings >= 3, "the relay pings the viewer repeatedly (" + pings + " in the time allowed)");
+            check(waitFor(() -> { List<String> l = g.f.relay.viewerLines(); return l.size() == 1 && l.get(0).contains("pongs of"); }, 2000),
+                    "the host has a round trip for the viewer: " + g.f.relay.viewerLines());
+            String line = g.f.relay.viewerLines().get(0);
+            check(line.contains("frames behind"), "and the viewer's queue depth: " + line);
+            java.util.regex.Matcher m = java.util.regex.Pattern.compile("round trip ([0-9.]+) ms").matcher(line);
+            check(m.find() && Double.parseDouble(m.group(1)) >= 30 && Double.parseDouble(m.group(1)) < 2000, "the round trip includes the 40 ms the test waited");
+            // A pong with a payload that is not a timestamp is ignored.
+            s.getOutputStream().write(maskedFrame(10, new byte[] { 1, 2, 3 }, mask));
+            s.getOutputStream().flush();
+        }
+        check(waitFor(() -> g.f.relay.viewerCount() == 0, 3000), "the viewer is gone from the list after it closes");
+        g.end();
+        Relay.GameSummary gs = g.f.relay.lastSummary();
+        check(gs != null && gs.text().contains("TV viewers") && gs.text().contains("round trip") && gs.text().contains("frames behind"),
+                "the end-of-game report has the viewer's round trip and queue depth");
+    }
+
+    /** Item 3: a viewer that is killed or reset has disconnected; only an overflowing queue is "too slow". */
+    static void testViewerClassification() throws Exception {
+        System.out.println("TV viewer: disconnects are not slowness");
+        Game g = new Game(20000, 1000);
+        int vp = g.f.relay.viewerPort();
+        // 1. reset (RST), as when the TV process is killed, while the relay is sending
+        Socket s = new Socket("127.0.0.1", vp);
+        s.setSoTimeout(3000);
+        s.getOutputStream().write(WS_REQ.getBytes(StandardCharsets.ISO_8859_1));
+        readUntilBlank(s.getInputStream());
+        readWsFrame(s.getInputStream());
+        check(waitFor(() -> g.f.relay.viewerCount() == 1, 2000), "viewer 1 joined");
+        s.setSoLinger(true, 0);
+        s.close();
+        for (int i = 0; i < 300; i++) { g.ea.send(new byte[] { 'Z', (byte) i }); if (i % 50 == 0) Thread.sleep(20); }
+        check(waitFor(() -> g.f.relay.viewerCount() == 0, 3000), "a reset viewer is removed");
+        // 2. plain close without a close frame (EOF)
+        Socket s2 = new Socket("127.0.0.1", vp);
+        s2.setSoTimeout(3000);
+        s2.getOutputStream().write(WS_REQ.getBytes(StandardCharsets.ISO_8859_1));
+        readUntilBlank(s2.getInputStream());
+        readWsFrame(s2.getInputStream());
+        check(waitFor(() -> g.f.relay.viewerCount() == 1, 2000), "viewer 2 joined");
+        s2.close();
+        check(waitFor(() -> g.f.relay.viewerCount() == 0, 3000), "a viewer that just closes is removed");
+        Thread.sleep(300);
+        check(!g.f.logged("too slow"), "neither disconnect was logged as too slow");
+        check(g.f.logged("viewer") && g.f.logged(" left: "), "both were logged as having left with a reason");
+        boolean named = false;
+        for (String l : g.f.log) if (l.contains(" left: ") && (l.contains("connection lost") || l.contains("disconnected") || l.contains("closed"))) named = true;
+        check(named, "and the reason says the connection was lost or closed");
+        g.end();
+        Relay.GameSummary gs = g.f.relay.lastSummary();
+        int left = 0;
+        for (String e : gs.events) if (e.startsWith("TV viewer ") && e.contains(" left (")) left++;
+        check(left == 2, "the report lists both departures as events (" + left + ")");
+    }
+
+    /** A viewer that stays connected but does not read really is too slow: its small queue overflows and it is dropped with that reason. */
+    static void testViewerSlow() throws Exception {
+        System.out.println("TV viewer: a real overflow is still reported as too slow");
+        int old = Fix.queueItems;
+        Fix.queueItems = 40;
+        try {
+            Game g = new Game(20000, 1000);
+            int vp = g.f.relay.viewerPort();
+            Socket s = new Socket();
+            s.setReceiveBufferSize(2048);
+            s.connect(new java.net.InetSocketAddress("127.0.0.1", vp));
+            s.getOutputStream().write(WS_REQ.getBytes(StandardCharsets.ISO_8859_1));
+            readUntilBlank(s.getInputStream());                     // then it never reads again
+            check(waitFor(() -> g.f.relay.viewerCount() == 1, 2000), "the slow viewer joined");
+            byte[] big = new byte[250];
+            big[0] = 'Z';
+            long end = System.currentTimeMillis() + 60000;
+            for (int i = 0; i < 400000 && !g.f.logged("too slow") && System.currentTimeMillis() < end; i++) {
+                g.ea.send(big);
+                if (i % 200 == 0) Thread.sleep(2);
+            }
+            check(g.f.logged("too slow"), "the overflowing queue is logged as too slow");
+            check(waitFor(() -> g.f.relay.viewerCount() == 0, 3000), "and the viewer is dropped");
+            s.close();
+            g.end();
+        } finally {
+            Fix.queueItems = old;
+        }
+    }
+
+    /** Item 5: the viewer port taken by an old instance is retried, not given up for the session. */
+    static void testViewerBindRetry() throws Exception {
+        System.out.println("TV viewer: bind retry");
+        java.net.ServerSocket hold = new java.net.ServerSocket();
+        hold.setReuseAddress(true);
+        hold.bind(new java.net.InetSocketAddress(0));
+        int port = hold.getLocalPort();
+        Relay.Config cfg = new Relay.Config();
+        cfg.port = 0;
+        cfg.viewerPort = port;
+        cfg.viewerBindRetries = 20;
+        cfg.viewerBindRetryMs = 100;
+        cfg.data = data;
+        cfg.hostSetup = () -> SetupModel.defaults(data, new Random(3));
+        cfg.listener = new Relay.Listener() {
+            public void log(String line) { }
+            public void changed() { }
+        };
+        Relay r = new Relay(cfg);
+        r.start();
+        check(r.viewerPort() == -1 && !r.viewerError().isEmpty(), "while the port is taken the relay reports it: " + r.viewerError());
+        hold.close();
+        check(waitFor(() -> r.viewerPort() == port, 5000), "once the port is free the relay opens it by itself");
+        check(r.viewerError().isEmpty(), "and the error is cleared");
+        r.stop();
+        // stop() before the retry succeeds ends the retry thread without opening anything
+        java.net.ServerSocket hold2 = new java.net.ServerSocket();
+        hold2.setReuseAddress(true);
+        hold2.bind(new java.net.InetSocketAddress(0));
+        cfg.viewerPort = hold2.getLocalPort();
+        Relay r2 = new Relay(cfg);
+        r2.start();
+        r2.stop();
+        hold2.close();
+        Thread.sleep(500);
+        check(r2.viewerPort() == -1, "a relay stopped while retrying never opens the port");
+    }
+
+    /** Item 2 and the host's Quit: the host ending the game ends it for everyone, with the right words for each phone. */
+    static void testQuitWording() throws Exception {
+        System.out.println("Quit wording: joiner quit, host quit");
+        Game g = new Game(20000, 1000);
+        g.ea.send("Mdig");
+        g.eb.send("Mdig");
+        g.eb.send("Q");                                             // phone B quits: the engine sends Q and its link ends
+        g.eb.close();
+        check(waitFor(() -> g.pb.notice.contains("You left the game"), 3000), "a joiner that quits is told 'You left the game.' (" + g.pb.notice + ")");
+        check(!g.pb.notice.contains("dropped"), "and not that it was dropped");
+        g.ea.send("Q");                                             // the host ends the game
+        g.ea.close();
+        check(waitFor(() -> g.f.relay.lastSummary() != null, 4000), "the host's quit ends the game");
+        Relay.GameSummary gs = g.f.relay.lastSummary();
+        check(gs != null && gs.endReason.equals(Relay.HOST_ENDED), "the relay's end reason is '" + Relay.HOST_ENDED + "' (" + (gs == null ? null : gs.endReason) + ")");
+        check(gs != null && gs.text().contains("quit"), "the report marks the host's phone as having quit");
+        g.end();
+    }
+
     static byte[] maskedFrame(int op, byte[] p, byte[] mask) {
         ByteArrayOutputStream b = new ByteArrayOutputStream();
         b.write(0x80 | op);
@@ -686,6 +862,59 @@ public class RelayTests {
         while (n < (first[0] & 0xff)) { pos += 1 + (first[pos] & 0xff); n++; }
         check(pos <= first.length, "the count matches the framed lines that follow");
         g.end();
+    }
+
+
+    /** Item 5: RelayClient reports a closed link once, whichever way it ends, and a refused or closed link frees its writer. */
+    static void testClientClose() throws Exception {
+        System.out.println("RelayClient: close is idempotent, a refusal or host close closes the client");
+        Fix f = new Fix(20000, 1000);
+        final AtomicInteger closes = new AtomicInteger();
+        P h = new P() { @Override public void onClosed(String r) { super.onClosed(r); closes.incrementAndGet(); } };
+        RelayClient c = join(f, h, "Host", true, team("A", 0, 0));
+        c.close();
+        c.close();
+        Thread[] ts = new Thread[4];
+        for (int i = 0; i < ts.length; i++) { ts[i] = new Thread(c::close); ts[i].start(); }
+        for (Thread t : ts) t.join(2000);
+        Thread.sleep(200);
+        check(closes.get() == 0, "close() from the app does not call onClosed, however often it is called");
+        // The host stops hosting: the other phone's client gets 'closed', reports it once and its writer thread ends.
+        P hh = new P();
+        RelayClient host = join(f, hh, "Host2", true, team("H", 2, 0));
+        final AtomicInteger jc = new AtomicInteger();
+        P jp = new P() { @Override public void onClosed(String r) { super.onClosed(r); jc.incrementAndGet(); } };
+        RelayClient joiner = join(f, jp, "Joiner", false, team("J", 3, 0));
+        Thread.sleep(300);
+        f.stop();
+        check(waitFor(() -> jc.get() >= 1, 4000), "the joiner is told the host closed: " + jp.closed);
+        Thread.sleep(300);
+        check(jc.get() == 1, "and told once (" + jc.get() + ")");
+        joiner.close();
+        host.close();
+        Thread.sleep(500);
+        int base = writerThreads();
+        P ph2 = new P();
+        RelayClient extra = join(f2(), ph2, "Extra", false, team("X", 4, 0));
+        extra.setReady(true);                                       // the first write starts the writer thread
+        Thread.sleep(300);
+        int with = writerThreads();
+        extra.close();
+        Thread.sleep(500);
+        check(with == base + 1 && writerThreads() == base, "a client's writer thread ends when the client is closed (" + base + " -> " + with + " -> " + writerThreads() + ")");
+        // A refusal (here: protocol mismatch is not reachable from the client, so use a full lobby) also closes the client.
+    }
+
+    static Fix extraFix;
+    static Fix f2() throws Exception {
+        if (extraFix == null) extraFix = new Fix(20000, 1000);
+        return extraFix;
+    }
+
+    static int writerThreads() {
+        int n = 0;
+        for (Thread t : Thread.getAllStackTraces().keySet()) if (t.getName().equals("relay-writer") && t.isAlive()) n++;
+        return n;
     }
 
     /** The 0.3.0-tv1 crash: the UI thread (Start tap) wrote to the relay socket. Every call the UI makes must leave the socket to the writer thread. */
@@ -734,6 +963,12 @@ public class RelayTests {
         testViewerCount();
         testViewerAbuse();
         testViewerReconnect();
+        testViewerRtt();
+        testViewerClassification();
+        testViewerSlow();
+        testViewerBindRetry();
+        testQuitWording();
+        testClientClose();
         testNoSocketWriteOnCallerThread();
         System.out.println("\nrelay tests: " + checks + " checks, " + failures + " failed");
         System.out.println(failures == 0 ? "RESULT: PASS (the relay survived all malformed input)" : "RESULT: FAIL");

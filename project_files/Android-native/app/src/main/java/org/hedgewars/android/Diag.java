@@ -89,6 +89,7 @@ final class Diag {
             if (previous != null) previous.uncaughtException(t, e);
         });
 
+        if ("main".equals(tag)) dropStaleProblem(app, dir);
         startLogcat(dir, tag);
         Log.i(TAG, "process " + tag + " started, version " + versionName(app) + ", " + deviceLine());
     }
@@ -164,6 +165,40 @@ final class Diag {
     /** True when a game was started and neither finished cleanly nor reported why. */
     static boolean previousGameUnclean(Context c) {
         return new File(logsDir(c), GAME_MARKER).isFile();
+    }
+
+    /**
+     * An error recorded by an older version must not show after an update (0.2.2 still showed the launch crash of
+     * 0.2.1): the version that wrote the logs is kept beside them and the stored problem is dropped when it differs.
+     * Runs in the setup screen process only, before anything of this version could have been recorded.
+     */
+    static void dropStaleProblem(Context app, File dir) {
+        try {
+            File v = new File(dir, "app_version.txt");
+            String cur = versionName(app);
+            String old = v.isFile() ? readTail(v, 200).trim() : "";
+            if (!cur.equals(old)) {
+                new File(dir, LAST_ERROR).delete();
+                new File(dir, GAME_MARKER).delete();
+                writeFile(v, cur + "\n", false);
+            }
+        } catch (IOException | RuntimeException e) {
+            Log.w(TAG, "cannot check the version of the stored problem: " + e);
+        }
+    }
+
+    /** When the stored problem was written (0: none). The setup screen shows it once per problem. */
+    static long problemStamp(Context c) {
+        File e = new File(logsDir(c), LAST_ERROR), m = new File(logsDir(c), GAME_MARKER);
+        return Math.max(e.isFile() ? e.lastModified() : 0, m.isFile() ? m.lastModified() : 0);
+    }
+
+    /** The first line of the stored problem, shortened: the details stay in the shared log. */
+    static String problemSummary(String err) {
+        if (err == null) return "The last game did not end cleanly.";
+        String first = err.split("\n", 2)[0].trim();
+        if (first.length() > 160) first = first.substring(0, 160) + "...";
+        return first;
     }
 
     static void clearGameState(Context c) {

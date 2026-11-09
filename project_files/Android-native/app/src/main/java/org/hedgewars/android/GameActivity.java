@@ -50,7 +50,7 @@ public class GameActivity extends SDLActivity {
 
     /**
      * Called from the native launcher (hp_main.c, through JNI) just before the engine starts.
-     * Returns {HUD scale %, weapon menu scale %, inset left, top, right, bottom} in screen pixels (see DisplayCalc),
+     * Returns the 15 display values of DisplayCalc.measure (scales, cut-out insets, corner radii, margin, cut-out rows),
      * with the sizes chosen in the options menu applied.
      */
     @SuppressWarnings("unused")

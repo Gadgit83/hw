@@ -148,8 +148,13 @@ public class MainActivity extends SetupActivity {
         problemBox.setPadding(ui.dp(12), ui.dp(2), ui.dp(4), ui.dp(2));
         problemBox.setBackground(ui.round(Color.rgb(84, 52, 44), 10));
         problemText = ui.text("", 12, Color.rgb(255, 214, 190));
+        problemText.setMaxLines(2);
+        problemText.setEllipsize(android.text.TextUtils.TruncateAt.END);
         problemBox.addView(problemText, ui.weight(1f));
         problemBox.addView(ui.button("Share last log", false, v -> shareLog()));
+        Button dismiss = ui.button("\u00d7", false, v -> dismissProblem());
+        dismiss.setContentDescription("Dismiss");
+        problemBox.addView(dismiss, Ui.lp(ui.dp(Ui.TOUCH_DP), ui.dp(Ui.TOUCH_DP)));
         LinearLayout.LayoutParams pp = Ui.lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         pp.setMargins(ui.dp(12), ui.dp(2), ui.dp(12), ui.dp(2));
         root.addView(problemBox, pp);
@@ -165,7 +170,7 @@ public class MainActivity extends SetupActivity {
         // Always visible: what will be played, the data state, and Start.
         bottomBar = ui.row();
         bottomBar.setBackgroundColor(Color.rgb(28, 42, 32));
-        bottomBar.setPadding(ui.dp(14), ui.dp(2), ui.dp(12), ui.dp(2));
+        bottomBar.setPadding(ui.dp(14), ui.dp(1), ui.dp(12), ui.dp(1));
         LinearLayout texts = new LinearLayout(this);
         texts.setOrientation(LinearLayout.VERTICAL);
         summary = ui.text("", 13, Color.WHITE);
@@ -189,12 +194,22 @@ public class MainActivity extends SetupActivity {
         ui.trackInsets(root, (l, t, r, b, kb) -> {
             root.setPadding(l, t, r, b);
             topBar.setVisibility(kb ? View.GONE : View.VISIBLE);
+            keyboardOpen = kb;
+            showProblemBox();
+            status.setVisibility(kb ? View.GONE : View.VISIBLE);   // keep the Start bar to one line
             if (kb) {
                 // bring the field being typed in back on screen once the new padding is laid out
                 root.post(() -> {
                     View f = root.findFocus();
-                    if (f != null) f.requestRectangleOnScreen(
-                            new android.graphics.Rect(0, 0, f.getWidth(), f.getHeight()), false);
+                    if (f == null) return;
+                    // the whole card of the field when it fits above the keyboard (its hog count and type rows too),
+                    // otherwise just the field
+                    View card = f;
+                    while (card.getParent() != null && card.getParent() != holder && card.getParent() instanceof View)
+                        card = (View) card.getParent();
+                    View target = card.getParent() == holder && card.getHeight() <= scroll.getHeight() ? card : f;
+                    target.requestRectangleOnScreen(
+                            new android.graphics.Rect(0, 0, target.getWidth(), target.getHeight()), false);
                 });
             }
         });
@@ -799,19 +814,49 @@ public class MainActivity extends SetupActivity {
 
     // Problems and the log ------------------------------------------------------------------------
 
-    /** Shows why the last game failed, if it did, and offers the log. */
+    private boolean keyboardOpen, problemWanted;
+    private final Runnable autoHideProblem = () -> {
+        // hidden after a while, and not shown again for this problem; the log stays in Options, Advanced
+        problemSeen(Diag.problemStamp(this));
+        problemWanted = false;
+        showProblemBox();
+    };
+
+    private void problemSeen(long stamp) {
+        getSharedPreferences("diag", MODE_PRIVATE).edit().putLong("problemSeen", stamp).apply();
+    }
+
+    private void showProblemBox() {
+        if (problemBox != null) problemBox.setVisibility(problemWanted && !keyboardOpen ? View.VISIBLE : View.GONE);
+    }
+
+    /** Shows why the last game failed, if it did, and offers the log. Short, hidden after 30 s or when dismissed. */
     private void refreshProblem() {
         if (problemBox == null || Diag.gameProcessAlive(this)) return;
         String err = Diag.lastError(this);
         boolean unclean = Diag.previousGameUnclean(this);
-        if (err == null && !unclean) {
-            problemBox.setVisibility(View.GONE);
+        long stamp = Diag.problemStamp(this);
+        boolean seen = stamp != 0 && getSharedPreferences("diag", MODE_PRIVATE).getLong("problemSeen", 0) == stamp;
+        if ((err == null && !unclean) || seen) {
+            problemWanted = false;
+            ui.handler.removeCallbacks(autoHideProblem);
+            showProblemBox();
             return;
         }
-        problemText.setText(err != null
-                ? "The last game stopped with a problem:\n" + err
-                : "The last game did not end cleanly.");
-        problemBox.setVisibility(View.VISIBLE);
+        problemText.setText("The last game stopped with a problem.\n" + Diag.problemSummary(err));
+        if (!problemWanted) {
+            problemWanted = true;
+            ui.handler.removeCallbacks(autoHideProblem);
+            ui.handler.postDelayed(autoHideProblem, 30000);
+        }
+        showProblemBox();
+    }
+
+    private void dismissProblem() {
+        ui.handler.removeCallbacks(autoHideProblem);
+        Diag.clearGameState(this);
+        problemWanted = false;
+        showProblemBox();
     }
 
     private void shareLog() {
@@ -832,6 +877,8 @@ public class MainActivity extends SetupActivity {
             return;
         }
         Diag.clearGameState(this);
+        problemWanted = false;
+        showProblemBox();
         startActivity(new Intent(this, GameActivity.class));
     }
 }

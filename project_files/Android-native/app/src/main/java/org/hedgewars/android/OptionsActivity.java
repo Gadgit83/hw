@@ -182,14 +182,27 @@ public class OptionsActivity extends SetupActivity {
 
         LinearLayout edge = ui.card();
         edge.addView(ui.heading("Screen edge"));
-        LinearLayout marginSlider = ui.slider("Clear space at the edge", 0, 15, o.marginMm, n -> n + " mm", n -> o.marginMm = n);
+        LinearLayout marginSlider = ui.slider("Extra space at the edge", 0, 10, o.marginMm, n -> n + " mm", n -> o.marginMm = n);
         enableAll(marginSlider, !o.marginAuto);
-        edge.addView(ui.toggle("Automatic (from the rounded corners)", o.marginAuto, c -> {
+        edge.addView(ui.toggle("Automatic (just clear of the corners and camera)", o.marginAuto, c -> {
             o.marginAuto = c;
             enableAll(marginSlider, !c);
         }));
         edge.addView(marginSlider);
-        edge.addView(ui.hint("Keeps buttons out of the rounded corners. The camera cut-out and the navigation bar are always avoided."));
+        edge.addView(ui.hint("Each button is placed just clear of the rounding of its own corner and of the camera cut-out. "
+                + "Turn Automatic off to add space on top of that, up to 10 mm."));
+
+        LinearLayout cam = ui.card();
+        cam.addView(ui.heading("Camera at the start of a turn"));
+        cam.addView(ui.toggle("Centre on the active hedgehog", o.centreTurn, c -> o.centreTurn = c));
+        LinearLayout zoomSlider = ui.slider("Zoom in", 110, 200, o.zoomPct, n -> n + "%", n -> o.zoomPct = n);
+        enableAll(zoomSlider, o.zoomTurn);
+        cam.addView(ui.toggle("Zoom in", o.zoomTurn, c -> {
+            o.zoomTurn = c;
+            enableAll(zoomSlider, c);
+        }));
+        cam.addView(zoomSlider);
+        cam.addView(ui.hint("Only at the start of a turn; pinching or dragging during the turn is left alone."));
 
         LinearLayout look = ui.card();
         look.addView(ui.heading("Effects and feedback"));
@@ -213,6 +226,7 @@ public class OptionsActivity extends SetupActivity {
         left.setOrientation(LinearLayout.VERTICAL);
         left.addView(size);
         left.addView(edge, ui.margins(full(), 0, 8, 0, 0));
+        left.addView(cam, ui.margins(full(), 0, 8, 0, 0));
         twoColumns(left, look);
     }
 

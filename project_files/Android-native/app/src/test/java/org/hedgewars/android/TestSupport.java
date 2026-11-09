@@ -82,6 +82,41 @@ final class TestSupport {
         measure(decor);
     }
 
+    /** The same with the soft keyboard open (400 px of it), as when a team name is being edited. */
+    static void layoutWithKeyboard(Activity a) {
+        View decor = a.getWindow().getDecorView();
+        WindowInsets in = new WindowInsets.Builder()
+                .setInsets(WindowInsets.Type.displayCutout(), Insets.of(90, 0, 0, 0))
+                .setInsets(WindowInsets.Type.ime(), Insets.of(0, 0, 0, 400))
+                .setVisible(WindowInsets.Type.ime(), true).build();
+        measure(decor);
+        decor.dispatchApplyWindowInsets(in);
+        measure(decor);
+    }
+
+    /** The first view in the tree whose text or description is exactly this. */
+    static View find(View v, String text) {
+        if ((v instanceof TextView && text.contentEquals(((TextView) v).getText()))
+                || (v.getContentDescription() != null && text.contentEquals(v.getContentDescription()))) return v;
+        if (v instanceof ViewGroup) {
+            for (int i = 0; i < ((ViewGroup) v).getChildCount(); i++) {
+                View r = find(((ViewGroup) v).getChildAt(i), text);
+                if (r != null) return r;
+            }
+        }
+        return null;
+    }
+
+    /** Whether the view and every parent up to the root are visible (not GONE or INVISIBLE). */
+    static boolean shown(View v) {
+        for (View x = v; x != null; ) {
+            if (x.getVisibility() != View.VISIBLE) return false;
+            Object p = x.getParent();
+            x = p instanceof View ? (View) p : null;
+        }
+        return true;
+    }
+
     private static void measure(View decor) {
         decor.measure(View.MeasureSpec.makeMeasureSpec(W, View.MeasureSpec.EXACTLY),
                 View.MeasureSpec.makeMeasureSpec(H, View.MeasureSpec.EXACTLY));

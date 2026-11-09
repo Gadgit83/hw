@@ -134,4 +134,89 @@ public class LaunchSmokeTest {
             System.out.println("SDK " + android.os.Build.VERSION.SDK_INT + ": TeamEditActivity team " + team + " ok");
         }
     }
+
+    // The problem box ------------------------------------------------------------------------------
+
+    private static java.io.File logs() {
+        return Diag.logsDir(app());
+    }
+
+    private static void writeProblem(String text, String writtenByVersion) throws Exception {
+        java.nio.file.Files.write(new java.io.File(logs(), Diag.LAST_ERROR).toPath(), text.getBytes("UTF-8"));
+        java.nio.file.Files.write(new java.io.File(logs(), "app_version.txt").toPath(), (writtenByVersion + "\n").getBytes("UTF-8"));
+    }
+
+    /** The 0.2.1 launch crash that 0.2.2 still showed after the update: an older version's error must not show. */
+    @Test
+    public void problemBox_errorFromOlderVersion_isDroppedAndNotShown() throws Exception {
+        TestSupport.installData(app());
+        writeProblem("The app crashed (RuntimeException: Unable to start activity).\n", "0.2.1 (7)");
+        Diag.dropStaleProblem(app(), logs());                  // what the setup screen process does when it starts
+        assertTrue("the stale error file is removed", Diag.lastError(app()) == null);
+        String text = launch(MainActivity.class, null, 1200);
+        assertFalse("the box must not show: " + text, text.contains("stopped with a problem"));
+        System.out.println("SDK " + android.os.Build.VERSION.SDK_INT + ": stale problem not shown ok");
+    }
+
+    /** An error of this version shows short, hides while the keyboard is open, and the x clears it for good. */
+    @Test
+    public void problemBox_currentError_shortHidesWithKeyboardAndDismisses() throws Exception {
+        TestSupport.installData(app());
+        prefsInt("tab", 0);
+        writeProblem("The engine stopped with code 5.\nsecond line with details that belong in the log\n", Diag.versionName(app()));
+        Diag.dropStaleProblem(app(), logs());                  // same version: kept
+        assertTrue(Diag.lastError(app()) != null);
+        ActivityController<MainActivity> ctl = Robolectric.buildActivity(MainActivity.class, null);
+        MainActivity a = ctl.create().start().postCreate(null).resume().visible().get();
+        a.onWindowFocusChanged(true);
+        TestSupport.layout(a);
+        TestSupport.settle(1500);
+        TestSupport.layout(a);
+        android.view.View decor = a.getWindow().getDecorView();
+        android.view.View box = TestSupport.find(decor, "Share last log");
+        assertNotNull("the share button is there", box);
+        assertTrue("the box is visible", TestSupport.shown(box));
+        String text = TestSupport.texts(decor);
+        assertTrue(text, text.contains("The engine stopped with code 5."));
+        assertFalse("details stay in the log: " + text, text.contains("second line with details"));
+
+        TestSupport.layoutWithKeyboard(a);
+        TestSupport.settle(200);
+        assertFalse("hidden while the keyboard is open", TestSupport.shown(box));
+        TestSupport.layout(a);
+        TestSupport.settle(200);
+        assertTrue("back after the keyboard closes", TestSupport.shown(box));
+
+        android.view.View x = TestSupport.find(decor, "Dismiss");
+        assertNotNull("the dismiss button is there", x);
+        x.performClick();
+        TestSupport.settle(200);
+        assertFalse("hidden after dismissing", TestSupport.shown(box));
+        assertTrue("the stored error is cleared", Diag.lastError(app()) == null);
+        ctl.pause().stop().destroy();
+        // and it does not come back
+        String again = launch(MainActivity.class, null, 800);
+        assertFalse(again, again.contains("stopped with a problem"));
+        System.out.println("SDK " + android.os.Build.VERSION.SDK_INT + ": problem box ok");
+    }
+
+    /** Options, Display: the screen edge setting, the camera setting, and a layout pass with the saved values. */
+    @Test
+    public void optionsActivity_displayTab_screenEdgeAndCamera() throws Exception {
+        TestSupport.installData(app());
+        prefsInt("optionsTab", 1);
+        String text = launch(OptionsActivity.class, null, 600);
+        assertTrue(text, text.contains("Screen edge") && text.contains("Extra space at the edge"));
+        assertTrue(text, text.contains("Camera at the start of a turn") && text.contains("Centre on the active hedgehog"));
+        Options o = new Options();
+        o.marginAuto = false;
+        o.marginMm = 7;
+        o.zoomPct = 160;
+        Store.saveOptions(app(), o);
+        text = launch(OptionsActivity.class, null, 600);
+        assertTrue(text, text.contains("7 mm"));
+        Options back = Store.loadOptions(app());
+        assertTrue(back.marginMm == 7 && !back.marginAuto && back.zoomPct == 160);
+        System.out.println("SDK " + android.os.Build.VERSION.SDK_INT + ": options display tab ok");
+    }
 }

@@ -4,6 +4,26 @@ All notable changes to the native Android app (`project_files/Android-native`), 
 
 Only some builds were put on a phone, so a version below is a build that was made, not necessarily one that was released. Releases are tags on `android-master` with the APK attached; there is none yet.
 
+## 0.2.3 (9): screen corners, problem box, switch button, turn camera
+
+### Fixed
+
+- **A stale "The last game stopped with a problem" box.** After the update to 0.2.2 the launch crash of 0.2.1 still showed in a large red box. The box is now two lines at most (what happened; the details are only in the shared log), has a x that dismisses and clears the stored error, hides itself after 30 seconds (not shown again for that problem), is hidden while the keyboard is open, is cleared when a new game starts, and an error recorded by an older version is dropped when the app is updated (the version that wrote the logs is kept in `logs/app_version.txt`). Share last log stays in the box while it shows and in Options, Advanced.
+- **The setup screen with the keyboard open.** The Start bar drops its status line while the keyboard is open (one line instead of about 100 px) and the focused card, with its hog count and type rows, is scrolled into view when it fits above the keyboard.
+- **No way to switch hedgehog on a phone with the rule "Switch hedgehog in a turn".** The engine starts a switcher gear at the turn start but the touch interface only showed the switch button when Switch was the selected weapon, so there was no button and no gesture. The button now follows the gear: it shows while the switcher is there, a tap moves to the next hedgehog (as Tab does), and it goes away when the switcher ends (walking, aiming, jumping, firing, picking a weapon). The simulation is untouched. Checked on the host with the scheme rule on: two taps moved the turn from Ariel to Thaddeus to Robbie (`[Touch] switch, hedgehog ...`, `[Touch] active hedgehog ...`) and walking hid the button.
+
+### Changed
+
+- **Controls sit in the corners.** The one symmetric safe area inset (the larger of the cut-out and the rounded corners, plus 3.5 %) is gone. The app measures the radius of each rounded corner and the camera cut-out (its depth and the rows it covers) and passes them to the engine (`--screen-shape`, engine change in `uWorld.pas`), which places every control just clear of its own corner's arc, and moves a control for the cut-out only when it overlaps the cut-out's rows. The timer, arrows, fire button, jump, weapon chest, pause button, health and the wind bar are placed this way; the weapon menu keeps clear of the corner too. Without real values (before Android 12) the old 3.5 % margin remains. The 180 degree flip of a sensor landscape activity is handled by making the shape symmetric under it (see README, "Engine options from the options menu"), not by re-reading the insets. Host check at 2340 by 1080 with 120 px corners and a 90 px cut-out on the left: before and after screenshots, and taps on the arrows, fire, jump, weapon chest and pause button all reach the engine.
+- **Options, Display, Screen edge**: Automatic (just clear of the corners and the camera) or an extra margin of 0 to 10 mm on top of that. The old setting was an absolute 0 to 15 mm margin; a saved value is kept, capped at 10 mm.
+- Version 0.2.3, versionCode 9.
+
+### Added
+
+- **Camera at the start of a turn** (touch only, `--turn-centre`, `--turn-zoom`; Options, Display): at the start of a turn, and when the switcher moves to another hedgehog, the camera glides to the active hedgehog (a real centre, within the map's camera limits) and zooms in to 140 % of the normal zoom (110 to 200 % in the options). Only once per turn start: a pinch or a drag during the turn is left alone, and a view you have pinched closer than the turn start zoom is not changed. It only touches the camera (`WorldDx`, `WorldDy`, `ZoomValue`), which the simulation and the turn checksums never read (checked in the source: `FollowGear`, the world offset and the zoom are read by rendering, input mapping and the camera only), and it runs for remote turns too.
+- Smoke test: the problem box (an error of an older version is not shown, a current one is short, is hidden with the keyboard open, and the x clears it for good) and Options, Display with the new settings.
+- Host test: the scenario `switch`, and `[Touch]` log lines for released controls, taps on jump, weapon chest and pause, the active hedgehog and the switch button.
+
 ## 0.2.2 (8): launch crash fix
 
 ### Fixed

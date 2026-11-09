@@ -2204,7 +2204,7 @@ DrawScreenWidget(@jumpWidget);
 DrawScreenWidget(@AMWidget);
 DrawScreenWidget(@utilityWidget);
 DrawScreenWidget(@utilityWidget2);
-if GameType <> gmtNet then DrawScreenWidget(@pauseButton);
+if (GameType <> gmtNet) or cNetHost then DrawScreenWidget(@pauseButton);
 {$ENDIF}
 
 // Captions
@@ -2259,7 +2259,13 @@ if fastUntilLag then
 else if isAFK then
     DrawTextureCentered(0, (cScreenHeight shr 1), AFKTexture)
 else if isPaused then
-    DrawTextureCentered(0, (cScreenHeight shr 1), PauseTexture);
+    begin
+    // a network game is paused by the host only: the other phones are told so
+    if (GameType = gmtNet) and (not cNetHost) then
+        DrawTextureCentered(0, (cScreenHeight shr 1), HostPauseTexture)
+    else
+        DrawTextureCentered(0, (cScreenHeight shr 1), PauseTexture);
+    end;
 
 // Cursor
 if isCursorVisible and bShowAmmoMenu then

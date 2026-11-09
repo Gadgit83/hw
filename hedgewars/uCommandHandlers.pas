@@ -667,6 +667,34 @@ if (gameType <> gmtNet) or (s = 'server') then
 updateCursorVisibility;
 end;
 
+// Network games: the launcher (local IPC 'e' command, never a network message) marks this phone as the host.
+procedure chNetHost(var s: shortstring);
+begin
+s:= s; // avoid compiler hint
+cNetHost:= true;
+end;
+
+// Network games: the launcher pauses ('1') or resumes ('0') this engine when the relay says the host did. A real pause
+// (game time stops, the Paused banner shows), not the AFK toggle. Game time only moves by ticks, never by the wall
+// clock, so pausing at different moments on each phone cannot change what any phone computes.
+procedure chNetPause(var s: shortstring);
+begin
+if gameType = gmtNet then
+    begin
+    cPausedByFocus:= false;
+    isPaused:= (s = '1');
+    updateCursorVisibility
+    end
+end;
+
+// The host asks (touch) to pause ('1') or resume ('0'): only the launcher is told; it passes the request to the relay and
+// the pause comes back through chNetPause, the same way on every phone including this one.
+procedure chNetPauseReq(var s: shortstring);
+begin
+if (gameType = gmtNet) and cNetHost then
+    SendIPC('y' + s)
+end;
+
 procedure chRotateMask(var s: shortstring);
 begin
 s:= s; // avoid compiler hint
@@ -1063,6 +1091,9 @@ begin
     RegisterVariable('mute'    , @chMute         , true );
     RegisterVariable('findhh'  , @chFindhh       , true );
     RegisterVariable('pause'   , @chPause        , true );
+    RegisterVariable('nethost' , @chNetHost      , true );
+    RegisterVariable('netpause', @chNetPause     , true );
+    RegisterVariable('netpausereq', @chNetPauseReq, true );
     RegisterVariable('+cur_u'  , @chCurU_p       , true );
     RegisterVariable('-cur_u'  , @chCurU_m       , true );
     RegisterVariable('+cur_d'  , @chCurD_p       , true );

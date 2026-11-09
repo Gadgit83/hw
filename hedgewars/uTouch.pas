@@ -159,16 +159,24 @@ if isOnWidget(arrowDown, finger^) then
     exit;
     end;
 
-// A network game cannot pause (the pause command only toggles away-from-keyboard there), so the button is not drawn
-// and not pressable; leaving goes through the Back key.
+// A network game cannot pause locally (the pause command only toggles away-from-keyboard there): the button is drawn
+// for the host only, and asks the launcher/relay to pause or resume everybody; leaving goes through the Back key.
 if isOnWidget(pauseButton, finger^) then
     begin
     if GameType <> gmtNet then
         begin
         WriteLnToConsole('[Touch] pressed pause');
         ParseCommand('pause', true);
+        end
+    else if cNetHost then
+        begin
+        WriteLnToConsole('[Touch] host asks for pause/resume');
+        if isPaused then
+            ParseCommand('netpausereq 0', true)
+        else
+            ParseCommand('netpausereq 1', true);
         end;
-    // In a network game the press is still consumed, so a tap in the old pause corner is not a map press or click.
+    // Where the button is not usable the press is still consumed, so a tap in the old pause corner is not a map press or click.
     moveCursor:= false;
     finger^.pressedWidget:= @pauseButton;
     exit;
@@ -324,7 +332,12 @@ if not(fingerHasMoved(finger^)) then
     if isPaused then
         begin
         if finger^.downWhilePaused and (finger^.pressedWidget = nil) then
-            ParseCommand('pause', true);
+            begin
+            if GameType <> gmtNet then
+                ParseCommand('pause', true)
+            else
+                ParseCommand('netpausereq 0', true);   // only the host's engine passes this on
+            end;
         end
     else if finger^.pressedWidget <> @pauseButton then
         begin

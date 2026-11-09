@@ -547,6 +547,7 @@ if (not cOnlyStats) and allOK then
     InitHealth;
 
     PauseTexture:= RenderStringTex(trmsg[sidPaused], cCentralMessageColor, fntBig);
+    HostPauseTexture:= RenderStringTex(ansistring('Paused by the host'), cCentralMessageColor, fntBig);
     AFKTexture:= RenderStringTex(trmsg[sidAFK], cCentralMessageColor, fntBig);
     keyConfirm:= KeyBindToName('confirm');
     keyQuit:= KeyBindToName('quit');
@@ -609,6 +610,7 @@ FreeAndNilTexture(ChefHatTexture);
 FreeAndNilTexture(CrosshairTexture);
 FreeAndNilTexture(WeaponTooltipTex);
 FreeAndNilTexture(PauseTexture);
+FreeAndNilTexture(HostPauseTexture);
 FreeAndNilTexture(AFKTexture);
 FreeAndNilTexture(SyncTexture);
 FreeAndNilTexture(ConfirmTexture);

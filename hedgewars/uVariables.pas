@@ -195,6 +195,7 @@ var
     cMuteToggle     : boolean; // Mute toggle requested
     cHasFocus       : boolean;
     cPausedByFocus  : boolean; // mobile: the pause was caused by losing focus, so regaining it resumes
+    cNetHost        : boolean; // network game: the launcher told us (local IPC only) that this phone is the host, which alone may pause
     cSafeInsetL, cSafeInsetT, cSafeInsetR, cSafeInsetB: LongInt; // screen pixels kept clear of cut-outs and bars (the depth of the cut-out on that side)
     cCornerTL, cCornerTR, cCornerBL, cCornerBR: LongInt; // radius in screen pixels of the rounded display corners
     cEdgeMargin: LongInt; // extra screen pixels kept clear at every edge (player's setting)
@@ -2653,6 +2654,7 @@ var
 
 
     PauseTexture,
+    HostPauseTexture,
     AFKTexture,
     SyncTexture,
     ConfirmTexture: PTexture;
@@ -3057,6 +3059,7 @@ begin
     cMuteToggle     := false;
     cHasFocus       := true;
     cPausedByFocus  := false;
+    cNetHost        := false;
     cInactDelay     := 100;
     ReadyTimeLeft   := 0;
 

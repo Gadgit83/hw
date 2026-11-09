@@ -2551,6 +2551,8 @@ begin
 {$IFDEF USE_TOUCH_INTERFACE}
 if(ammoType = amNothing)then
     begin
+    if CurrentHedgehog = nil then
+        exit;
     ammoType:= CurrentHedgehog^.CurAmmoType;
     // the switcher that scheme flag gfSwitchHog starts at the turn start is a gear, the selected weapon is something else
     if (CurAmmoGear <> nil) and (CurAmmoGear^.Kind = gtSwitcher) then

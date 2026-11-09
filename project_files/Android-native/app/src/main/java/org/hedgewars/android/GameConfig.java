@@ -28,7 +28,7 @@ public final class GameConfig {
     private GameConfig() { }
 
     /** Removes characters that would break the line based message format and limits the length. */
-    static String clean(String s, String fallback) {
+    public static String clean(String s, String fallback) {
         String t = s == null ? "" : s.replaceAll("[\\p{Cc}\\u2028\\u2029]", " ").trim();
         int cps = t.codePointCount(0, t.length());
         if (cps > 32) t = t.substring(0, t.offsetByCodePoints(0, 32)).trim();
@@ -36,7 +36,7 @@ public final class GameConfig {
     }
 
     /** Team names also become file names in the engine (key bindings), so path characters are dropped. */
-    static String cleanTeamName(String s, String fallback) {
+    public static String cleanTeamName(String s, String fallback) {
         return clean(s == null ? null : s.replaceAll("[\\\\/:*?\"<>|]", ""), fallback);
     }
 

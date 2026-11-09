@@ -49,6 +49,7 @@ public final class RelayClient {
     private final int port;
     private final String name, build;
     private final boolean isHost;
+    private String hostSecret = "";
     private final Handler handler;
     private Socket socket;
     private OutputStream out;
@@ -65,6 +66,12 @@ public final class RelayClient {
         this.handler = h;
     }
 
+    /** The host's own phone presents the secret that only the app knows; without it the relay refuses the host role. */
+    public RelayClient hostSecret(String secret) {
+        hostSecret = secret == null ? "" : secret;
+        return this;
+    }
+
     /** Connects (blocking, 5 s limit) and starts the reader thread. */
     public void connect() throws IOException {
         socket = new Socket();
@@ -73,7 +80,7 @@ public final class RelayClient {
         socket.setKeepAlive(true);
         out = socket.getOutputStream();
         send(Json.obj("t", "hello", "role", "lobby", "proto", (long) Relay.PROTO, "name", name, "build", build,
-                "host", isHost, "teams", NetTeams.listToJson(teams)));
+                "host", isHost, "secret", hostSecret, "teams", NetTeams.listToJson(teams)));
         Thread t = new Thread(this::readLoop, "relay-client");
         t.setDaemon(true);
         t.start();
@@ -101,6 +108,11 @@ public final class RelayClient {
         trySend(Json.obj("t", "ready", "ready", ready));
     }
 
+    /** Tells the relay whether this phone is showing the Network screen (so the host can be warned before it starts). */
+    public void setForeground(boolean on) {
+        trySend(Json.obj("t", "fg", "on", on));
+    }
+
     public void start() {
         trySend(Json.obj("t", "start"));
     }
@@ -121,7 +133,7 @@ public final class RelayClient {
         try {
             InputStream in = new java.io.BufferedInputStream(socket.getInputStream(), 8192);
             for (;;) {
-                String line = Frames.readLine(in, 4 << 20);
+                String line = Frames.readLine(in, 1 << 20);
                 if (line == null) break;
                 Map<String, Object> m = Json.parseObject(line);
                 String t = Json.str(m, "t", "");
@@ -148,9 +160,9 @@ public final class RelayClient {
                     default: break;
                 }
             }
-        } catch (Exception e) {
+        } catch (Throwable e) {
             if (closed) return;
-            why = "The connection to the host was lost (" + e.getMessage() + ").";
+            why = "The connection to the host was lost (" + e + ").";
         }
         if (!closed) {
             closed = true;

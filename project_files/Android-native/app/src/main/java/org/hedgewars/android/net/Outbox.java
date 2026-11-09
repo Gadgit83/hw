@@ -98,7 +98,7 @@ final class Outbox {
                 synchronized (this) { more = !q.isEmpty(); }
                 if (!more) o.flush();
             }
-        } catch (IOException | InterruptedException e) {
+        } catch (Throwable e) {
             synchronized (this) { closed = true; }
             if (onError != null) onError.run();
         }

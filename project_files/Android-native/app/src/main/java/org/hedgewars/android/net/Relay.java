@@ -13,12 +13,17 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.HashSet;
 import java.util.Random;
+import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.BiFunction;
 import java.util.function.Supplier;
 
 /**
@@ -50,6 +55,13 @@ public final class Relay {
     public static final int VIEWER_PORT = 8766;
 
     private static final int S_SETUP = 0, S_STARTING = 1, S_PLAYING = 2;
+    /** Phones in one lobby, connections in their handshake or lobby, and TV viewers, at most. */
+    public static final int MAX_PLAYERS = 8, MAX_CONNECTIONS = 32, MAX_VIEWERS = 16;
+    /** A line of the setup is one engine message: a length byte, so at most 255 bytes; the viewer's first message counts them in one byte. */
+    public static final int MAX_SETUP_LINE = 255, MAX_SETUP_LINES = 255;
+    /** Longest lobby line a phone may send, and how long the first line of a connection may take. */
+    private static final int MAX_LOBBY_LINE = 1 << 18, MAX_HELLO_LINE = 1 << 15;
+    private static final long HELLO_DEADLINE_MS = 15000;
 
     /** Settings and callbacks. Fields are read when the relay starts or when a game starts. */
     public static final class Config {
@@ -66,6 +78,17 @@ public final class Relay {
         public long linkWaitMs = 45000;
         public long lobbySilenceMs = 25000;
         public Listener listener;
+        /**
+         * A secret that only the app itself knows (the hosting service makes one per session and keeps it in memory):
+         * the host role is given only to a connection from this device that presents it. Null: any loopback connection.
+         */
+        public String hostSecret;
+        /** Extra time before the first turn ends, on top of the silence limit (the first turn can start late on a slow phone). */
+        public long graceMs = 40000;
+        /** How long after the start gate a phone may take to send its map digest before it is dropped. */
+        public long mapWaitMs = 180000;
+        /** Test hook, never set by the app: called for each frame about to go to a phone; returns the frame to send or null to lose it. */
+        public BiFunction<Integer, byte[], byte[]> fault;
     }
 
     public interface Listener {
@@ -90,6 +113,8 @@ public final class Relay {
     private GameSummary lastSummary;
     private int gameNo;
     private final Random rnd = new Random();
+    private final SecureRandom secure = new SecureRandom();
+    private final AtomicInteger connCount = new AtomicInteger(), viewerConns = new AtomicInteger();
 
     public Relay(Config cfg) {
         this.cfg = cfg;
@@ -166,6 +191,29 @@ public final class Relay {
         log("relay stopped");
     }
 
+    private String newToken() {
+        byte[] b = new byte[16];
+        secure.nextBytes(b);
+        StringBuilder t = new StringBuilder();
+        for (byte x : b) t.append(String.format("%02x", x & 0xff));
+        return t.toString();
+    }
+
+    /**
+     * Starts a daemon thread for one connection. Whatever goes wrong inside it, even an Error, ends only that
+     * connection: the handler logs and closes its socket, it never reaches the process's default handler.
+     */
+    private Thread spawn(String name, final Socket s, Runnable r) {
+        Thread t = new Thread(r, name);
+        t.setDaemon(true);
+        t.setUncaughtExceptionHandler((th, e) -> {
+            log(th.getName() + " died with " + e + "; only its connection is closed");
+            try { if (s != null) s.close(); } catch (IOException ignored) { }
+        });
+        t.start();
+        return t;
+    }
+
     private void log(String s) {
         if (cfg.listener != null) cfg.listener.log(s);
     }
@@ -179,8 +227,10 @@ public final class Relay {
     private final class Player {
         final int id;
         String name;
-        String token = Long.toHexString(rnd.nextLong()) + Long.toHexString(rnd.nextLong());
+        final String token = newToken();
         boolean host, ready;
+        /** The phone says it is showing its Network screen (a joiner elsewhere may miss the start). */
+        boolean fg = true;
         final List<SetupModel.Team> teams = new ArrayList<>();
         String build = "";
         // lobby link
@@ -268,7 +318,10 @@ public final class Relay {
         final List<Integer> desyncReporters = new ArrayList<>();
         long desyncSince;
         int desyncActiveAtStart;
+        /** The silence rule is armed once every live phone has sent its map digest M (plan section 2.8). */
         boolean armed;
+        long armedAt;
+        final Set<Integer> mSeen = new HashSet<>();
         long maxGapMs;
         String endReason = "";
     }
@@ -314,13 +367,26 @@ public final class Relay {
         while (running) {
             try {
                 final Socket s = server.accept();
-                s.setTcpNoDelay(true);
-                s.setKeepAlive(true);
-                Thread t = new Thread(() -> connection(s), "relay-conn");
-                t.setDaemon(true);
-                t.start();
+                try {
+                    s.setTcpNoDelay(true);
+                    s.setKeepAlive(true);
+                    if (connCount.incrementAndGet() > MAX_CONNECTIONS) {
+                        connCount.decrementAndGet();
+                        log("too many connections, closed " + s.getRemoteSocketAddress());
+                        s.close();
+                        continue;
+                    }
+                    spawn("relay-conn", s, () -> {
+                        try { connection(s); } finally { connCount.decrementAndGet(); }
+                    });
+                } catch (Throwable e) {
+                    log("accept handling failed: " + e);
+                    try { s.close(); } catch (IOException ignored) { }
+                }
             } catch (IOException e) {
                 if (running) log("accept failed: " + e);
+            } catch (Throwable e) {
+                log("accept failed: " + e);
             }
         }
     }
@@ -329,7 +395,7 @@ public final class Relay {
         try {
             s.setSoTimeout(10000);
             InputStream in = new java.io.BufferedInputStream(s.getInputStream(), 8192);
-            String first = Frames.readLine(in, 65536);
+            String first = Frames.readLine(in, MAX_HELLO_LINE, System.currentTimeMillis() + HELLO_DEADLINE_MS);
             if (first == null) { s.close(); return; }
             Map<String, Object> hello = Json.parseObject(first);
             if (!"hello".equals(Json.str(hello, "t", ""))) throw new IOException("no hello");
@@ -337,7 +403,9 @@ public final class Relay {
             if ("lobby".equals(role)) lobbyConnection(s, in, hello);
             else if ("engine".equals(role)) engineConnection(s, in, hello);
             else throw new IOException("unknown role " + role);
-        } catch (Exception e) {
+        } catch (Throwable e) {
+            // Throwable, not Exception: a StackOverflowError or OutOfMemoryError caused by one phone's input must end
+            // that connection only, never the process.
             log("connection from " + s.getRemoteSocketAddress() + " ended: " + e);
             try { s.close(); } catch (IOException ignored) { }
         }
@@ -363,15 +431,19 @@ public final class Relay {
                 return;
             }
             boolean isHost = Json.bool(hello, "host", false);
-            if (isHost && (!s.getInetAddress().isLoopbackAddress() || hasHost())) {
+            if (isHost && (!s.getInetAddress().isLoopbackAddress() || hasHost() || !secretOk(Json.str(hello, "secret", "")))) {
                 refuse(s, "Only the hosting phone can be the host.");
+                return;
+            }
+            if (players.size() >= MAX_PLAYERS) {
+                refuse(s, "The host is full: at most " + MAX_PLAYERS + " phones.");
                 return;
             }
             if (state != S_SETUP) {
                 refuse(s, "A game is running on this host. Try again when it has ended.");
                 return;
             }
-            List<SetupModel.Team> teams = NetTeams.listFromJson(Json.list(hello, "teams"));
+            List<SetupModel.Team> teams = NetTeams.listFromJson(Json.list(hello, "teams"), cfg.data);
             if (totalTeams() + teams.size() > SetupModel.MAX_TEAMS) {
                 refuse(s, "The host has no room for " + teams.size() + " more teams (at most " + SetupModel.MAX_TEAMS + ").");
                 return;
@@ -393,15 +465,20 @@ public final class Relay {
         broadcastState();
         try {
             for (;;) {
-                String line = Frames.readLine(in, 1 << 20);
+                String line = Frames.readLine(in, MAX_LOBBY_LINE);
                 if (line == null) break;
                 me.lobbyRx = System.currentTimeMillis();
                 handleLobby(me, Json.parseObject(line));
             }
-        } catch (Exception e) {
+        } catch (Throwable e) {
             log("lobby " + me.name + ": " + e);
         }
         lobbyLost(me);
+    }
+
+    private boolean secretOk(String given) {
+        if (cfg.hostSecret == null) return true;
+        return MessageDigest.isEqual(given.getBytes(StandardCharsets.UTF_8), cfg.hostSecret.getBytes(StandardCharsets.UTF_8));
     }
 
     private boolean hasHost() {
@@ -416,7 +493,7 @@ public final class Relay {
     }
 
     private String uniqueName(String want, int exceptId) {
-        String base = GameConfigAccess.clean(want, "Player");
+        String base = GameConfig.clean(want, "Player");
         String name = base;
         for (int k = 2; nameTaken(name, exceptId); k++) name = base + " (" + k + ")";
         return name;
@@ -432,6 +509,8 @@ public final class Relay {
         synchronized (lock) {
             if (!players.containsKey(p.id)) return;
             p.lobbyOut.close();
+            // The reader has ended (the phone closed, or sent something unreadable): close our side too.
+            try { if (p.lobbySock != null) p.lobbySock.close(); } catch (IOException ignored) { }
             if (state == S_SETUP) {
                 players.remove(p.id);
                 removed = true;
@@ -462,7 +541,7 @@ public final class Relay {
             switch (t) {
                 case "teams": {
                     if (state != S_SETUP) return;
-                    List<SetupModel.Team> teams = NetTeams.listFromJson(Json.list(m, "teams"));
+                    List<SetupModel.Team> teams = NetTeams.listFromJson(Json.list(m, "teams"), cfg.data);
                     int others = totalTeams() - p.teams.size();
                     if (others + teams.size() > SetupModel.MAX_TEAMS) {
                         sendLobby(p, Json.obj("t", "notice", "text", "Too many teams: at most " + SetupModel.MAX_TEAMS + " in all."));
@@ -473,6 +552,9 @@ public final class Relay {
                     p.ready = p.host;
                     break;
                 }
+                case "fg":
+                    p.fg = Json.bool(m, "on", true);
+                    break;
                 case "name":
                     if (state != S_SETUP) return;
                     p.name = uniqueName(Json.str(m, "name", p.name), p.id);
@@ -511,7 +593,7 @@ public final class Relay {
             List<Object> pl = new ArrayList<>();
             for (Player q : players.values()) {
                 pl.add(Json.obj("id", (long) q.id, "name", q.name, "host", q.host, "ready", q.ready,
-                        "teams", NetTeams.listToJson(q.teams), "build", q.build, "linked", q.linked, "dropped", q.dropped));
+                        "teams", NetTeams.listToJson(q.teams), "build", q.build, "linked", q.linked, "dropped", q.dropped, "fg", q.fg));
             }
             return Json.obj("t", "state", "state", state == S_SETUP ? "setup" : "playing", "host", cfg.hostName,
                     "proto", (long) PROTO, "build", cfg.build, "you", (long) forPlayer, "players", pl,
@@ -562,7 +644,7 @@ public final class Relay {
                 }
                 usedColor[t.color] = true;
                 mine.add(t.color);
-                String base = GameConfigAccess.cleanTeam(t.name, "Team " + (m.teams.size() + 1));
+                String base = GameConfig.cleanTeamName(t.name, "Team " + (m.teams.size() + 1));
                 String n = base;
                 for (int k = 2; containsIgnoreCase(usedNames, n); k++) n = base + " (" + k + ")";
                 usedNames.add(n);
@@ -579,6 +661,14 @@ public final class Relay {
             }
         }
         g.canonical = GameConfig.build(m, cfg.data, rnd);
+        String bad = checkSetupLines(g.canonical);
+        if (bad != null) {
+            // Nothing has changed yet: refuse cleanly, like the viewer's 503, and say why in the lobby.
+            if (gameNo == g.no) gameNo--;
+            log("game refused: " + bad);
+            for (Player q : players.values()) sendLobby(q, Json.obj("t", "notice", "text", "The game cannot start: " + bad));
+            return;
+        }
         for (Player q : players.values()) {
             boolean[] owned = new boolean[g.teams.size()];
             for (TeamRef r : g.teams) owned[r.index] = r.owner == q.id;
@@ -605,6 +695,34 @@ public final class Relay {
                     "game", (long) g.no, "lines", lines));
         }
         broadcastStateLocked();
+    }
+
+    /**
+     * The setup lines are engine messages: one length byte, so at most 255 bytes each (the launcher would skip a longer
+     * line and the phones would then disagree), no control characters (a newline would be a second command), and at most
+     * 255 of them (the TV viewer's first message counts them in one byte). Null when all is well, otherwise the reason.
+     */
+    public static String checkSetupLines(List<String> lines) {
+        if (lines.size() > MAX_SETUP_LINES) {
+            return "the setup has " + lines.size() + " lines but the TV viewer link counts at most " + MAX_SETUP_LINES
+                    + ". Use fewer teams or hedgehogs.";
+        }
+        for (int k = 0; k < lines.size(); k++) {
+            String l = lines.get(k);
+            int n = l.getBytes(StandardCharsets.UTF_8).length;
+            String head = l.length() > 40 ? l.substring(0, 40) + "..." : l;
+            if (n > MAX_SETUP_LINE) {
+                return "setup line " + (k + 1) + " (\"" + head.replaceAll("\\p{Cc}", "?") + "\") is " + n
+                        + " bytes but the engine link takes at most " + MAX_SETUP_LINE
+                        + ". Shorten the long name, seed or script parameter.";
+            }
+            for (int c = 0; c < l.length(); c++) {
+                if (l.charAt(c) < 0x20 || l.charAt(c) == 0x7f) {
+                    return "setup line " + (k + 1) + " (\"" + head.replaceAll("\\p{Cc}", "?") + "\") contains a control character.";
+                }
+            }
+        }
+        return null;
     }
 
     private void broadcastStateLocked() {
@@ -649,8 +767,8 @@ public final class Relay {
                 if (msg == null) break;
                 onEngineMessage(me, msg);
             }
-        } catch (IOException e) {
-            log("engine link " + me.name + ": " + e.getMessage());
+        } catch (Throwable e) {
+            log("engine link " + me.name + ": " + e);
         }
         engineClosed(me);
     }
@@ -677,6 +795,7 @@ public final class Relay {
         game.lastKeptAt = game.gateOpenAt;
         for (Player q : players.values()) if (q.engineOut != null) q.engineOut.release();
         log("all engine links up; game " + game.no + " running");
+        updateArmed(game, game.gateOpenAt);
         broadcastStateLocked();
     }
 
@@ -715,7 +834,6 @@ public final class Relay {
             g.lastKeptAt = p.lastMsg;
             g.lastSender = p.id;
             g.lastType = type;
-            g.armed = true;
             if (type == 'N') {
                 if (msg.length >= 7) {
                     Digest d = new Digest();
@@ -725,13 +843,27 @@ public final class Relay {
                     d.tick = ((msg[5] & 0xff) << 8) | (msg[6] & 0xff);
                     g.digests.add(d);
                 }
-            } else if (type == 'M' && g.mapDigest.isEmpty()) {
-                g.mapDigest = new String(msg, 1, msg.length - 1, StandardCharsets.ISO_8859_1);
-                g.mapDigestFrom = p.name;
+            } else if (type == 'M') {
+                if (g.mapDigest.isEmpty()) {
+                    g.mapDigest = new String(msg, 1, msg.length - 1, StandardCharsets.ISO_8859_1);
+                    g.mapDigestFrom = p.name;
+                }
+                g.mSeen.add(p.id);
             }
             appendAndForward(g, msg, p, after);
+            if (type == 'M') updateArmed(g, p.lastMsg);
         }
         for (Runnable r : after) r.run();
+    }
+
+    /** Lock held. Arms the silence rule once every live phone has sent its map digest: until then nobody can be blamed. */
+    private void updateArmed(Game g, long now) {
+        if (g.armed || state != S_PLAYING) return;
+        for (Player q : players.values()) if (!q.dropped && !q.finished && !g.mSeen.contains(q.id)) return;
+        g.armed = true;
+        g.armedAt = now;
+        g.lastKeptAt = now;
+        log("every live phone has sent its map digest; the silence rule is armed");
     }
 
     /** Lock held. Appends to the log and offers to every other live engine. */
@@ -748,7 +880,9 @@ public final class Relay {
             if (q == from || q.dropped || q.finished || q.engineOut == null) continue;
             q.toHash.add(f);
             q.toMsgs++;
-            if (!q.engineOut.offer(f)) {
+            byte[] out = cfg.fault == null ? f : cfg.fault.apply(q.id, f);
+            if (out == null) continue;
+            if (!q.engineOut.offer(out)) {
                 after.add(() -> {
                     synchronized (lock) {
                         if (game != null && !q.dropped) {
@@ -811,6 +945,7 @@ public final class Relay {
         for (Runnable r : after) r.run();
         sendLobby(p, Json.obj("t", "dropped", "reason", "You were dropped from the game: " + why));
         if (state == S_STARTING) maybeOpenGate();
+        else updateArmed(g, System.currentTimeMillis());
         broadcastStateLocked();
     }
 
@@ -841,7 +976,9 @@ public final class Relay {
             // Nobody linked yet: keep waiting (the watchdog applies the link timeout).
             for (Player q : players.values()) if (!q.dropped && !q.linked) return;
         }
-        endGame(game.events.isEmpty() ? "every engine finished" : "every engine is gone");
+        boolean anyDropped = false;
+        for (Player q : players.values()) if (q.dropped) anyDropped = true;
+        endGame(anyDropped ? "every engine is gone" : "every engine finished");
     }
 
     /** Lock held. */
@@ -943,6 +1080,15 @@ public final class Relay {
                 return;
             }
             long now = System.currentTimeMillis();
+            try {
+                lastPing = watchOnce(now, lastPing);
+            } catch (Throwable e) {
+                log("watchdog error (carrying on): " + e);
+            }
+        }
+    }
+
+    private long watchOnce(long now, long lastPing) {
             synchronized (lock) {
                 if (now - lastPing > 5000) {
                     lastPing = now;
@@ -959,34 +1105,47 @@ public final class Relay {
                     }
                 }
                 Game g = game;
-                if (g == null) continue;
+                if (g == null) return lastPing;
                 if (state == S_STARTING && now - g.startedAt > cfg.linkWaitMs) {
                     for (Player q : new ArrayList<>(players.values()))
                         if (!q.linked && !q.dropped) dropPlayer(q, "its engine did not connect in " + cfg.linkWaitMs / 1000 + " s");
                     if (state == S_STARTING) maybeOpenGate();
                     checkEnd();
-                } else if (state == S_PLAYING && g.armed && now - g.lastKeptAt > cfg.silenceMs) {
-                    silence(g, now);
+                } else if (state == S_PLAYING && !g.armed) {
+                    // The silence rule is off until every live phone has sent its map digest. A phone that is still
+                    // generating the map must not be blamed; one that never finishes is dropped after a long wait.
+                    if (now - g.gateOpenAt > cfg.mapWaitMs) {
+                        for (Player q : new ArrayList<>(players.values()))
+                            if (!q.dropped && !q.finished && !g.mSeen.contains(q.id))
+                                dropPlayer(q, "no map digest in " + cfg.mapWaitMs / 1000 + " s: it never finished generating the map");
+                        updateArmed(g, now);
+                        checkEnd();
+                    }
+                } else if (state == S_PLAYING) {
+                    // Before the first turn ends there is extra grace: the first turn can start late on a slow phone.
+                    long limit = cfg.silenceMs + (g.digests.isEmpty() ? cfg.graceMs : 0);
+                    if (now - g.lastKeptAt > limit) silence(g, now);
                 }
                 if (!g.desyncReporters.isEmpty() && now - g.desyncSince > 5000) g.desyncReporters.clear();
             }
-        }
+            return lastPing;
     }
 
     /**
-     * Lock held. Nothing has arrived from any phone for the silence limit. The current team's owner sends an
-     * empty tick at least once a second, so someone is stalled. After an N the next owner is unknown to the
-     * relay, so with exactly two phones it is the other one; otherwise the last sender is dropped.
+     * Lock held. Nothing has arrived from any phone for the silence limit (the rule is armed: every live phone has
+     * sent its map digest). The current team's owner sends an empty tick at least once a second, so someone is
+     * stalled. After an N, or an M (the first turn has not started), the next owner is unknown to the relay, so
+     * with exactly two phones it is the other one; otherwise the last sender is dropped.
      */
     private void silence(Game g, long now) {
         if (now - g.lastKeptAt > g.maxGapMs) g.maxGapMs = now - g.lastKeptAt;
         List<Player> live = new ArrayList<>();
         for (Player q : players.values()) if (q.linkOpen && !q.dropped && !q.finished) live.add(q);
         Player culprit = null;
-        if (g.lastType == 'N') {
+        if (g.lastType == 'N' || g.lastType == 'M') {
             for (Player q : live) if (q.id != g.lastSender) { if (culprit == null) culprit = q; else { culprit = null; break; } }
             if (culprit == null && live.size() > 2) {
-                log("silence for " + cfg.silenceMs / 1000 + " s after a turn end with " + live.size()
+                log("silence for " + (now - g.lastKeptAt) / 1000 + " s after a turn end or map digest with " + live.size()
                         + " phones: cannot tell who is stalled");
                 g.lastKeptAt = now;
                 return;
@@ -1015,12 +1174,25 @@ public final class Relay {
         while (running) {
             try {
                 final Socket s = viewerServer.accept();
-                s.setTcpNoDelay(true);
-                Thread t = new Thread(() -> viewerConnection(s), "relay-viewer");
-                t.setDaemon(true);
-                t.start();
+                try {
+                    s.setTcpNoDelay(true);
+                    if (viewerConns.incrementAndGet() > MAX_VIEWERS) {
+                        viewerConns.decrementAndGet();
+                        log("too many viewer connections, closed " + s.getRemoteSocketAddress());
+                        s.close();
+                        continue;
+                    }
+                    spawn("relay-viewer", s, () -> {
+                        try { viewerConnection(s); } finally { viewerConns.decrementAndGet(); }
+                    });
+                } catch (Throwable e) {
+                    log("viewer accept handling failed: " + e);
+                    try { s.close(); } catch (IOException ignored) { }
+                }
             } catch (IOException e) {
                 if (running) log("viewer accept failed: " + e);
+            } catch (Throwable e) {
+                log("viewer accept failed: " + e);
             }
         }
     }
@@ -1036,7 +1208,7 @@ public final class Relay {
         try {
             s.setSoTimeout(10000);
             InputStream in = new java.io.BufferedInputStream(s.getInputStream(), 4096);
-            String head = Ws.readHead(in);
+            String head = Ws.readHead(in, System.currentTimeMillis() + HELLO_DEADLINE_MS);
             if (head == null) { s.close(); return; }
             OutputStream os = s.getOutputStream();
             String key = Ws.header(head, "sec-websocket-key");
@@ -1054,7 +1226,7 @@ public final class Relay {
             }
             final Viewer me = new Viewer();
             synchronized (lock) {
-                if (game == null || state == S_SETUP) {
+                if (game == null || state == S_SETUP || game.viewerLines.size() > MAX_SETUP_LINES) {
                     os.write("HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\nContent-Length: 0\r\n\r\n".getBytes(StandardCharsets.ISO_8859_1));
                     os.flush();
                     s.close();
@@ -1076,8 +1248,11 @@ public final class Relay {
             v = me;
             s.setSoTimeout(0);
             changed();
-            Ws.readClient(in, pong -> me.out.offer(pong));
-        } catch (Exception e) {
+            Ws.readClient(in, reply -> me.out.offer(reply));
+            // The client closed (and its close frame was echoed): let the echo out before the socket goes.
+            me.out.closeWhenDrained();
+            try { Thread.sleep(200); } catch (InterruptedException ignored) { }
+        } catch (Throwable e) {
             log("viewer connection: " + e);
         }
         if (v != null) viewerLost(v);
@@ -1139,22 +1314,6 @@ public final class Relay {
                 b.write(game.log.toByteArray(), 0, game.log.size());
             }
             return b.toByteArray();
-        }
-    }
-
-    // Small access helpers for package-private members of the app package -----------------------
-
-    /** GameConfig keeps its cleaners package-private; this mirrors them for names typed by other phones. */
-    static final class GameConfigAccess {
-        static String clean(String s, String fallback) {
-            String t = s == null ? "" : s.replaceAll("[\\p{Cc}\\u2028\\u2029]", " ").trim();
-            int cps = t.codePointCount(0, t.length());
-            if (cps > 32) t = t.substring(0, t.offsetByCodePoints(0, 32)).trim();
-            return t.isEmpty() ? fallback : t;
-        }
-
-        static String cleanTeam(String s, String fallback) {
-            return clean(s == null ? null : s.replaceAll("[\\\\/:*?\"<>|]", ""), fallback);
         }
     }
 }

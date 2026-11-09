@@ -11,8 +11,11 @@ import java.util.Map;
  * Written here so that the relay core runs on a plain JVM and on Android without org.json.
  */
 public final class Json {
+    /** Limits for text that comes from other phones: nesting, elements per container, nodes in all, string length. */
+    public static final int MAX_DEPTH = 32, MAX_ITEMS = 4096, MAX_NODES = 20000, MAX_STRING = 65536;
+
     private final String s;
-    private int i;
+    private int i, depth, nodes;
 
     private Json(String s) {
         this.s = s;
@@ -40,9 +43,14 @@ public final class Json {
 
     private Object value() {
         if (i >= s.length()) throw new IllegalArgumentException("unexpected end");
+        if (++nodes > MAX_NODES) throw new IllegalArgumentException("too many values");
         char c = s.charAt(i);
-        if (c == '{') return object();
-        if (c == '[') return array();
+        if (c == '{' || c == '[') {
+            if (++depth > MAX_DEPTH) throw new IllegalArgumentException("nested more than " + MAX_DEPTH + " levels");
+            Object o = c == '{' ? object() : array();
+            depth--;
+            return o;
+        }
         if (c == '"') return string();
         if (s.startsWith("true", i)) { i += 4; return Boolean.TRUE; }
         if (s.startsWith("false", i)) { i += 5; return Boolean.FALSE; }
@@ -50,7 +58,7 @@ public final class Json {
         int st = i;
         if (c == '-') i++;
         while (i < s.length() && Character.isDigit(s.charAt(i))) i++;
-        if (st == i || (c == '-' && i == st + 1)) throw new IllegalArgumentException("bad value at " + st);
+        if (st == i || (c == '-' && i == st + 1) || i - st > 18) throw new IllegalArgumentException("bad value at " + st);
         return Long.valueOf(s.substring(st, i));
     }
 
@@ -58,15 +66,17 @@ public final class Json {
         Map<String, Object> m = new LinkedHashMap<>();
         i++;
         ws();
-        if (s.charAt(i) == '}') { i++; return m; }
+        if (i < s.length() && s.charAt(i) == '}') { i++; return m; }
         for (;;) {
+            if (m.size() >= MAX_ITEMS) throw new IllegalArgumentException("object too large");
             ws();
             String k = string();
             ws();
-            if (s.charAt(i++) != ':') throw new IllegalArgumentException("expected : at " + (i - 1));
+            if (i >= s.length() || s.charAt(i++) != ':') throw new IllegalArgumentException("expected : at " + (i - 1));
             ws();
             m.put(k, value());
             ws();
+            if (i >= s.length()) throw new IllegalArgumentException("unexpected end");
             char c = s.charAt(i++);
             if (c == '}') return m;
             if (c != ',') throw new IllegalArgumentException("expected , at " + (i - 1));
@@ -77,11 +87,13 @@ public final class Json {
         List<Object> l = new ArrayList<>();
         i++;
         ws();
-        if (s.charAt(i) == ']') { i++; return l; }
+        if (i < s.length() && s.charAt(i) == ']') { i++; return l; }
         for (;;) {
+            if (l.size() >= MAX_ITEMS) throw new IllegalArgumentException("array too large");
             ws();
             l.add(value());
             ws();
+            if (i >= s.length()) throw new IllegalArgumentException("unexpected end");
             char c = s.charAt(i++);
             if (c == ']') return l;
             if (c != ',') throw new IllegalArgumentException("expected , at " + (i - 1));
@@ -89,13 +101,16 @@ public final class Json {
     }
 
     private String string() {
-        if (s.charAt(i) != '"') throw new IllegalArgumentException("expected string at " + i);
+        if (i >= s.length() || s.charAt(i) != '"') throw new IllegalArgumentException("expected string at " + i);
         i++;
         StringBuilder b = new StringBuilder();
         for (;;) {
+            if (i >= s.length()) throw new IllegalArgumentException("unterminated string");
+            if (b.length() > MAX_STRING) throw new IllegalArgumentException("string too long");
             char c = s.charAt(i++);
             if (c == '"') return b.toString();
             if (c != '\\') { b.append(c); continue; }
+            if (i >= s.length()) throw new IllegalArgumentException("unterminated string");
             char e = s.charAt(i++);
             switch (e) {
                 case 'n': b.append('\n'); break;
@@ -103,7 +118,11 @@ public final class Json {
                 case 't': b.append('\t'); break;
                 case 'b': b.append('\b'); break;
                 case 'f': b.append('\f'); break;
-                case 'u': b.append((char) Integer.parseInt(s.substring(i, i + 4), 16)); i += 4; break;
+                case 'u':
+                    if (i + 4 > s.length()) throw new IllegalArgumentException("bad escape");
+                    b.append((char) Integer.parseInt(s.substring(i, i + 4), 16));
+                    i += 4;
+                    break;
                 default: b.append(e);
             }
         }

@@ -19,10 +19,11 @@ final class Ws {
     static final String GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
     /** The request head (up to the blank line) as text; null at end of stream. */
-    static String readHead(InputStream in) throws IOException {
+    static String readHead(InputStream in, long deadlineMs) throws IOException {
         ByteArrayOutputStream b = new ByteArrayOutputStream();
         int c, state = 0;
         while ((c = in.read()) >= 0) {
+            if (System.currentTimeMillis() > deadlineMs) throw new IOException("request head too slow");
             b.write(c);
             if (b.size() > 16384) throw new IOException("request head too long");
             state = (c == '\r' && (state == 0 || state == 2)) ? state + 1 : (c == '\n' && (state == 1 || state == 3)) ? state + 1 : 0;
@@ -64,33 +65,46 @@ final class Ws {
         return b.toByteArray();
     }
 
+    private static final int MAX_CLIENT_FRAME = 1 << 16;
+
+    /** One byte, or an IOException at the end of the stream (a frame cut in half is an error, not a zero). */
+    private static int need(InputStream in) throws IOException {
+        int c = in.read();
+        if (c < 0) throw new IOException("stream ended inside a frame");
+        return c;
+    }
+
     /**
-     * Reads client frames until the client closes or the stream ends. Pings are answered through {@code pong};
-     * text and binary frames are ignored (viewers are read-only).
+     * Reads client frames until the client closes or the stream ends. A ping is answered with a pong that carries the
+     * same payload, a close frame is echoed (with its status code) before returning; text and binary frames are
+     * ignored (viewers are read-only). A negative or oversized length ends the connection with an IOException.
+     * {@code reply} receives the frames to send back.
      */
-    static void readClient(InputStream in, java.util.function.Consumer<byte[]> pong) throws IOException {
+    static void readClient(InputStream in, java.util.function.Consumer<byte[]> reply) throws IOException {
         for (;;) {
             int b0 = in.read();
             if (b0 < 0) return;
-            int b1 = in.read();
-            if (b1 < 0) return;
+            int b1 = need(in);
             long len = b1 & 0x7f;
-            if (len == 126) len = (in.read() << 8) | in.read();
-            else if (len == 127) { len = 0; for (int k = 0; k < 8; k++) len = (len << 8) | in.read(); }
-            boolean masked = (b1 & 0x80) != 0;
+            if (len == 126) len = (need(in) << 8) | need(in);
+            else if (len == 127) { len = 0; for (int k = 0; k < 8; k++) len = (len << 8) | need(in); }
+            if (len < 0 || len > MAX_CLIENT_FRAME) throw new IOException("client frame length " + len + " refused");
             byte[] mask = new byte[4];
-            if (masked) for (int k = 0; k < 4; k++) mask[k] = (byte) in.read();
-            if (len > (1 << 20)) throw new IOException("client frame too long");
+            if ((b1 & 0x80) != 0) for (int k = 0; k < 4; k++) mask[k] = (byte) need(in);
             byte[] p = new byte[(int) len];
             int got = 0;
             while (got < len) {
                 int r = in.read(p, got, (int) len - got);
-                if (r < 0) return;
+                if (r < 0) throw new IOException("stream ended inside a frame");
                 got += r;
             }
+            if ((b1 & 0x80) != 0) for (int k = 0; k < p.length; k++) p[k] ^= mask[k & 3];
             int op = b0 & 0x0f;
-            if (op == 8) return;
-            if (op == 9) pong.accept(frame(10, new byte[0]));
+            if (op == 8) {
+                reply.accept(frame(8, p.length >= 2 ? new byte[] { p[0], p[1] } : new byte[0]));
+                return;
+            }
+            if (op == 9) reply.accept(frame(10, p.length > 125 ? java.util.Arrays.copyOf(p, 125) : p));
         }
     }
 }

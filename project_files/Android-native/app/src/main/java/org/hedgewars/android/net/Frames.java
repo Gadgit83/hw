@@ -68,8 +68,14 @@ public final class Frames {
 
     /** Reads a text line (up to the newline, which is consumed) byte by byte, so no binary data is swallowed. */
     public static String readLine(InputStream in, int max) throws IOException {
+        return readLine(in, max, 0);
+    }
+
+    /** As {@link #readLine(InputStream, int)}, but gives up with an IOException once the clock passes {@code deadlineMs} (0: no limit). */
+    public static String readLine(InputStream in, int max, long deadlineMs) throws IOException {
         java.io.ByteArrayOutputStream b = new java.io.ByteArrayOutputStream();
         for (;;) {
+            if (deadlineMs != 0 && System.currentTimeMillis() > deadlineMs) throw new IOException("line too slow");
             int c = in.read();
             if (c < 0) return b.size() == 0 ? null : b.toString("UTF-8");
             if (c == '\n') return b.toString("UTF-8");

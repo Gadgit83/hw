@@ -26,7 +26,8 @@ import org.robolectric.annotation.Config;
  *  - MainActivity, all three tabs, with the game data installed and a saved setup written by 0.2.0, and with default
  *    preferences;
  *  - MainActivity on the very first launch, when there is no game data yet and it is being unpacked;
- *  - OptionsActivity, all three tabs, and TeamEditActivity for two teams.
+ *  - OptionsActivity, all three tabs, and TeamEditActivity for two teams;
+ *  - NetLobbyActivity as the chooser, as a joined phone, as the host, and its Back confirmation.
  *
  * Needs the staged game data (scripts/stage-assets.sh) and the Android 14 and 15 jars in the Robolectric cache
  * (scripts/fetch-robolectric.sh). Run it with scripts/ui-smoke-test.sh.
@@ -65,8 +66,30 @@ public class LaunchSmokeTest {
         TestSupport.layout(a);
         String text = TestSupport.texts(a.getWindow().getDecorView());
         assertNotNull(a.getWindow().getDecorView());
+        if (a instanceof MainActivity) assertNetworkButtonFits(a);
         ctl.pause().stop().destroy();
         return text;
+    }
+
+    /** The Network button in the compact header shows its whole word and lies inside the screen. */
+    private static void assertNetworkButtonFits(Activity a) {
+        android.widget.TextView t = findText(a.getWindow().getDecorView(), "Network");
+        assertNotNull("the header has a Network button", t);
+        int[] xy = new int[2];
+        t.getLocationOnScreen(xy);
+        assertTrue("Network is not cut off (ellipsis)", t.getLayout() == null || t.getLayout().getEllipsisCount(0) == 0);
+        assertTrue("Network lies inside the screen: x " + xy[0] + " to " + (xy[0] + t.getWidth()), xy[0] >= 0 && xy[0] + t.getWidth() <= TestSupport.W);
+    }
+
+    private static android.widget.TextView findText(android.view.View v, String s) {
+        if (v instanceof android.widget.TextView && s.contentEquals(((android.widget.TextView) v).getText())) return (android.widget.TextView) v;
+        if (v instanceof android.view.ViewGroup) {
+            for (int i = 0; i < ((android.view.ViewGroup) v).getChildCount(); i++) {
+                android.widget.TextView r = findText(((android.view.ViewGroup) v).getChildAt(i), s);
+                if (r != null) return r;
+            }
+        }
+        return null;
     }
 
     private void mainTabs(String setup) throws Exception {
@@ -218,5 +241,70 @@ public class LaunchSmokeTest {
         Options back = Store.loadOptions(app());
         assertTrue(back.marginMm == 7 && !back.marginAuto && back.zoomPct == 160);
         System.out.println("SDK " + android.os.Build.VERSION.SDK_INT + ": options display tab ok");
+    }
+
+    // The network screen ---------------------------------------------------------------------------------------
+
+    private static void netState(String stateJson, boolean hosting) throws Exception {
+        java.lang.reflect.Field f = NetSession.class.getDeclaredField("state");
+        f.setAccessible(true);
+        f.set(null, org.hedgewars.android.net.Json.parseObject(stateJson));
+        NetSession.joined = true;
+        NetSession.hosting = hosting;
+        NetSession.target = "192.168.1.20:46633";
+    }
+
+    private static final String LOBBY = "{\"t\":\"state\",\"state\":\"setup\",\"host\":\"Pixel\",\"proto\":1,\"build\":\"0.3.0-mp2\",\"you\":2,"
+            + "\"players\":[{\"id\":1,\"name\":\"Pixel\",\"host\":true,\"ready\":true,\"fg\":true,"
+            + "\"teams\":[{\"name\":\"Red Team\",\"color\":0,\"level\":0}]},"
+            + "{\"id\":2,\"name\":\"Fairphone\",\"host\":false,\"ready\":false,\"fg\":false,"
+            + "\"teams\":[{\"name\":\"Blue Team\",\"color\":1,\"level\":3}]}],\"canStart\":false,\"game\":0}";
+
+    @Test
+    public void netLobbyActivity_chooser_neitherHostingNorJoined() throws Exception {
+        TestSupport.installData(app());
+        String text = launch(NetLobbyActivity.class, null, 600);
+        assertTrue("chooser shows Host and Join: " + text, text.contains("Host network game") && text.contains("Join by address"));
+        System.out.println("SDK " + android.os.Build.VERSION.SDK_INT + ": NetLobbyActivity chooser ok");
+    }
+
+    @Test
+    public void netLobbyActivity_joinedState() throws Exception {
+        TestSupport.installData(app());
+        netState(LOBBY, false);
+        String text = launch(NetLobbyActivity.class, null, 600);
+        assertTrue("joined lobby lists the phones and teams: " + text,
+                text.contains("Joined") && text.contains("Fairphone") && text.contains("Blue Team") && text.contains("Ready") && text.contains("Leave"));
+        System.out.println("SDK " + android.os.Build.VERSION.SDK_INT + ": NetLobbyActivity joined state ok");
+    }
+
+    @Test
+    public void netLobbyActivity_hostState() throws Exception {
+        TestSupport.installData(app());
+        netState(LOBBY.replace("\"canStart\":false", "\"canStart\":true").replace("\"you\":2", "\"you\":1"), true);
+        String text = launch(NetLobbyActivity.class, null, 600);
+        assertTrue("host lobby shows Start and the address block: " + text,
+                text.contains("Hosting") && text.contains("Start game") && text.contains("TV viewer address") && text.contains("Stop hosting"));
+        System.out.println("SDK " + android.os.Build.VERSION.SDK_INT + ": NetLobbyActivity host state ok");
+    }
+
+    /** Back asks before it leaves a lobby, and leaves at once when there is nothing to leave. */
+    @Test
+    public void netLobbyActivity_backPressed() throws Exception {
+        TestSupport.installData(app());
+        netState(LOBBY, false);
+        org.robolectric.android.controller.ActivityController<NetLobbyActivity> ctl =
+                Robolectric.buildActivity(NetLobbyActivity.class, null);
+        NetLobbyActivity a = ctl.create().start().postCreate(null).resume().visible().get();
+        TestSupport.layout(a);
+        a.onBackPressed();
+        TestSupport.settle(200);
+        assertFalse("the screen stays open while the question is up", a.isFinishing());
+        assertNotNull("a confirmation dialog is shown", org.robolectric.shadows.ShadowAlertDialog.getLatestAlertDialog());
+        ctl.pause().stop().destroy();
+        TestSupport.resetStatics();
+        NetLobbyActivity b = Robolectric.buildActivity(NetLobbyActivity.class, null).create().start().resume().visible().get();
+        b.onBackPressed();
+        assertTrue("without a connection Back closes the screen", b.isFinishing());
     }
 }

@@ -22,7 +22,7 @@ import java.util.Random;
 public final class GameData {
     public final File root;
 
-    private List<String> themes, hiddenThemes, hats, graves, forts, voices, maps, styles;
+    private List<String> themes, hiddenThemes, hats, graves, forts, voices, flags, maps, styles;
     private final Map<String, List<String>> dictCache = new HashMap<>();
     private List<List<String>> typeTeamNames, typeHats;
 
@@ -43,6 +43,7 @@ public final class GameData {
         graves();
         forts();
         voices();
+        flags();
         imageMaps();
         styles();
         typeCount();
@@ -100,6 +101,12 @@ public final class GameData {
     public List<String> hats() {
         if (hats == null) hats = pngNames("Graphics/Hats");
         return hats;
+    }
+
+    /** Team flags: the Graphics/Flags/&lt;name&gt;.png files. */
+    public List<String> flags() {
+        if (flags == null) flags = pngNames("Graphics/Flags");
+        return flags;
     }
 
     public List<String> graves() {

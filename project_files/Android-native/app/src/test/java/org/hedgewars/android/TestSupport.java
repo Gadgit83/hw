@@ -55,6 +55,19 @@ final class TestSupport {
         set(MainActivity.class, "shown", null);
         set(Store.class, "cachedData", null);
         set(Store.class, "cachedStamp", -1L);
+        // The network session is process-wide state too.
+        set(NetSession.class, "hosting", false);
+        set(NetSession.class, "joined", false);
+        set(NetSession.class, "target", "");
+        set(NetSession.class, "state", null);
+        set(NetSession.class, "closedReason", "");
+        set(NetSession.class, "notice", "");
+        set(NetSession.class, "relaySummary", "");
+        set(NetSession.class, "pendingStart", null);
+        set(NetSession.class, "inGame", false);
+        set(NetSession.class, "lobbyVisible", false);
+        set(NetSession.class, "client", null);
+        set(NetSession.class, "listener", null);
     }
 
     private static void set(Class<?> k, String name, Object v) throws Exception {

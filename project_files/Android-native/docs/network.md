@@ -4,6 +4,8 @@ This is a survey, written while building the 0.2.0 setup screen, of what Hedgewa
 
 ## Where the app stands
 
+Update, build 0.3.0-mp1: this survey describes 0.2.0. The app now has an experimental relay that lets phones play each other (README, Network games); the relay is a small Java one written for this app, not the Haskell or Rust server surveyed below. The rest of this page is unchanged.
+
 - The app is hotseat only. One phone runs the engine, all teams play on that phone, and computer teams are played by the engine's AI.
 - The engine runs as a client of a local IPC socket on 127.0.0.1. The launcher (`project_files/Android-native/native/launcher/hp_ipc.c`) stands in for the Qt frontend on that socket and serves the game setup from `files/game.ipc`.
 - SDL2_net is linked only because the engine uses it for that local IPC socket (`project_files/Android-native/native/CMakeLists.txt`). The app does not open any other connection. (The manifest requests `INTERNET`, which Android requires for any socket, loopback included.)

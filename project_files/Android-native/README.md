@@ -100,7 +100,7 @@ Losing focus (home button, notification shade, phone call) pauses the game and g
 
 ### Known limitations
 
-- Hotseat only: no lobby, network play or controller phones yet. Everything is on one phone.
+- Hotseat is the normal mode. Network play between phones (0.3.0-mp2) is an experimental test build: see [Network games](#network-games-experimental). No controller phones yet.
 - Not offered: hand-drawn maps, mission and campaign maps, training, editing individual weapon counts (the 13 built-in weapon sets are), custom team flags, saved teams on disk (the setup is remembered as one whole).
 - English only.
 - HUD text and sprites are drawn larger by scaling the engine's artwork, so they are a little soft on very dense screens. The names and health tags above the hedgehogs are part of the world and keep their size (pinch to zoom in).
@@ -188,6 +188,30 @@ The weapon menu is drawn at its own scale and its touch cursor lives in the same
 Orientation: all activities are `sensorLandscape`. SDL additionally asks Android for an orientation when the engine creates its window (with no hint it requests every orientation, which overrode the manifest and let the game open in portrait), so `GameActivity` overrides `setOrientationBis` and `hp_main.c` sets `SDL_HINT_ORIENTATIONS` to landscape.
 
 The setup screens draw edge to edge and pad their content by the display cut-out, the system bars and the keyboard. While the keyboard is open the title and tabs make room, and the Start bar stays visible above the keyboard.
+
+### Network games (experimental)
+
+Build 0.3.0-mp2 (0.3.0-mp1 before the review fixes in the changelog) lets two or more phones on one Wi-Fi play one game, each with its own engine and its own teams. Phase 4 of the plan in https://github.com/Gadgit83/hedgewars-party (`docs/tv-viewer-plan.md`): no TV, no automatic discovery (the joiner types the host's address), no version check yet; the TV viewer endpoint is in (see below). The test script for two phones is `docs/multiphone-test.md`.
+
+```
+Host phone, main process                                    Joining phone, main process
+  NetLobbyActivity (Network button)                           NetLobbyActivity
+  HostService (foreground service, wake + Wi-Fi lock)         NetSession ---- lobby (JSON lines) ---+
+     Relay, TCP port 46633                                                                         |
+       lobby, setup per phone, whitelist, log, F on dropout  <------------------------------------+
+  NetSession ---- lobby over 127.0.0.1 ---->  Relay
+process :game (GameActivity)                                process :game
+  engine (TN) -- IPC 127.0.0.1 -- hp_ipc.c (network mode)     engine (TN) -- IPC -- hp_ipc.c (network mode)
+                                   '---- engine link (TCP) ---> Relay <---- engine link (TCP) ----'
+```
+
+- `files/net.cfg` (host, port, token, nick, diagnostics path) is written next to `game.ipc` when the relay starts the game. Its presence is what puts the launcher in network mode; a local game deletes it.
+- The relay sends each phone its own setup lines: `TN`, the shared lines of the host's setup, and per team the block of `GameConfig.teamLines`, with `erdriven` right after every `eaddteam` the phone does not own. The host's setup (map, theme, seed, rules, weapons) is authoritative. The relay fixes the team order and resolves clashing colours and names.
+- Forwarding: every whitelisted message (`M#+LlRrUuDdZzAaSjJ,NpPwtgfhbc12345`, `0x80..0x8A`) from an engine goes unchanged and in arrival order to every other engine and into the log. `h` is checked against the sender's team indices. The sender does not get its own messages back. Nothing is sent to any engine before every engine link is up.
+- Dropout: if an engine link closes without the engine having said it finished (`q`), or a phone is silent for 20 s while its turn is the expected one, the relay sends the others the unsynced `F<team>` (no timestamp) for each of that phone's teams, and logs it. The engines take it from there. Two phones that disagree (a "Desync detected" report) end the game for both.
+- TV viewer: the relay also serves a WebSocket on port 8766 (`Ws.java`, `Relay.viewerConnection`), with the behaviour of the e2e-host bridge in the hedgewars-party repository so the existing TV viewer page connects unchanged: plain GET returns status JSON, an upgrade while no game is running gets 503 (the page retries), an upgrade during a game gets one binary message (setup count, the canonical setup lines `TL...` without `erdriven`, which the page transforms itself, then `e$spectate 1` and the backlog when the log is not empty) and then one binary frame per forwarded message, including the injected `F`. Viewers are read-only and have bounded queues. The host screen shows the address (`ws://IP:8766`); the TV page has it built in (`HW_WS_URL`), no discovery yet. A single phone hosting with two or more teams plays through the relay in the same way, so the TV can watch a one-phone game.
+- Diagnostics: every phone shows, and Share log contains, the turn checksums (`N`) and map digest (`M`) that crossed its link, FNV-1a hashes of both directions, and the relay's report with the game log hash.
+- Tests without a device: `scripts/net-test.sh` (see [Host tests](#host-tests)).
 
 ### Game data
 
@@ -277,6 +301,10 @@ No device is needed for these.
 
 `scripts/config-test.sh` (a few seconds, JVM only) checks the setup model and the game configuration against the desktop frontend's source and the engine's registered commands: the 16 scheme presets, the 13 weapon sets, the 25 flag bits, the 18 `e$` value lines and their factors, the nine colours, the shape of every `eaddteam`, `eaddhh` and `ehat` line, the order inside a team block, the `eammstore` rule, 8 teams of 8 hedgehogs with every computer level, every map type, every game style, saving and loading, and the options to engine option mapping (including that the engine knows each option it is given).
 
+`scripts/net-test.sh SCENARIO` runs the relay on the JVM and two or three real engines as separate phones (teams of their own, computer players), prints the relay's report, each phone's launcher diagnostics and the per-turn checksums side by side, and ends with `RESULT: PASS` or `RESULT: FAIL` and the matching exit status. Scenarios: `basic`, `basic3` (three phones), `dropout`, `dropout3`, `stall`, `slowstart` (phone B 30 s late with its map digest), `negcontrol` (the relay alters one checksum byte; passes only if the desync detection fires), `solo`, `viewer1`, `viewer2`, `malformed` (no engines: hostile input to the relay, see `native/host-test/RelayTests.java`) and `all`. It needs `scripts/stage-assets.sh` and `scripts/host-test.sh` to have been run once (it runs the latter itself if the host engine is missing). `HP_TEST_DISPLAY` picks the X display (a bare number: default 66 there, 77 for host-test.sh).
+
+`scripts/ui-smoke-test.sh` opens every screen under Android 14 and 15 with Robolectric, the Network screen (chooser, joined, host, Back question) included.
+
 `scripts/host-test.sh [seconds]` builds the same engine and launcher for Linux with desktop OpenGL, starts a game from the config that `GameConfig.java` produces, and runs it headless under Xvfb for a while, saving screenshots. Run `pkill Xvfb` before it if an earlier run was interrupted. Environment variables:
 
 | Variable | Meaning |
@@ -328,7 +356,9 @@ Most of it is game data (112 MB staged, compressed little because the images and
 | `native/CMakeLists.txt` | Builds SDL2 family, Lua, PhysFS, fpcrtl, the pas2c engine and `libmain.so` (used through Gradle `externalNativeBuild`) |
 | `native/launcher/` | `SDL_main` and the in-process IPC server |
 | `native/include/` | Header shims: `gles11.h` and `GL/gl.h` map the engine's GL includes to OpenGL ES 1.1 |
-| `native/host-test/` | Desktop smoke test (`GenConfig.java` scenarios, `ConfigCheck.java`, the Linux launcher), not shipped |
+| `native/host-test/` | Desktop smoke test (`GenConfig.java` scenarios, `ConfigCheck.java`, the Linux launcher) and the network test harness (`NetHarness.java`), not shipped |
+| `app/.../net/` | The relay and its lobby client: plain Java, no Android classes (`Relay`, `RelayClient`, `Frames`, `Json`, `Outbox`, `Fnv`, `NetTeams`) |
+| `app/.../HostService.java`, `NetLobbyActivity.java`, `NetSession.java`, `NetDiag.java` | Foreground service that hosts, the network screen, the phone's session with the relay, the network game report |
 | `scripts/` | Reproducible build steps, `gen-schemes.py`, `config-test.sh`, `host-test.sh` |
 | `third_party/`, `build/` | Downloaded and generated, gitignored |
 

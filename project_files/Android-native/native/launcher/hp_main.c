@@ -223,6 +223,10 @@ int SDL_main(int argc, char **argv)
     }
     mkdir(user, 0771);
 
+    char netcfg[1100];
+    snprintf(netcfg, sizeof netcfg, "%s/net.cfg", base);
+    if (hp_ipc_net_config(netcfg) == 0) LOGI("network game: joining through the relay as '%s'", hp_ipc_net_nick());
+
     int p = hp_ipc_start(config);
     if (p < 0) {
         record_error("Could not start the local game setup server (socket error).");
@@ -262,7 +266,7 @@ int SDL_main(int argc, char **argv)
         "--prefix", data, "--user-prefix", user,
         "--width", w, "--height", h,
         "--fullscreen-width", w, "--fullscreen-height", h, "--fullscreen",
-        "--locale", "en.txt", "--nodampen", "--nick", "Player",
+        "--locale", "en.txt", "--nodampen", "--nick", (char *)(hp_ipc_net_nick() ? hp_ipc_net_nick() : "Player"),
         "--ui-scale", ui, "--menu-scale", menu,
         "--inset-left", il, "--inset-top", it, "--inset-right", ir, "--inset-bottom", ib,
         "--screen-shape", shape,

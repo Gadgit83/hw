@@ -98,6 +98,10 @@ public class GameActivity extends SDLActivity {
         // The native launcher removes this marker when the engine ends cleanly.
         Diag.markGameStarted(this);
         options = Store.loadOptions(this);
+        // A network game cannot pause, and a phone that sleeps stalls everyone's engine on its turn.
+        if (new java.io.File(getFilesDir(), "net.cfg").exists()) {
+            getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        }
         super.onCreate(savedInstanceState);
     }
 

@@ -674,6 +674,14 @@ s:= s; // avoid compiler hint
 cNetHost:= true;
 end;
 
+// Network games: the launcher (local IPC 'e' command, never a network message) marks this phone as a watcher: it plays no team, so
+// the touch controls and the weapon menu are hidden and ignored (the camera still pans and zooms). Used only where GameType = gmtNet.
+procedure chNetWatch(var s: shortstring);
+begin
+s:= s; // avoid compiler hint
+cNetWatch:= true;
+end;
+
 // Network games: the launcher pauses ('1') or resumes ('0') this engine when the relay says the host did. A real pause
 // (game time stops, the Paused banner shows), not the AFK toggle. Game time only moves by ticks, never by the wall
 // clock, so pausing at different moments on each phone cannot change what any phone computes.
@@ -1092,6 +1100,7 @@ begin
     RegisterVariable('findhh'  , @chFindhh       , true );
     RegisterVariable('pause'   , @chPause        , true );
     RegisterVariable('nethost' , @chNetHost      , true );
+    RegisterVariable('netwatch', @chNetWatch     , true );
     RegisterVariable('netpause', @chNetPause     , true );
     RegisterVariable('netpausereq', @chNetPauseReq, true );
     RegisterVariable('+cur_u'  , @chCurU_p       , true );

@@ -201,21 +201,24 @@ final class NetSession {
 
     // Addresses -------------------------------------------------------------------------------
 
-    /** The phone's IPv4 addresses on its networks, Wi-Fi first, for the host screen. */
+    /** True for Wi-Fi, hotspot and Ethernet interfaces (wlan*, swlan*, ap*, eth*); not cellular (rmnet*), VPN (tun*) or others. */
+    static boolean isLanInterface(String name) {
+        return name != null && (name.startsWith("wlan") || name.startsWith("swlan") || name.startsWith("ap") || name.startsWith("eth"));
+    }
+
+    /** The phone's IPv4 addresses on Wi-Fi, hotspot or Ethernet, for the host screen. Empty when there is none. */
     static List<String> localAddresses() {
-        List<String> wlan = new ArrayList<>(), other = new ArrayList<>();
+        List<String> out = new ArrayList<>();
         try {
             for (NetworkInterface ni : Collections.list(NetworkInterface.getNetworkInterfaces())) {
-                if (!ni.isUp() || ni.isLoopback()) continue;
+                if (!ni.isUp() || ni.isLoopback() || !isLanInterface(ni.getName())) continue;
                 for (InetAddress a : Collections.list(ni.getInetAddresses())) {
                     if (!(a instanceof Inet4Address) || a.isLoopbackAddress() || a.isLinkLocalAddress()) continue;
-                    String s = a.getHostAddress();
-                    (ni.getName().startsWith("wlan") ? wlan : other).add(s);
+                    out.add(a.getHostAddress());
                 }
             }
         } catch (Exception ignored) {
         }
-        wlan.addAll(other);
-        return wlan;
+        return out;
     }
 }

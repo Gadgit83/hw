@@ -202,6 +202,8 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
         content.addView(card, ui.margins(Ui.lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT), 0, 8, 0, 0));
     }
 
+    private static final String NO_WIFI = "No Wi-Fi: connect the phone to the same Wi-Fi as the TV";
+
     @SuppressWarnings("unchecked")
     private void lobby() {
         Map<String, Object> st = NetSession.state;
@@ -217,7 +219,7 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
             if (rl != null && rl.viewerPort() > 0) {
                 StringBuilder w = new StringBuilder();
                 for (String s : addr) w.append(w.length() == 0 ? "" : "\n").append("ws://").append(s).append(':').append(rl.viewerPort());
-                TextView tv = ui.text(addr.isEmpty() ? "No Wi-Fi address found. Connect to Wi-Fi." : w.toString(), 28, Color.WHITE);
+                TextView tv = ui.text(addr.isEmpty() ? NO_WIFI : w.toString(), 28, Color.WHITE);
                 tv.setTypeface(Typeface.DEFAULT_BOLD);
                 tv.setTextIsSelectable(true);
                 card.addView(tv);
@@ -228,7 +230,7 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
                 card.addView(coloured(rl == null ? "The TV viewer endpoint is not running." : rl.viewerError(), Ui.DANGER));
             }
             card.addView(ui.heading("Hosting: address for other phones"));
-            TextView big = ui.text(addr.isEmpty() ? "No Wi-Fi address found. Connect to Wi-Fi." : a.toString(), 18, Color.WHITE);
+            TextView big = ui.text(addr.isEmpty() ? NO_WIFI : a.toString(), 18, Color.WHITE);
             big.setTypeface(Typeface.DEFAULT_BOLD);
             card.addView(big);
             card.addView(ui.hint("Other phones type this address (Join by address). Not needed for a one-phone game with the TV."));

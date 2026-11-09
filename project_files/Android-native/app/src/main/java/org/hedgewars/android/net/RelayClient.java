@@ -86,16 +86,49 @@ public final class RelayClient {
         t.start();
     }
 
-    private synchronized void send(Map<String, Object> m) throws IOException {
-        out.write((Json.write(m) + "\n").getBytes(StandardCharsets.UTF_8));
-        out.flush();
+    /** Every write after connect() runs on this one thread, so callers (the UI thread too) never touch the socket and the order is kept. */
+    private final java.util.concurrent.ExecutorService writer = java.util.concurrent.Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(r, "relay-writer");
+        t.setDaemon(true);
+        return t;
+    });
+    /** Test hook: the thread that last wrote to the socket. */
+    private volatile Thread lastWriteThread;
+
+    public Thread lastWriteThread() {
+        return lastWriteThread;
     }
 
-    private void trySend(Map<String, Object> m) {
+    /** Test hook: blocks until every write queued so far has been done. */
+    public void flushWrites() throws InterruptedException {
         try {
-            send(m);
-        } catch (IOException e) {
-            close("The connection to the host was lost.");
+            writer.submit(() -> { }).get(5, java.util.concurrent.TimeUnit.SECONDS);
+        } catch (java.util.concurrent.ExecutionException | java.util.concurrent.TimeoutException | java.util.concurrent.RejectedExecutionException ignored) {
+        }
+    }
+
+    private void send(Map<String, Object> m) throws IOException {
+        byte[] b = (Json.write(m) + "\n").getBytes(StandardCharsets.UTF_8);
+        synchronized (this) {
+            lastWriteThread = Thread.currentThread();
+            out.write(b);
+            out.flush();
+        }
+    }
+
+    /** Queues the message for the writer thread; never blocks, never does I/O on the caller. */
+    private void trySend(Map<String, Object> m) {
+        if (closed) return;
+        try {
+            writer.execute(() -> {
+                if (closed) return;
+                try {
+                    send(m);
+                } catch (IOException e) {
+                    close("The connection to the host was lost.");
+                }
+            });
+        } catch (java.util.concurrent.RejectedExecutionException ignored) {
         }
     }
 
@@ -124,7 +157,14 @@ public final class RelayClient {
     private void close(String reason) {
         if (closed) return;
         closed = true;
-        try { if (socket != null) socket.close(); } catch (IOException ignored) { }
+        writer.shutdown();
+        final Socket sock = socket;
+        // Closing a socket can block on some platforms, and this may be called from the UI thread: close it on its own thread.
+        if (sock != null) {
+            Thread t = new Thread(() -> { try { sock.close(); } catch (IOException ignored) { } }, "relay-close");
+            t.setDaemon(true);
+            t.start();
+        }
         if (reason != null) handler.onClosed(reason);
     }
 

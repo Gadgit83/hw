@@ -146,9 +146,14 @@ public class HostService extends Service {
         Relay r = relay;
         relay = null;
         hostSecret = "";
-        if (r != null) r.stop();
         NetSession.leave();
         NetSession.hosting = false;
+        // Relay.stop() closes sockets (and can block): never on the main thread.
+        if (r != null) {
+            Thread t = new Thread(r::stop, "host-stop");
+            t.setDaemon(true);
+            t.start();
+        }
     }
 
     @Override

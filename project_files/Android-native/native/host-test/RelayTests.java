@@ -688,6 +688,38 @@ public class RelayTests {
         g.end();
     }
 
+    /** The 0.3.0-tv1 crash: the UI thread (Start tap) wrote to the relay socket. Every call the UI makes must leave the socket to the writer thread. */
+    static void testNoSocketWriteOnCallerThread() throws Exception {
+        System.out.println("N1: the calls the UI makes never write to the socket on the calling thread");
+        Fix f = new Fix(20000, 1000);
+        P h = new P();
+        RelayClient c = join(f, h, "Host", true, team("A", 0, 0));
+        final Thread[] ui = new Thread[1];
+        final boolean[] returnedFast = { true };
+        Thread t = new Thread(() -> {
+            long t0 = System.nanoTime();
+            c.setForeground(true);
+            c.setReady(true);
+            c.setTeams(Arrays.asList(team("A", 0, 0)));
+            c.start();
+            returnedFast[0] = (System.nanoTime() - t0) < 200_000_000L;
+        }, "fake-main");
+        ui[0] = t;
+        t.start();
+        t.join();
+        c.flushWrites();
+        Thread w = c.lastWriteThread();
+        check(w != null, "something was written");
+        check(w != ui[0], "the write did not happen on the UI thread (was " + (w == null ? "null" : w.getName()) + ")");
+        check(w != null && w.getName().equals("relay-writer"), "the write ran on the relay-writer thread");
+        check(returnedFast[0], "the calls returned at once");
+        Thread t2 = new Thread(c::close, "fake-main-close");
+        t2.start();
+        t2.join(2000);
+        check(!t2.isAlive(), "close() returned at once");
+        f.stop();
+    }
+
     public static void main(String[] a) throws Exception {
         data = new GameData(new File(a[0]));
         data.warm();
@@ -702,6 +734,7 @@ public class RelayTests {
         testViewerCount();
         testViewerAbuse();
         testViewerReconnect();
+        testNoSocketWriteOnCallerThread();
         System.out.println("\nrelay tests: " + checks + " checks, " + failures + " failed");
         System.out.println(failures == 0 ? "RESULT: PASS (the relay survived all malformed input)" : "RESULT: FAIL");
         System.exit(failures == 0 ? 0 : 1);

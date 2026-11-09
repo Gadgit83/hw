@@ -43,6 +43,10 @@ final class NetSession {
     static volatile long toYouMsgs;
     static volatile RelayClient.StartInfo pendingStart;
     static volatile boolean inGame;
+    /** The Network screen is resumed (in front). Set by that screen. */
+    static volatile boolean lobbyVisible;
+    private static final String START_CHANNEL = "gamestart";
+    private static final int START_NOTIFICATION_ID = 46634;
     private static PowerManager.WakeLock wake;
     private static WifiManager.WifiLock wifi;
 
@@ -55,7 +59,15 @@ final class NetSession {
         @Override public void onStart(RelayClient.StartInfo s) {
             inGame = true;
             Listener l = listener;
-            if (l != null) l.startGame(s); else pendingStart = s;
+            if (l != null && lobbyVisible) {
+                l.startGame(s);
+            } else {
+                // The Network screen is not in front (another app, the home screen, the setup screen): Android does not
+                // let a background app open a screen, so keep the start and put a notification up to tap.
+                pendingStart = s;
+                Context c = HpApp.appContext;
+                if (c != null) notifyStart(c);
+            }
         }
 
         @Override public void onSummary(Map<String, Object> m) {
@@ -85,6 +97,38 @@ final class NetSession {
         }
     };
 
+    /** A notification that opens the Network screen, which then starts the waiting game. */
+    static void notifyStart(Context c) {
+        try {
+            android.app.NotificationManager nm = (android.app.NotificationManager) c.getSystemService(Context.NOTIFICATION_SERVICE);
+            if (Build.VERSION.SDK_INT >= 26) {
+                nm.createNotificationChannel(new android.app.NotificationChannel(START_CHANNEL, "Game starting",
+                        android.app.NotificationManager.IMPORTANCE_HIGH));
+            }
+            android.content.Intent open = new android.content.Intent(c, NetLobbyActivity.class)
+                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK | android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP);
+            int pf = android.app.PendingIntent.FLAG_UPDATE_CURRENT | (Build.VERSION.SDK_INT >= 23 ? android.app.PendingIntent.FLAG_IMMUTABLE : 0);
+            android.app.PendingIntent pi = android.app.PendingIntent.getActivity(c, 2, open, pf);
+            android.app.Notification.Builder b = Build.VERSION.SDK_INT >= 26
+                    ? new android.app.Notification.Builder(c, START_CHANNEL) : new android.app.Notification.Builder(c);
+            b.setContentTitle(BuildConfig.APP_NAME + ": the game is starting")
+                    .setContentText("Tap to join the network game now.")
+                    .setSmallIcon(android.R.drawable.stat_sys_download_done)
+                    .setContentIntent(pi)
+                    .setAutoCancel(true);
+            nm.notify(START_NOTIFICATION_ID, b.build());
+        } catch (RuntimeException e) {
+            android.util.Log.w(Diag.TAG, "could not post the game-start notification: " + e);
+        }
+    }
+
+    static void cancelStartNotification(Context c) {
+        try {
+            ((android.app.NotificationManager) c.getSystemService(Context.NOTIFICATION_SERVICE)).cancel(START_NOTIFICATION_ID);
+        } catch (RuntimeException ignored) {
+        }
+    }
+
     static void ping() {
         Listener l = listener;
         if (l != null) l.changed();
@@ -100,6 +144,7 @@ final class NetSession {
         NetDiag.clear(c);
         List<SetupModel.Team> teams = Store.loadSetup(c, Store.data(c)).teams;
         RelayClient rc = new RelayClient(host, port, name, Diag.versionName(c), isHost, teams, HANDLER);
+        if (isHost) rc.hostSecret(HostService.hostSecret);
         rc.connect();
         client = rc;
         joined = true;

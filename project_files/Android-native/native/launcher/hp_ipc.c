@@ -98,6 +98,7 @@ static int g_net_pending;                 /* config sent, connect to the relay a
 static int g_relay_fd = -1;
 static volatile int g_net_up, g_net_ending, g_net_lost;
 static pthread_mutex_t g_wr_lock = PTHREAD_MUTEX_INITIALIZER;   /* all writes to the engine socket */
+static pthread_mutex_t g_relay_wr_lock = PTHREAD_MUTEX_INITIALIZER;   /* all writes to the relay link: sender thread and control frames */
 static int g_engine_fd = -1;
 
 struct qnode { struct qnode *next; unsigned char len; unsigned char data[255]; };
@@ -222,6 +223,8 @@ static void note_digest(const char *dir, const unsigned char *m, int len)
     }
 }
 
+static int g_tx_delay_done;
+
 static void *send_thread(void *arg)
 {
     (void)arg;
@@ -239,7 +242,18 @@ static void *send_thread(void *arg)
         unsigned char buf[256];
         buf[0] = n->len;
         memcpy(buf + 1, n->data, n->len);
-        if (!g_net_lost && write_full(g_relay_fd, buf, (size_t)n->len + 1)) net_lost("Lost the connection to the host (send failed).");
+        if (!g_tx_delay_done) {
+            /* Test hook (HP_NET_TX_DELAY_MS, set only by the host tests): hold this phone's first message back, to
+               imitate a phone that is slow to finish generating the map. */
+            g_tx_delay_done = 1;
+            const char *d = getenv("HP_NET_TX_DELAY_MS");
+            if (d && atoi(d) > 0) usleep((useconds_t)atoi(d) * 1000u);
+        }
+        int bad = 0;
+        pthread_mutex_lock(&g_relay_wr_lock);
+        if (!g_net_lost) bad = write_full(g_relay_fd, buf, (size_t)n->len + 1);
+        pthread_mutex_unlock(&g_relay_wr_lock);
+        if (bad) net_lost("Lost the connection to the host (send failed).");
         free(n);
     }
     return NULL;
@@ -294,7 +308,9 @@ static void net_send_control(char kind, const char *text)
         if (empty) break;
         usleep(5000);
     }
+    pthread_mutex_lock(&g_relay_wr_lock);              /* one writer at a time on the link: never in the middle of a frame the sender thread is writing */
     write_full(g_relay_fd, buf, tl + 3);
+    pthread_mutex_unlock(&g_relay_wr_lock);
     diag("CONTROL %c %s", kind, text);
 }
 
@@ -455,7 +471,13 @@ static int send_config(int fd)
         while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r')) line[--len] = 0;
         if (len == 0 || line[0] == '#') continue;
         if (len > 255) {
-            LOGE("config line too long (%zu bytes), skipped", len);
+            /* A skipped line would make this phone's game differ from the others'; in a network game stop instead. */
+            LOGE("config line too long (%zu bytes)%s", len, g_net ? ", game stopped" : ", skipped");
+            if (g_net) {
+                fclose(f);
+                if (g_error_handler) g_error_handler("A line of the game setup is longer than 255 bytes (see the log).");
+                return -1;
+            }
             continue;
         }
         unsigned char l = (unsigned char)len;

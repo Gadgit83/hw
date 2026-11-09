@@ -67,6 +67,9 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
     protected void onResume() {
         super.onResume();
         NetSession.listener = this;
+        NetSession.lobbyVisible = true;
+        NetSession.cancelStartNotification(this);
+        sendForeground(true);
         getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         RelayClient.StartInfo s = NetSession.pendingStart;
         if (s != null) {
@@ -79,6 +82,8 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
 
     @Override
     protected void onPause() {
+        NetSession.lobbyVisible = false;
+        sendForeground(false);
         saveFields();
         super.onPause();
     }
@@ -88,6 +93,33 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
         destroyed = true;
         if (NetSession.listener == this) NetSession.listener = null;
         super.onDestroy();
+    }
+
+    private static void sendForeground(boolean on) {
+        RelayClient c = NetSession.client;
+        if (c != null && !NetSession.inGame) c.setForeground(on);
+    }
+
+    /**
+     * Back leaves the lobby for good: it asks first when this phone is connected, then closes the link and releases the
+     * wake lock, the Wi-Fi lock and (for the host) the hosting service. Without a connection it just closes the screen.
+     */
+    @Override
+    public void onBackPressed() {
+        if (!NetSession.joined || NetSession.inGame) {
+            finish();
+            return;
+        }
+        final boolean host = NetSession.hosting;
+        new android.app.AlertDialog.Builder(this)
+                .setTitle(host ? "Stop hosting?" : "Leave the network game?")
+                .setMessage(host ? "Every phone that has joined is disconnected." : "You are removed from the lobby.")
+                .setPositiveButton(host ? "Stop hosting" : "Leave", (d, w) -> {
+                    leaveOrStop();
+                    finish();
+                })
+                .setNegativeButton("Stay", null)
+                .show();
     }
 
     private void saveFields() {
@@ -132,7 +164,7 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
         title.setTypeface(Typeface.DEFAULT_BOLD);
         LinearLayout top = ui.row();
         top.addView(title, ui.weight(1f));
-        top.addView(ui.button("Back", false, v -> finish()));
+        top.addView(ui.button("Back", false, v -> onBackPressed()));
         content.addView(top);
         if (!problem.isEmpty()) content.addView(coloured(problem, Ui.DANGER));
         String closed = NetSession.closedReason;
@@ -179,25 +211,27 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
             List<String> addr = NetSession.localAddresses();
             StringBuilder a = new StringBuilder();
             for (String s : addr) a.append(a.length() == 0 ? "" : "   or   ").append(s).append(':').append(Relay.PHONE_PORT);
-            card.addView(ui.heading("Hosting"));
-            TextView big = ui.text(addr.isEmpty() ? "No Wi-Fi address found. Connect to Wi-Fi." : a.toString(), 24, Color.WHITE);
-            big.setTypeface(Typeface.DEFAULT_BOLD);
-            card.addView(big);
-            card.addView(ui.hint("Type this address on the other phones (Join by address)."));
             Relay rl = HostService.relay;
+            // The TV address first and biggest: a one-phone host with the TV watching is the main use.
             card.addView(ui.heading("TV viewer address"));
             if (rl != null && rl.viewerPort() > 0) {
                 StringBuilder w = new StringBuilder();
-                for (String s : addr) w.append(w.length() == 0 ? "" : "   or   ").append("ws://").append(s).append(':').append(rl.viewerPort());
-                TextView tv = ui.text(addr.isEmpty() ? "No Wi-Fi address found." : w.toString(), 22, Color.WHITE);
+                for (String s : addr) w.append(w.length() == 0 ? "" : "\n").append("ws://").append(s).append(':').append(rl.viewerPort());
+                TextView tv = ui.text(addr.isEmpty() ? "No Wi-Fi address found. Connect to Wi-Fi." : w.toString(), 28, Color.WHITE);
                 tv.setTypeface(Typeface.DEFAULT_BOLD);
+                tv.setTextIsSelectable(true);
                 card.addView(tv);
-                card.addView(ui.hint("The TV viewer connects here (open its page with ?ws=" + (addr.isEmpty() ? "ws://IP:" + rl.viewerPort() : "ws://" + addr.get(0) + ":" + rl.viewerPort())
-                        + ", or set HW_WS_URL in the page). It retries by itself until a game is started. TVs watching now: " + rl.viewerCount()
-                        + ". There is no automatic discovery yet."));
+                card.addView(ui.hint("TVs watching now: " + rl.viewerCount() + ". The TV viewer connects here (open its page with ?ws="
+                        + (addr.isEmpty() ? "ws://IP:" + rl.viewerPort() : "ws://" + addr.get(0) + ":" + rl.viewerPort())
+                        + ", or set HW_WS_URL in the page). It retries by itself until a game is started. There is no automatic discovery yet."));
             } else {
-                card.addView(coloured(rl == null ? "" : rl.viewerError(), Ui.DANGER));
+                card.addView(coloured(rl == null ? "The TV viewer endpoint is not running." : rl.viewerError(), Ui.DANGER));
             }
+            card.addView(ui.heading("Hosting: address for other phones"));
+            TextView big = ui.text(addr.isEmpty() ? "No Wi-Fi address found. Connect to Wi-Fi." : a.toString(), 18, Color.WHITE);
+            big.setTypeface(Typeface.DEFAULT_BOLD);
+            card.addView(big);
+            card.addView(ui.hint("Other phones type this address (Join by address). Not needed for a one-phone game with the TV."));
         } else {
             card.addView(ui.heading("Joined"));
             card.addView(ui.text("Host " + NetSession.target + (st == null ? "" : " (" + Json.str(st, "host", "") + ")"), 18, Color.WHITE));
@@ -234,8 +268,18 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
         if (host) {
             boolean can = st != null && Json.bool(st, "canStart", false) && !playing;
             Button start = ui.button("Start game", true, v -> {
-                RelayClient c = NetSession.client;
-                if (c != null) c.start();
+                String away = phonesAway(NetSession.state);
+                if (away.isEmpty()) {
+                    startNow();
+                } else {
+                    new android.app.AlertDialog.Builder(this)
+                            .setTitle("Not everyone is waiting")
+                            .setMessage(away + " not on the Network screen. A phone that is somewhere else gets a notification to tap, "
+                                    + "but may be late. Start anyway?")
+                            .setPositiveButton("Start anyway", (d, w) -> startNow())
+                            .setNegativeButton("Wait", null)
+                            .show();
+                }
             });
             start.setEnabled(can);
             buttons.addView(start, ui.weight(1f));
@@ -258,6 +302,25 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
         card.addView(ui.hint(host ? "Your teams and the map and rules come from the setup screen. Leaving the game screen does not stop hosting."
                 : "Your teams come from the Teams tab. Wait for the host to press Start."));
         content.addView(card, ui.margins(Ui.lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT), 0, 8, 0, 0));
+    }
+
+    private static void startNow() {
+        RelayClient c = NetSession.client;
+        if (c != null) c.start();
+    }
+
+    /** Names of the joining phones that are not showing their Network screen, as a phrase ("B is" / "B and C are"), or "". */
+    @SuppressWarnings("unchecked")
+    private static String phonesAway(Map<String, Object> st) {
+        if (st == null) return "";
+        StringBuilder b = new StringBuilder();
+        int n = 0;
+        for (Object o : Json.list(st, "players")) {
+            Map<String, Object> p = (Map<String, Object>) o;
+            if (Json.bool(p, "host", false) || Json.bool(p, "fg", true)) continue;
+            b.append(n++ == 0 ? "" : ", ").append(Json.str(p, "name", "?"));
+        }
+        return n == 0 ? "" : b + (n == 1 ? " is" : " are");
     }
 
     @SuppressWarnings("unchecked")
@@ -309,6 +372,7 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
     private void reallyHost() {
         connecting = true;
         render();
+        HostService.begin();                 // clears any earlier failure now, before the service can race with the wait below
         Intent svc = new Intent(this, HostService.class).setAction(HostService.ACTION_START);
         try {
             if (Build.VERSION.SDK_INT >= 26) startForegroundService(svc); else startService(svc);

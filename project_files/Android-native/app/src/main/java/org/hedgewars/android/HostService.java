@@ -23,16 +23,33 @@ import java.util.List;
  * service type, wake lock and Wi-Fi lock.
  */
 public class HostService extends Service {
-    static final String ACTION_START = "party.hedge.host.HOST_START";
-    static final String ACTION_STOP = "party.hedge.host.HOST_STOP";
+    static final String ACTION_START = BuildConfig.APPLICATION_ID + ".HOST_START";
+    static final String ACTION_STOP = BuildConfig.APPLICATION_ID + ".HOST_STOP";
     private static final String CHANNEL = "hosting";
     private static final int NOTIFICATION_ID = 46633;
 
     /** The running relay, or null. Set once the port is bound. */
     static volatile Relay relay;
-    /** Why hosting failed, or "". */
+    /** Why hosting failed, or "". Cleared by {@link #begin()} before a start is requested, so a screen never reads an old failure. */
     static volatile String error = "";
     static volatile boolean starting;
+    /** Counts start requests; a failure of an earlier attempt never overwrites the state of a later one. */
+    private static int generation;
+    /**
+     * The host role is given only to the app itself: a secret made for each hosting session, kept in memory of this
+     * process (never written out, never sent over the network except to the relay on loopback by this process).
+     */
+    static volatile String hostSecret = "";
+
+    /** Called by the screen, before it starts the service: clears the old error synchronously and numbers the attempt. */
+    static synchronized int begin() {
+        error = "";
+        return ++generation;
+    }
+
+    private static synchronized void fail(int gen, String text) {
+        if (gen == generation) error = text;
+    }
 
     @Override
     public IBinder onBind(Intent intent) {
@@ -49,17 +66,23 @@ public class HostService extends Service {
         goForeground("Starting to host...");
         if (relay == null && !starting) {
             starting = true;
-            error = "";
-            new Thread(this::startRelay, "host-start").start();
+            final int gen;
+            synchronized (HostService.class) { gen = generation; }
+            new Thread(() -> startRelay(gen), "host-start").start();
         }
         return START_NOT_STICKY;
     }
 
-    private void startRelay() {
+    private void startRelay(int gen) {
         final Context app = getApplicationContext();
         try {
             Relay.Config cfg = new Relay.Config();
             cfg.port = Relay.PHONE_PORT;
+            byte[] sb = new byte[16];
+            new java.security.SecureRandom().nextBytes(sb);
+            StringBuilder sec = new StringBuilder();
+            for (byte x : sb) sec.append(String.format("%02x", x & 0xff));
+            cfg.hostSecret = sec.toString();
             cfg.data = Store.data(app);
             cfg.hostSetup = () -> Store.loadSetup(app, cfg.data);
             cfg.build = Diag.versionName(app);
@@ -75,15 +98,17 @@ public class HostService extends Service {
             };
             Relay r = new Relay(cfg);
             r.start();
+            hostSecret = cfg.hostSecret;
             relay = r;
             NetSession.acquireLocks(app);
             List<String> addr = NetSession.localAddresses();
             String where = addr.isEmpty() ? "no Wi-Fi address found" : addr.get(0) + ":" + Relay.PHONE_PORT;
             goForeground("Hosting at " + where);
         } catch (IOException e) {
-            error = "Could not host on port " + Relay.PHONE_PORT + ": " + e.getMessage()
+            String text = "Could not host on port " + Relay.PHONE_PORT + ": " + e.getMessage()
                     + (e.getMessage() != null && e.getMessage().contains("in use") ? " (is another host running?)" : "");
-            android.util.Log.e(Diag.TAG, error);
+            fail(gen, text);
+            android.util.Log.e(Diag.TAG, text);
             stopSelf();
         } finally {
             starting = false;
@@ -120,6 +145,7 @@ public class HostService extends Service {
     private void stopHosting() {
         Relay r = relay;
         relay = null;
+        hostSecret = "";
         if (r != null) r.stop();
         NetSession.leave();
         NetSession.hosting = false;

@@ -347,9 +347,11 @@ public class LaunchSmokeTest {
             assertTrue(d.getButton(android.content.DialogInterface.BUTTON_POSITIVE).getText().toString().equals(host ? "End the game" : "Leave"));
             assertTrue(d.getButton(android.content.DialogInterface.BUTTON_NEGATIVE).getText().toString().equals("Keep playing"));
             d.getButton(android.content.DialogInterface.BUTTON_NEGATIVE).performClick();
+            TestSupport.settle(100);
             assertFalse("Keep playing does not quit", yes[0]);
             android.app.AlertDialog d2 = BackConfirm.show(a, host, () -> yes[0] = true);
             d2.getButton(android.content.DialogInterface.BUTTON_POSITIVE).performClick();
+            TestSupport.settle(100);                          // the dialog hands the click to its listener through a message
             assertTrue("the positive button quits", yes[0]);
         }
         java.io.File dir = app().getFilesDir();

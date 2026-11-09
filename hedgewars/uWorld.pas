@@ -2194,17 +2194,21 @@ if CinematicSteps > 0 then
 
 // Touchscreen interface widgets
 {$IFDEF USE_TOUCH_INTERFACE}
-DrawScreenWidget(@arrowLeft);
-DrawScreenWidget(@arrowRight);
-DrawScreenWidget(@arrowUp);
-DrawScreenWidget(@arrowDown);
+// a phone that only watches a network game plays no team: no controls are drawn
+if (GameType <> gmtNet) or (not cNetWatch) then
+    begin
+    DrawScreenWidget(@arrowLeft);
+    DrawScreenWidget(@arrowRight);
+    DrawScreenWidget(@arrowUp);
+    DrawScreenWidget(@arrowDown);
 
-DrawScreenWidget(@fireButton);
-DrawScreenWidget(@jumpWidget);
-DrawScreenWidget(@AMWidget);
-DrawScreenWidget(@utilityWidget);
-DrawScreenWidget(@utilityWidget2);
-if (GameType <> gmtNet) or cNetHost then DrawScreenWidget(@pauseButton);
+    DrawScreenWidget(@fireButton);
+    DrawScreenWidget(@jumpWidget);
+    DrawScreenWidget(@AMWidget);
+    DrawScreenWidget(@utilityWidget);
+    DrawScreenWidget(@utilityWidget2);
+    if (GameType <> gmtNet) or cNetHost then DrawScreenWidget(@pauseButton);
+    end;
 {$ENDIF}
 
 // Captions

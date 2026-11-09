@@ -197,6 +197,7 @@ var
     cPausedByFocus  : boolean; // mobile: the pause was caused by losing focus, so regaining it resumes
     cNetFlushMs     : LongWord; // network game: game ms between flushes of this engine's outgoing messages / empty '+' time marks (default 1000; the launcher may lower it, local IPC only). Only gates how soon peers may advance, never what they compute
     cNetHost        : boolean; // network game: the launcher told us (local IPC only) that this phone is the host, which alone may pause
+    cNetWatch       : boolean; // network game: the launcher told us (local IPC only) that this phone only watches: no playing controls
     cSafeInsetL, cSafeInsetT, cSafeInsetR, cSafeInsetB: LongInt; // screen pixels kept clear of cut-outs and bars (the depth of the cut-out on that side)
     cCornerTL, cCornerTR, cCornerBL, cCornerBR: LongInt; // radius in screen pixels of the rounded display corners
     cEdgeMargin: LongInt; // extra screen pixels kept clear at every edge (player's setting)
@@ -3062,6 +3063,7 @@ begin
     cPausedByFocus  := false;
     cNetFlushMs     := 1000;
     cNetHost        := false;
+    cNetWatch       := false;
     cInactDelay     := 100;
     ReadyTimeLeft   := 0;
 

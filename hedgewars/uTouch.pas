@@ -118,7 +118,8 @@ finger^.downWhilePaused:= isPaused;
 
 inc(buttonsDown);//inc buttonsDown, if we don't see a button down we'll dec it
 
-if (not isPaused) or isOnWidget(pauseButton, finger^) then
+// a phone that only watches a network game has no controls: every touch pans or zooms the camera
+if ((not isPaused) or isOnWidget(pauseButton, finger^)) and ((GameType <> gmtNet) or (not cNetWatch)) then
 begin
 if isOnWidget(fireButton, finger^) then
     begin
@@ -237,7 +238,8 @@ if buttonsDown = 0 then
     moveCursor:= true;
     case pointerCount of
         1:
-            targetting:= not(targetted) and (CurrentHedgehog <> nil) and (Ammoz[CurrentHedgehog^.CurAmmoType].Ammo.Propz and ammoprop_NeedTarget <> 0);
+            targetting:= not(targetted) and (CurrentHedgehog <> nil) and (Ammoz[CurrentHedgehog^.CurAmmoType].Ammo.Propz and ammoprop_NeedTarget <> 0)
+                and ((GameType <> gmtNet) or (not cNetWatch));
         2:
             begin
             moveCursor:= false;
@@ -418,6 +420,7 @@ end;
 
 procedure onTouchLongClick(finger: TTouch_Data);
 begin
+if (GameType = gmtNet) and cNetWatch then exit;
 if isOnWidget(jumpWidget, finger) then
     begin
     TouchTeamCommand('ljump');
@@ -427,6 +430,7 @@ end;
 
 procedure onTouchClick(finger: TTouch_Data);
 begin
+if (GameType = gmtNet) and cNetWatch then exit;
 
 if bShowAmmoMenu then
     begin

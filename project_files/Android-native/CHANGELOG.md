@@ -4,6 +4,33 @@ All notable changes to the native Android app (`project_files/Android-native`), 
 
 Only some builds were put on a phone, so a version below is a build that was made, not necessarily one that was released. Releases are tags on `android-master` with the APK attached; there is none yet.
 
+## 0.3.0-mp2 (101): hardened relay, merged with 0.2.2 (test build)
+
+Fixes from an independent review of 0.3.0-mp1 (the sync itself was proven on the host; these were the failures around it), and the merge of `android-master` 0.2.2.
+
+### Fixed
+
+- **A remote phone could crash the whole app (M1).** `Json` recursed once per `[`, so one line of 60000 `[` raised a `StackOverflowError`, which the reader threads did not catch (they caught `Exception`) and so ended the process. The reader now has a nesting limit of 32, limits on elements, nodes, string length and number length, and no input can raise anything but `IllegalArgumentException`. Every relay, lobby, engine-link, viewer and watchdog thread now catches `Throwable` and ends only its own connection, relay threads have an uncaught-exception handler that logs and closes only that connection, lobby lines are limited to 256 KB and the first line of a connection to 32 KB and 15 s, `Outbox` and `RelayClient` readers catch `Throwable` too, and a socket is closed when its reader ends. `scripts/net-test.sh malformed` (`native/host-test/RelayTests.java`) sends the 60000 `[` line (as first line, after a valid hello, inside a teams message), 60000-deep objects, 100 KB and 300 KB lines, invalid UTF-8, random bytes, junk engine frames, truncated frames, bad WebSocket frames and connection floods, and checks that the relay answers a normal phone afterwards.
+- **A phone could inject engine commands and desynchronise the others (M2).** Grave, fort, voice, flag, hat and names from another phone went into the setup lines as they came, so a newline in a grave name was a new engine command on every phone and the TV. `NetTeams.fromJson` now accepts a grave, fort, voice, flag or hat only if the host's own game data has it (otherwise the default) and cleans team and hedgehog names as `GameConfig.clean` does (no control characters, 32 characters at most; the cleaners are public now), and reads at most 8 teams. `GameData.flags()` is new. The launcher used to skip a setup line longer than 255 bytes without a word, which left that phone with a different game: the relay now checks every setup line (255 bytes at most, no control characters, at most 255 lines because the TV viewer's first message counts them in one byte) and refuses to start the game with a clear message in every lobby ("The game cannot start: setup line 26 ... is 314 bytes ..."); the launcher also stops with an error instead of skipping in a network game.
+- **The silence rule armed too early (M3).** It armed at the first forwarded message, so a phone still generating the map could be blamed while a healthy phone that was waiting for it was dropped. The rule now arms only when every live phone has sent its map digest `M`, adds a grace of 40 s before the first turn ends, treats a last message of type `M` like `N` (the next sender is unknown) and drops a phone that never sends `M` after 3 minutes.
+- Host start race (m5): `HostService.begin()` clears the old error before the service is asked to start, and a failure of an earlier attempt can no longer overwrite a later one (generation counter).
+- WebSocket (m7): a close frame is echoed with its status code, a ping's payload is echoed in the pong, masked payloads are unmasked, and a negative, oversized (more than 64 KB) or cut-off frame ends that viewer cleanly.
+- Launcher (m8): the relay link has one write lock shared by the sender thread and the control frames, so an engine error frame can no longer land in the middle of a message.
+
+### Changed
+
+- **Back leaves the lobby (m4).** Back on the Network screen asks, then closes the link and releases the wake and Wi-Fi locks (and stops hosting, for the host). The host's Start warns when a joiner is not on its Network screen (phones now tell the relay when the screen goes to the background), and a joiner that receives the start while elsewhere gets a notification to tap instead of a silent failure.
+- **Tokens and roles (m6).** Engine tokens are 128 bits from `SecureRandom`; at most 8 phones, 32 simultaneous connections and 16 TV viewers; the host role needs a secret that only the app process knows (made per hosting session, kept in memory, presented by the app's own client over loopback), not just a loopback address.
+- Network button in the compact header of the setup screen, beside the Options icon button.
+- `scripts/net-test.sh`: explicit scenario names (`basic`, `basic3`, `dropout`, `dropout3`, `stall`, `slowstart`, `negcontrol`, `solo`, `viewer1`, `viewer2`, `malformed`, `all`); the old `three` ran two phones. It exits non-zero on any desync, unexpected protocol line, engine queue error, non-zero engine exit (the victim's excepted), differing checksums, or a relay and launcher stream hash that differ, and ends with a `RESULT:` line. `negcontrol` has the relay alter one byte of one turn checksum and passes only if the desync detection fires. `slowstart` holds phone B's first message back by 30 s (launcher test hook `HP_NET_TX_DELAY_MS`).
+- The UI smoke test (`scripts/ui-smoke-test.sh`) also opens the Network screen as the chooser, as a joined phone, as the host, and its Back confirmation, under SDK 34 and 35.
+- Merged `android-master` 0.2.2: launch crash fix (`Ui.hideBars`), UI smoke test, compact setup screens, Options icon button, `HP_TEST_DISPLAY` as a bare number in both host scripts.
+- Version 0.3.0-mp2, versionCode 101.
+
+### Not done (follow-ups, see docs/multiphone-test.md)
+
+- Liveness of the engine link by ping (m3) and reconnecting a phone that dropped (m9).
+
 ## 0.3.0-mp1 (100): two phones play through a relay (test build)
 
 Phase 4 of the multi-phone plan (`docs/tv-viewer-plan.md` in https://github.com/Gadgit83/hedgewars-party): any phone can host, a second phone joins by typed address, each phone runs its own engine with its own teams. Experimental; the owner's two-phone test is `docs/multiphone-test.md`. Nothing about local hotseat games changes.
@@ -16,12 +43,12 @@ Phase 4 of the multi-phone plan (`docs/tv-viewer-plan.md` in https://github.com/
 - **Network screen** (`NetLobbyActivity`, the Network button on the setup screen): Host network game, Join by address, the list of phones and teams, Ready, Start, and the report of the last game to compare between phones.
 - **Launcher network mode** (`hp_ipc.c`): when `files/net.cfg` exists the launcher joins the game through the relay: the IPC reader only queues, a sender thread writes to the relay, a downstream thread writes the relay's frames to the engine. It writes `files/logs/netgame.txt` with every `N` and `M` that crosses the link in either direction and hashes of both streams. Share log includes it.
 - `GameConfig.teamLines` and `GameConfig.forRecipient` (the setup split: shared lines once, per-team blocks, then `TN` and `erdriven` after the teams a phone does not own).
-- Host tests: `scripts/net-test.sh [basic|dropout|stall|solo]` runs the relay on the JVM and real engines as separate phones under Xvfb (`native/host-test/NetHarness.java`).
+- Host tests: `scripts/net-test.sh [basic|dropout|stall|solo]` (0.3.0-mp2: see the scenario list in the script) runs the relay on the JVM and real engines as separate phones under Xvfb (`native/host-test/NetHarness.java`).
 
 ### Changed
 
 - Version 0.3.0-mp1, versionCode 100. New permissions: foreground service (connected device), notifications, wake lock, Wi-Fi and network state, multicast state (declared for the foreground service type, and for discovery in a later phase).
-- `host-test.sh` takes `HP_TEST_DISPLAY` for the X display (default `:77`).
+- `host-test.sh` takes `HP_TEST_DISPLAY` for the X display.
 
 ## 0.2.2 (8): launch crash fix
 

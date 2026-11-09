@@ -98,7 +98,7 @@ Losing focus (home button, notification shade, phone call) pauses the game and g
 
 ### Known limitations
 
-- Hotseat is the normal mode. Network play between phones (0.3.0-mp1) is an experimental test build: see [Network games](#network-games-experimental). No controller phones yet.
+- Hotseat is the normal mode. Network play between phones (0.3.0-mp2) is an experimental test build: see [Network games](#network-games-experimental). No controller phones yet.
 - Not offered: hand-drawn maps, mission and campaign maps, training, editing individual weapon counts (the 13 built-in weapon sets are), custom team flags, saved teams on disk (the setup is remembered as one whole).
 - English only.
 - HUD text and sprites are drawn larger by scaling the engine's artwork, so they are a little soft on very dense screens. The names and health tags above the hedgehogs are part of the world and keep their size (pinch to zoom in).
@@ -189,7 +189,7 @@ The setup screens draw edge to edge and pad their content by the display cut-out
 
 ### Network games (experimental)
 
-Build 0.3.0-mp1 lets two or more phones on one Wi-Fi play one game, each with its own engine and its own teams. Phase 4 of the plan in https://github.com/Gadgit83/hedgewars-party (`docs/tv-viewer-plan.md`): no TV, no automatic discovery (the joiner types the host's address), no version check yet; the TV viewer endpoint is in (see below). The test script for two phones is `docs/multiphone-test.md`.
+Build 0.3.0-mp2 (0.3.0-mp1 before the review fixes in the changelog) lets two or more phones on one Wi-Fi play one game, each with its own engine and its own teams. Phase 4 of the plan in https://github.com/Gadgit83/hedgewars-party (`docs/tv-viewer-plan.md`): no TV, no automatic discovery (the joiner types the host's address), no version check yet; the TV viewer endpoint is in (see below). The test script for two phones is `docs/multiphone-test.md`.
 
 ```
 Host phone, main process                                    Joining phone, main process
@@ -299,7 +299,9 @@ No device is needed for these.
 
 `scripts/config-test.sh` (a few seconds, JVM only) checks the setup model and the game configuration against the desktop frontend's source and the engine's registered commands: the 16 scheme presets, the 13 weapon sets, the 25 flag bits, the 18 `e$` value lines and their factors, the nine colours, the shape of every `eaddteam`, `eaddhh` and `ehat` line, the order inside a team block, the `eammstore` rule, 8 teams of 8 hedgehogs with every computer level, every map type, every game style, saving and loading, and the options to engine option mapping (including that the engine knows each option it is given).
 
-`scripts/net-test.sh [basic|dropout|stall|solo]` runs the relay on the JVM and two real engines as two phones (separate processes, teams of their own, computer players), then prints the relay's report, each phone's launcher diagnostics and the per-turn checksums side by side. `HP_TEST_DISPLAY` picks the X display (a bare number: default 66 there, 77 for host-test.sh).
+`scripts/net-test.sh SCENARIO` runs the relay on the JVM and two or three real engines as separate phones (teams of their own, computer players), prints the relay's report, each phone's launcher diagnostics and the per-turn checksums side by side, and ends with `RESULT: PASS` or `RESULT: FAIL` and the matching exit status. Scenarios: `basic`, `basic3` (three phones), `dropout`, `dropout3`, `stall`, `slowstart` (phone B 30 s late with its map digest), `negcontrol` (the relay alters one checksum byte; passes only if the desync detection fires), `solo`, `viewer1`, `viewer2`, `malformed` (no engines: hostile input to the relay, see `native/host-test/RelayTests.java`) and `all`. It needs `scripts/stage-assets.sh` and `scripts/host-test.sh` to have been run once (it runs the latter itself if the host engine is missing). `HP_TEST_DISPLAY` picks the X display (a bare number: default 66 there, 77 for host-test.sh).
+
+`scripts/ui-smoke-test.sh` opens every screen under Android 14 and 15 with Robolectric, the Network screen (chooser, joined, host, Back question) included.
 
 `scripts/host-test.sh [seconds]` builds the same engine and launcher for Linux with desktop OpenGL, starts a game from the config that `GameConfig.java` produces, and runs it headless under Xvfb for a while, saving screenshots. Run `pkill Xvfb` before it if an earlier run was interrupted. Environment variables:
 

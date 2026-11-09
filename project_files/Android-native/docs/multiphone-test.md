@@ -1,8 +1,8 @@
-# Network test script, build 0.3.0-mp1
+# Network test script, build 0.3.0-mp2
 
 Two tests, in this order: **Part A, one phone hosting with the TV watching**, then **Part B, two phones playing each other** (the TV can watch that too). Both are phase 4 and 6 of `docs/tv-viewer-plan.md` in the hedgewars-party repository: automatic discovery is not built yet (you type addresses), and there is no version check between phones.
 
-Needs: the APK `hedge-party-0.3.0-mp1-debug.apk` (same debug key, installs over 0.2.x) on every phone, all phones and the TV on the same home Wi-Fi with router client isolation (AP isolation) off, the TV viewer app (`tv/viewer`, HWViewer.wgt) built as for the PC test.
+Needs: the APK `hedge-party-0.3.0-mp2-debug.apk` (same debug key, installs over 0.2.x) on every phone, all phones and the TV on the same home Wi-Fi with router client isolation (AP isolation) off, the TV viewer app (`tv/viewer`, HWViewer.wgt) built as for the PC test.
 
 ## Part A: one phone hosts, the TV watches
 
@@ -25,8 +25,8 @@ Words: phone A is the host, phone B joins. "Own teams" are the teams on each pho
 
 ### B1. Install and prepare
 
-1. Install the APK on both phones (`adb install -r hedge-party-0.3.0-mp1-debug.apk`, or copy and open it). Open the app on each; wait for the first-run data unpacking if it appears.
-2. Check the version: Options, Advanced, About must say 0.3.0-mp1 on both.
+1. Install the APK on both phones (`adb install -r hedge-party-0.3.0-mp2-debug.apk`, or copy and open it). Open the app on each; wait for the first-run data unpacking if it appears.
+2. Check the version: Options, Advanced, About must say 0.3.0-mp2 on both.
 3. Phone A, setup screen: Teams tab. Keep or change the two teams (give them names you can tell apart, for example "A one" and "A two"). Set the Map and Rules tabs as you like; **phone A's Map and Rules decide the game**. For a short first game set Turn time 15 s and Starting health 50.
 4. Phone B, Teams tab: its own teams, for example "B one" and one Computer team ("Computer, level 3"). Phone B's Map and Rules tabs are ignored in a network game.
 5. Both phones: screen timeout long (or leave the app in front; the lobby and the game keep the screen on).
@@ -81,4 +81,13 @@ Also worth one try each, write down what happens: A presses Home during the lobb
 - Wi-Fi: router model if you know it; whether Join worked at the first attempt.
 - Any message in red, any freeze: roughly when, and which phone's turn it was.
 
-Known limits of this build: no automatic host discovery (type the address), no check that both phones run the same app or game data (use the same APK), a joining phone must stay on the Network screen until the host presses Start, one game at a time per lobby, the host's phone must stay hosting (stop hosting = game over for everyone).
+### B8. New in 0.3.0-mp2, worth one try each
+
+- Back on the Network screen asks "Leave the network game?" (or "Stop hosting?"); answering Leave/Stop hosting closes the link. The "Hedge Party: hosting a game" notification must be gone after Stop hosting and the phone must be able to sleep again (no wake lock: `adb shell dumpsys power | grep hedgeparty` shows nothing).
+- Phone B presses Home (or opens another app) while still in the lobby; on phone A, **Start game** now asks "B is not on the Network screen ... Start anyway?". Answer Start anyway: phone B shows a notification "the game is starting"; tapping it joins the game. (If notifications are refused on phone B there is no notification and B misses the start: the relay waits 45 s for its engine and then drops it.)
+- A setup the relay cannot send (for example a very long script parameter or seed made of non-Latin characters, over 255 bytes in a line) is refused with a message in the lobby on every phone instead of starting a game in which phones disagree.
+- A slow phone: if one phone takes a long time to generate the map, the others wait for it and nobody is dropped; the 20 s silence rule only starts once every phone has sent its map digest, plus 40 s of extra grace before the first turn ends.
+
+Known limits of this build: no automatic host discovery (type the address), no check that both phones run the same app or game data (use the same APK), a joining phone should stay on the Network screen until the host presses Start (otherwise it gets a notification to tap), one game at a time per lobby, the host's phone must stay hosting (stop hosting = game over for everyone).
+
+Follow-ups, not done in this build: the engine link has no ping of its own (a phone whose process is frozen but whose TCP connection stays up is caught by the 20 s silence rule only when it is the phone expected to play; a liveness ping between the relay and each launcher would catch it at any time), and a dropped phone cannot reconnect to the running game (it can only watch as a TV would, which is not built either).

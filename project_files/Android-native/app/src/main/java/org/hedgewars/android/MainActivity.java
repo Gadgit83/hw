@@ -129,7 +129,15 @@ public class MainActivity extends SetupActivity {
         TextView title = ui.text(BuildConfig.APP_NAME, 20, Color.WHITE);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         title.setSingleLine(true);
-        topBar.addView(title, ui.weight(1f));
+        if (BuildConfig.TEST_BUILD) {
+            // The test profile (small data, own application id) is marked so it is not mistaken for the real app.
+            LinearLayout titleBox = ui.row();
+            titleBox.addView(title);
+            titleBox.addView(ui.testBadge(), ui.margins(Ui.lp(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT), 8, 0, 0, 0));
+            topBar.addView(titleBox, ui.weight(1f));
+        } else {
+            topBar.addView(title, ui.weight(1f));
+        }
         tabs = ui.tabs(new String[] { "Teams", "Map", "Rules" }, tab, i -> {
             tab = i;
             showTab();
@@ -550,6 +558,8 @@ public class MainActivity extends SetupActivity {
         map.addView(ui.heading("Map"));
         List<String> types = Arrays.asList(MAP_TYPE_NAMES);
         List<String> usable = new ArrayList<>(types);
+        // Image map is the last type; it is only offered when the game data has image maps (the test profile has none).
+        if (data.imageMaps().isEmpty() && model.mapType != SetupModel.MAP_IMAGE) usable.remove(usable.size() - 1);
         map.addView(ui.choice("Map type", usable, typeIndex(), i -> {
             model.mapType = MAP_TYPE_VALUES[i];
             if (model.mapType == SetupModel.MAP_IMAGE && model.imageMap.isEmpty() && !data.imageMaps().isEmpty()) {

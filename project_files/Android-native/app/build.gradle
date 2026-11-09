@@ -2,8 +2,13 @@ plugins {
     id 'com.android.application'
 }
 
-// ABIs to build; override with -Pabis=arm64-v8a (or "arm64-v8a,x86_64").
-def abis = (project.findProperty('abis') ?: 'arm64-v8a,x86_64').split(',').collect { it.trim() }
+// Build profile: full (the normal app) or test (small APK for automated phone and TV tests: its own application id,
+// arm64-v8a only, reduced game data from scripts/stage-assets.sh). -Pprofile=test, or HP_PROFILE=test in the environment.
+def profile = (project.findProperty('profile') ?: System.getenv('HP_PROFILE') ?: 'full').toString()
+if (!(profile in ['full', 'test'])) throw new GradleException("Unknown profile '${profile}' (full or test)")
+def testProfile = profile == 'test'
+// ABIs to build; override with -Pabis=arm64-v8a (or "arm64-v8a,x86_64"). The test profile defaults to arm64-v8a only.
+def abis = (project.findProperty('abis') ?: (testProfile ? 'arm64-v8a' : 'arm64-v8a,x86_64')).split(',').collect { it.trim() }
 // Where things live. The engine is the repository this directory belongs to (../.. from the Gradle root);
 // third_party/ (the SDL2 clones) and build/ (generated inputs) can be redirected with the same environment
 // variables the scripts use (THIRD_PARTY, BUILD_DIR, HW_ENGINE_DIR).
@@ -38,8 +43,9 @@ if (appCommit != 'unknown' && !gitOut(rootDir, 'status', '--porcelain', '--untra
 
 // Identity of the build. The defaults are those of the first releases; override them to build another flavour,
 // for example  ./gradlew -PappId=org.hedgewars.hedgewars.nativeport -PappName=Hedgewars assembleDebug
-def appId = (project.findProperty('appId') ?: 'party.hedge.host').toString()
-def appName = (project.findProperty('appName') ?: 'Hedge Party').toString()
+// The test profile installs next to the normal app (its own id), under its own name.
+def appId = (project.findProperty('appId') ?: (testProfile ? 'party.hedge.host.test' : 'party.hedge.host')).toString()
+def appName = (project.findProperty('appName') ?: (testProfile ? 'Hedge Party (test)' : 'Hedge Party')).toString()
 // Where the corresponding source of this build can be found (shown under Options, Advanced, About).
 def sourceUrl = (project.findProperty('sourceUrl') ?: 'https://github.com/Gadgit83/hw/tree/android-master').toString()
 
@@ -56,9 +62,11 @@ android {
         minSdk 24
         targetSdk 34
         versionCode 102
-        versionName '0.3.0-tv1'
+        versionName testProfile ? '0.3.0-tv1-test' : '0.3.0-tv1'
         resValue 'string', 'app_name', appName
         buildConfigField 'String', 'APP_NAME', "\"${appName}\""
+        buildConfigField 'String', 'PROFILE', "\"${profile}\""
+        buildConfigField 'boolean', 'TEST_BUILD', testProfile.toString()
         buildConfigField 'String', 'SOURCE_URL', "\"${sourceUrl}\""
         // Shown on the About page and in the log report: which engine and which app source this APK was built from.
         buildConfigField 'String', 'ENGINE_COMMIT', "\"${engineCommit}\""
@@ -160,6 +168,16 @@ tasks.matching { it.name == 'preBuild' }.configureEach {
         }
         if (!missing.isEmpty()) {
             throw new GradleException("Missing generated inputs: ${missing.join(', ')}. Run project_files/Android-native/scripts/build-apk.sh, or the listed scripts first.")
+        }
+        // The data must be the profile this build packages: a test set in a full APK (or the reverse) is a silent mistake.
+        // stage-assets.sh writes the profile it staged for into Data/.profile.
+        def marker = new File(genDir, 'assets/Data/.profile')
+        def staged = marker.exists() ? marker.text.trim() : null
+        if (staged != profile) {
+            def stagedFor = staged ? "profile '${staged}'" : 'an unknown profile (no .profile marker, staged by an older script)'
+            throw new GradleException("build/assets holds game data staged for ${stagedFor}, but this build is profile '${profile}'. " +
+                "Stage again for this profile: HP_PROFILE=${profile} project_files/Android-native/scripts/stage-assets.sh " +
+                "(or run build-apk.sh with HP_PROFILE=${profile}).")
         }
     }
 }

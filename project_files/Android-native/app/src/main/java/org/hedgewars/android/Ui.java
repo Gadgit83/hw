@@ -195,6 +195,16 @@ public final class Ui {
 
     // Text and buttons --------------------------------------------------------------------------
 
+    /** The "TEST BUILD" marker of the test profile (setup screen and About). */
+    public TextView testBadge() {
+        TextView t = text("TEST BUILD", 11, Color.WHITE);
+        t.setTypeface(Typeface.DEFAULT_BOLD);
+        t.setSingleLine(true);
+        t.setPadding(dp(8), dp(1), dp(8), dp(1));
+        t.setBackground(round(Color.rgb(198, 40, 40), 8));
+        return t;
+    }
+
     public TextView text(String s, float sp, int color) {
         TextView t = new TextView(ctx);
         t.setText(s);

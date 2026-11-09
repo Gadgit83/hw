@@ -239,6 +239,7 @@ git clone -b android-master https://github.com/Gadgit83/hw.git
 cd hw/project_files/Android-native
 scripts/build-apk.sh                 # arm64-v8a and x86_64
 ABIS=arm64-v8a scripts/build-apk.sh  # phone only, smaller APK
+HP_PROFILE=test scripts/build-apk.sh  # the small test build, see "Build profiles"
 ```
 
 It runs these steps, which can also be run on their own (all paths below are relative to `project_files/Android-native`; the engine is the repository root, `../..`):
@@ -261,6 +262,38 @@ The defaults are the Hedge Party release (`party.hedge.host`, so an installed ap
 ```
 
 `appName` is the launcher label and the name shown inside the app and in the log report, `sourceUrl` is the link under Options, Advanced, Licence and source. Two builds with different ids install side by side.
+
+#### Build profiles
+
+`HP_PROFILE=full` (the default) is the normal app. `HP_PROFILE=test` builds a small APK for automated tests on a phone and the TV viewer, small enough to keep in git (GitHub refuses files over 100 MiB). The scripts read `HP_PROFILE` from the environment and pass it to Gradle as `-Pprofile=test` (Gradle also reads `HP_PROFILE` itself, so `./gradlew assembleDebug` with `HP_PROFILE=test` set works when `build/` was staged for it). The variable is not called `PROFILE`: the scripts stop with a message if `PROFILE` is set and `HP_PROFILE` is not. `stage-assets.sh` writes the profile it staged for to `build/assets/Data/.profile`, and the Gradle build stops with a message when that does not match its profile, so a test set cannot end up in a full APK or the reverse. Use a separate `BUILD_DIR` per profile if you build both, or stage again after switching: `stage-assets.sh` writes `build/assets` for one profile at a time.
+
+| | full | test |
+|---|---|---|
+| Application id | `party.hedge.host` | `party.hedge.host.test` (installs next to the full app; the log FileProvider authority `${applicationId}.logs` follows it) |
+| Launcher label | Hedge Party | Hedge Party (test) |
+| `versionName` | 0.2.2 | 0.2.2-test (same `versionCode`) |
+| Marker | none | red "TEST BUILD" badge next to the title on the setup screen, and on Options, Advanced, About (with a Profile line) |
+| ABIs | arm64-v8a, x86_64 | arm64-v8a only (`ABIS=...` still overrides) |
+| Signing | debug key | the same debug key |
+| Game data | as described under [Game data](#game-data) | the reduced set below |
+| APK | see [Size](#size) | about 14 MB |
+
+What the test profile keeps of `share/hedgewars/Data` (everything else needed to play is the same as in the full profile):
+
+| Folder | Kept | Dropped |
+|---|---|---|
+| Themes | Nature, Snow, Hell (offered), and EarthRise and Cave without their icon, which hides them from the theme picker and from Random: the game styles Space_Invasion and TechRacer set these themselves and the engine stops without them | the other 29 |
+| Forts | Earth (the default team fort) | the other 16 |
+| Sounds/voices | Default | the other 14 voice packs; Sounds/*.ogg effects are all kept |
+| Graphics/Hats | NoHat, royalguard, policecap, clown-copper, cyborg1, InfernalHorns, Glasses, pinksunhat, anzac (the hats most themed team groups of `Names/types.ini` use), crown, Skull, angel, Sniper (put on by game modes), and `Reserved/` (the engine loads `Reserved/chef` itself and stops without it) | the other 286 hats |
+| Graphics/Flags | hedgewars (the default team flag), cpu and cpu_plain (computer teams) | the other 290 flags |
+| Maps | nothing: the random island, maze, perlin, wave function collapse and forts map types read no files from `Data/Maps` (they are generated from `map_templates.yaml`, `maze_templates.yaml`, `wfc_templates.toml`, `Tiles` and the theme) | all 44 image maps |
+| Music | nothing | all |
+| Graphics, Fonts (DejaVuSans-Bold), Scripts (all 21 game styles), Shaders, Tiles, Names, Locale (en), touch button artwork, graves | kept | `.svg`, `.xcf` and `.sifz` sources |
+
+Because the data is staged by a whitelist, the setup screen offers only what is on disk: three themes (two more are installed but hidden), one fort, one voice pack, nine plus four hats, no "Image map" map type. A random theme, fort, voice, grave or hat is always picked from the installed ones, and `SetupModel.repair()` replaces a saved choice that is not installed (for example a deleted hat or theme). `scripts/config-test.sh` checks this, and on the test data that the offered themes are exactly Nature, Snow and Hell (300 random setups, every theme, fort, voice pack, grave, flag and hat that a generated game names exists in the staged data, and a setup that names missing content is repaired).
+
+**Match with the TV viewer.** The TV viewer of https://github.com/Gadgit83/hedgewars-party (`tv/viewer/tools/package-data.sh`, checked at commit 74977b5) packages all 34 themes (Nature in `hwengine.data`, the others as loose files), every hat, flag and grave, the top level `Graphics` PNGs, `Hedgehog`, `AmmoMenu` and `SuddenDeath`, `Shaders`, `Tiles`, `Names`, `misc`, `Scripts`, one font, the English locale and the three template files. It ships no `Sounds`, `Music`, `Maps` or `Forts` (it runs the engine with `--nosound --nomusic`). The intersection with this profile, and so what a phone and the TV can both play, is: themes Nature, Snow and Hell; all of the kept hats, the hedgewars flag and all graves; random island, maze, perlin and wave function collapse maps; every game style. The Forts map type needs `Data/Forts` on the TV, which the TV package does not contain yet, so a Forts game cannot be watched on the TV until it does (the test profile still offers it, as it offers it in the full app). Image maps are not offered by the test profile because the TV has none. If the TV package gains or loses data, change the lists at the top of the test block in `stage-assets.sh`.
 
 #### Releases
 
@@ -338,6 +371,7 @@ Not verified: running on an Android device or emulator (the build machine has no
 
 | Build | APK |
 |---|---|
+| test profile (arm64-v8a, reduced data, see [Build profiles](#build-profiles)) | about 14 MB (staged data 11 MB) |
 | arm64-v8a + x86_64, lite music | about 98 MiB (102 MB) |
 | arm64-v8a only | about 92 MiB (96 MB) |
 

@@ -287,9 +287,13 @@ public final class GameData {
         return typeHats.size();
     }
 
+    /** The hats of a themed group in types.ini that are installed (a trimmed data set, as in the test profile, lacks some). */
     public List<String> typeHats(int kind) {
         loadTypes();
-        return typeHats.get(kind);
+        if (hats().isEmpty()) return typeHats.get(kind);
+        List<String> installed = new ArrayList<>();
+        for (String h : typeHats.get(kind)) if (hats().contains(h)) installed.add(h);
+        return installed;
     }
 
     /** A random hat from the whole hat list. */

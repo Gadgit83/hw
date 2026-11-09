@@ -26,8 +26,31 @@ public final class GameData {
     private final Map<String, List<String>> dictCache = new HashMap<>();
     private List<List<String>> typeTeamNames, typeHats;
 
+    private volatile boolean warmed;
+
     public GameData(File dataRoot) {
         this.root = dataRoot;
+    }
+
+    /**
+     * Reads every directory listing the screens use, so later calls only return the cached lists. Meant for a worker
+     * thread; call the getters from other threads only once {@link #isWarm()} is true.
+     */
+    public synchronized void warm() {
+        if (warmed) return;
+        themes();
+        hats();
+        graves();
+        forts();
+        voices();
+        imageMaps();
+        styles();
+        typeCount();
+        warmed = true;
+    }
+
+    public boolean isWarm() {
+        return warmed;
     }
 
     // Directory listings -----------------------------------------------------------------------

@@ -69,7 +69,7 @@ const
     baseRectSize = 96;
 
 var
-    rectSize, halfRectSize: LongInt;
+    rectSize, halfRectSize, crosshairHalfSize: LongInt;
 
     pointerCount : Longword;
     fingers: array[0..cMaxFingers-1] of TTouch_Data;
@@ -97,6 +97,7 @@ var
 begin
 rectSize:= round(baseRectSize * cUIScale);
 halfRectSize:= rectSize shr 1;
+crosshairHalfSize:= round(baseRectSize * sqrt(cUIScale)) shr 1;
 uiDragX:= 0;
 uiDragY:= 0;
 xr:= round(x * cScreenWidth);
@@ -109,14 +110,6 @@ inc(buttonsDown);//inc buttonsDown, if we don't see a button down we'll dec it
 
 if (not isPaused) or isOnWidget(pauseButton, finger^) then
 begin
-if isOnCrosshair(finger^) then
-begin
-    aimingCrosshair:= true;
-    aim(finger^);
-    moveCursor:= false;
-    exit;
-end;
-
 if isOnWidget(fireButton, finger^) then
     begin
     ParseTeamCommand('+attack');
@@ -134,6 +127,7 @@ if isOnWidget(arrowLeft, finger^) then
 if isOnWidget(arrowRight, finger^) then
     begin
     ParseTeamCommand('+right');
+    if (CurrentHedgehog <> nil) and (CurrentHedgehog^.Gear <> nil) then WriteLnToConsole('[Touch] +right, hedgehog x ' + inttostr(hwRound(CurrentHedgehog^.Gear^.X)));
     moveCursor:= false;
     finger^.pressedWidget:= @arrowRight;
     exit;
@@ -196,6 +190,17 @@ if isOnWidget(utilityWidget2, finger^) then
                 end;
             end;
         end;
+    exit;
+    end;
+
+// Only after all the widgets: the aiming marker follows the hedgehog and must never steal a touch
+// from a button that is drawn over it. It is also only touchable while it is drawn.
+if isOnCrosshair(finger^) then
+    begin
+    aimingCrosshair:= true;
+    WriteLnToConsole('[Touch] aim marker grabbed');
+    aim(finger^);
+    moveCursor:= false;
     exit;
     end;
 
@@ -330,7 +335,10 @@ if (buttonsDown > 0) and (widget <> nil) then
         ParseTeamCommand('-left');
 
     if widget = @arrowRight then
+        begin
         ParseTeamCommand('-right');
+        if (CurrentHedgehog <> nil) and (CurrentHedgehog^.Gear <> nil) then WriteLnToConsole('[Touch] -right, hedgehog x ' + inttostr(hwRound(CurrentHedgehog^.Gear^.X)));
+        end;
 
     if widget = @arrowUp then
         ParseTeamCommand('-up');
@@ -611,36 +619,54 @@ begin
     convertToCursorY:= cScreenHeight - y;
 end;
 
-function isOnCrosshair(finger: TTouch_Data): boolean;
+// True when the finger is within half a side of the point (worldX, worldY) of the world, as drawn now.
+function isNearWorldPoint(worldX, worldY, half: LongInt; finger: TTouch_Data): boolean;
 var
     x, y: LongInt;
 begin
     x:= 0;
     y:= 0;
-    convertToFingerCoord(x, y, CrosshairX, CrosshairY);
-    isOnCrosshair:= isOnRect(x - HalfRectSize, y - HalfRectSize, RectSize, RectSize, finger);
+    convertToFingerCoord(x, y, worldX, worldY);
+    isNearWorldPoint:= (abs(finger.x - x) < half) and (abs(finger.y - y) < half);
+end;
+
+// The aiming marker can only be grabbed while it is drawn (see RenderHHGuiExtras). Its touch area follows the
+// size of a finger rather than the whole UI scale, so it does not cover the buttons next to a low hedgehog.
+function isOnCrosshair(finger: TTouch_Data): boolean;
+begin
+    isOnCrosshair:= false;
+    if (CurrentHedgehog = nil) or (CurrentHedgehog^.Gear = nil) or (CrosshairGear = nil) or
+       (CrosshairGear <> CurrentHedgehog^.Gear) then
+        exit;
+    isOnCrosshair:= isNearWorldPoint(CrosshairX, CrosshairY, crosshairHalfSize, finger);
 end;
 
 function isOnCurrentHog(finger: TTouch_Data): boolean;
-var
-    x, y: LongInt;
 begin
-    x:= 0;
-    y:= 0;
-    convertToFingerCoord(x, y, hwRound(CurrentHedgehog^.Gear^.X), hwRound(CurrentHedgehog^.Gear^.Y));
-    isOnCurrentHog:= isOnRect(x - HalfRectSize, y - HalfRectSize, RectSize, RectSize, finger);
+    isOnCurrentHog:= false;
+    if CurrentHedgehog = nil then exit;
+    if CurrentHedgehog^.Gear = nil then exit;
+    isOnCurrentHog:= isNearWorldPoint(hwRound(CurrentHedgehog^.Gear^.X), hwRound(CurrentHedgehog^.Gear^.Y), halfRectSize, finger);
 end;
 
+// Finger coordinates are centred horizontally and count up from the bottom (see convertToCursorX/Y). The world
+// is drawn about the middle of the screen at the scale 'zoom' (see SetScale), so both directions go through it.
 procedure convertToFingerCoord(var x, y : LongInt; oldX, oldY: LongInt);
+var
+    k: Single;
 begin
-    x := oldX + WorldDx;
-    y := cScreenHeight - oldY - WorldDy;
+    k:= zoom / 2;
+    x:= round((oldX + WorldDx) * k);
+    y:= cScreenHeight - round(cScreenHeight / 2 + ((oldY + WorldDy) - cScreenHeight / 2) * k);
 end;
 
 procedure convertToWorldCoord(var x,y: LongInt; finger: TTouch_Data);
+var
+    k: Single;
 begin
-    x := finger.x - WorldDx;
-    y := cScreenHeight - finger.y - WorldDy;
+    k:= 2 / zoom;
+    x:= round(finger.x * k) - WorldDx;
+    y:= round(cScreenHeight / 2 + ((cScreenHeight - finger.y) - cScreenHeight / 2) * k) - WorldDy;
 end;
 
 //Method to calculate the distance this finger has moved since the downEvent
@@ -714,6 +740,7 @@ begin
     uiDragY:= 0;
     rectSize:= round(baseRectSize * cUIScale);
     halfRectSize:= rectSize shr 1;
+    crosshairHalfSize:= round(baseRectSize * sqrt(cUIScale)) shr 1;
 end;
 
 procedure freeModule;

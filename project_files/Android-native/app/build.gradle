@@ -8,6 +8,8 @@ def abis = (project.findProperty('abis') ?: 'arm64-v8a,x86_64').split(',').colle
 // third_party/ (the SDL2 clones) and build/ (generated inputs) can be redirected with the same environment
 // variables the scripts use (THIRD_PARTY, BUILD_DIR, HW_ENGINE_DIR).
 def engineDir = new File(System.getenv('HW_ENGINE_DIR') ?: new File(rootDir, '../..').path).canonicalFile
+// Cache of Robolectric's android-all jars, filled by scripts/fetch-robolectric.sh.
+def robolectricDeps = new File(System.getenv('ROBOLECTRIC_DEPS') ?: "${System.getProperty('user.home')}/.cache/hedgeparty/robolectric")
 def thirdParty = new File(System.getenv('THIRD_PARTY') ?: new File(rootDir, 'third_party').path).canonicalFile
 def genDir = new File(System.getenv('BUILD_DIR') ?: new File(rootDir, 'build').path).canonicalFile
 def sdlJava = new File(thirdParty, 'SDL/android-project/app/src/main/java')
@@ -53,8 +55,8 @@ android {
         applicationId appId
         minSdk 24
         targetSdk 34
-        versionCode 100
-        versionName '0.3.0-mp1'
+        versionCode 101
+        versionName '0.3.0-mp2'
         resValue 'string', 'app_name', appName
         buildConfigField 'String', 'APP_NAME', "\"${appName}\""
         buildConfigField 'String', 'SOURCE_URL', "\"${sourceUrl}\""
@@ -108,6 +110,27 @@ android {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
     }
+    testOptions {
+        unitTests {
+            // Robolectric needs the merged resources to inflate the screens.
+            includeAndroidResources = true
+            all {
+                systemProperty 'screenshot.dir', (System.getenv('SCREENSHOT_DIR') ?: new File(genDir, 'screenshots').path)
+                // The staged game data the tests link in as the "installed" data (scripts/stage-assets.sh).
+                systemProperty 'screenshot.data', new File(genDir, 'assets/Data').path
+                systemProperty 'screenshots', project.hasProperty('screenshots') ? 'true' : 'false'
+                // Offline Robolectric: the Android 14 and 15 jars come from this folder (scripts/fetch-robolectric.sh).
+                systemProperty 'robolectric.offline', 'true'
+                systemProperty 'robolectric.dependency.dir', robolectricDeps.path
+                maxHeapSize = '2g'
+                testLogging {
+                    events 'passed', 'failed', 'skipped'
+                    exceptionFormat 'full'
+                    showStandardStreams = true
+                }
+            }
+        }
+    }
     lint {
         abortOnError false
         checkReleaseBuilds false
@@ -139,4 +162,14 @@ tasks.matching { it.name == 'preBuild' }.configureEach {
             throw new GradleException("Missing generated inputs: ${missing.join(', ')}. Run project_files/Android-native/scripts/build-apk.sh, or the listed scripts first.")
         }
     }
+}
+
+// Unit tests (src/test): the launch smoke test (LaunchSmokeTest, run by scripts/ui-smoke-test.sh) and, on request, pictures
+// of the setup screens without a phone. Robolectric renders the real layouts. The pictures use Skia (graphics mode
+// NATIVE) at 2340 x 1080 and 409 dpi, as on the Fairphone 4, and are not part of any normal run:
+//   ./gradlew -Pscreenshots testDebugUnitTest --tests '*ScreenshotTest'
+// and see build/screenshots/*.png.
+dependencies {
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.robolectric:robolectric:4.14.1'
 }

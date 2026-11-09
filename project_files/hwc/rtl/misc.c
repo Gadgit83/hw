@@ -3,6 +3,7 @@
 #include <stdarg.h>
 #include <string.h>
 #include <assert.h>
+#include <stdint.h>
 
 char strbuf[512];
 
@@ -228,3 +229,11 @@ void fpcrtl_glShaderSource(GLuint shader, GLsizei count,/* const dropped for pas
     glShaderSource(shader, count, (const char * const *)string, length);
 }
 #endif
+
+// Called by the engine's DeviceRumble (uUtils.pas) under PAS2C. Only the Android launcher
+// provides a real vibration (project_files/Android-native/native/launcher/hp_main.c); its
+// strong definition overrides this weak no-op wherever it is linked in. Desktop builds keep it.
+__attribute__((weak)) void hw_device_rumble(int32_t ms)
+{
+    (void)ms;
+}

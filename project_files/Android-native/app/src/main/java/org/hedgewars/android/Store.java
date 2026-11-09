@@ -17,8 +17,21 @@ public final class Store {
         return c.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
     }
 
-    public static GameData data(Context c) {
-        return new GameData(new File(c.getFilesDir(), "Data"));
+    private static GameData cachedData;
+    private static long cachedStamp = -1;
+
+    /**
+     * The lists read from the unpacked game data. One instance is kept (the folders are scanned once, not on every
+     * return to a screen); a new one is made when the data has been unpacked again, which rewrites the marker file.
+     */
+    public static synchronized GameData data(Context c) {
+        File root = new File(c.getFilesDir(), "Data");
+        long stamp = new File(root, ".installed").lastModified();
+        if (cachedData == null || !cachedData.root.equals(root) || stamp != cachedStamp) {
+            cachedData = new GameData(root);
+            cachedStamp = stamp;
+        }
+        return cachedData;
     }
 
     public static SetupModel loadSetup(Context c, GameData d) {

@@ -174,6 +174,22 @@ static void *server_thread(void *arg)
     return NULL;
 }
 
+/* Test hook (host test script action "ipc:<text>"): sends one message to the engine as the frontend would, e.g. "Fteamname"
+ * (a team left, the engine runs "teamgone u..."). Returns 0 when sent. */
+int hp_ipc_send(const char *payload)
+{
+    size_t n = strlen(payload);
+    int rc = -1;
+    if (n == 0 || n > 255) return -1;
+    pthread_mutex_lock(&g_fd_lock);
+    if (g_client_fd >= 0) {
+        unsigned char len = (unsigned char)n;
+        rc = (write_full(g_client_fd, &len, 1) == 0 && write_full(g_client_fd, payload, n) == 0) ? 0 : -1;
+    }
+    pthread_mutex_unlock(&g_fd_lock);
+    return rc;
+}
+
 int hp_ipc_start(const char *config_path)
 {
     struct sockaddr_in addr;

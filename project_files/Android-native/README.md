@@ -285,7 +285,7 @@ No device is needed for these.
 | `HP_TEST_SEED` | A fixed map seed |
 | `ASAN=ON` | Build with AddressSanitizer (needs `libclang-rt-dev`), which reports the out-of-bounds accesses that the phone's MTE and hardened allocator turn into crashes |
 | `HP_TEST_RESTORE=1,3,6,14` | Post `SDL_WINDOWEVENT_RESTORED` at those seconds; the phone sends it right after start-up and after every pause, and the engine answers with `fullscr`, which reloads the video state, the chat lines and every texture |
-| `HP_TEST_SCRIPT` | Timed input injection (touch, focus lost or gained and so on), see `native/host-test/hp_host_main.c` |
+| `HP_TEST_SCRIPT` | Timed input injection (touch, focus lost or gained, `ipc:` messages to the engine such as `ipc:eteamgone uTeam name` or `ipc:esetweap` plus the ammo character code, and so on), see `native/host-test/hp_host_main.c` |
 | `HP_TEST_ARGS` | Extra engine options, e.g. `--ui-scale 260 --inset-left 90 --screen-shape 120,120,120,120,0,480,600,480,600` (120 px corners, a 90 px cut-out on the left at rows 480 to 600) or `--turn-centre --turn-zoom 150` |
 | `HP_TEST_SHOTS` | Seconds after the start at which extra screenshots `build/host-test/shot_<n>.png` are taken |
 | `HP_TEST_SIZE` | Window size, e.g. `2340x1080` (default 1280x720) |

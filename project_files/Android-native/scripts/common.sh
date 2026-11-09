@@ -19,5 +19,12 @@ export ANDROID_HOME
 export ANDROID_SDK_ROOT="$ANDROID_HOME"
 NDK="${ANDROID_NDK_HOME:-$ANDROID_HOME/ndk/$NDK_VERSION}"
 TOOLCHAIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64"
-ABIS="${ABIS:-arm64-v8a x86_64}"
+# Build profile: full (default, the normal app) or test (small APK for automated phone and TV tests, see README "Build profiles").
+PROFILE="${PROFILE:-full}"
+case "$PROFILE" in
+  full) ABIS="${ABIS:-arm64-v8a x86_64}" ;;
+  test) ABIS="${ABIS:-arm64-v8a}" ;;
+  *) echo "unknown PROFILE=$PROFILE (full or test)"; exit 1 ;;
+esac
+export PROFILE
 log() { printf '\n==> %s\n' "$*"; }

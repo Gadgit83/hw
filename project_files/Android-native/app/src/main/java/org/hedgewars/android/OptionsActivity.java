@@ -237,10 +237,12 @@ public class OptionsActivity extends SetupActivity {
 
         LinearLayout about = ui.card();
         about.addView(ui.heading("About"));
+        if (BuildConfig.TEST_BUILD) about.addView(ui.testBadge(), ui.margins(Ui.lp(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT), 0, 0, 0, 4));
         about.addView(ui.text(BuildConfig.APP_NAME + " " + BuildConfig.VERSION_NAME + " (build " + BuildConfig.VERSION_CODE + ")", 16, Color.WHITE));
         about.addView(infoLine("Game engine", "Hedgewars, " + BuildConfig.ENGINE_COMMIT + " on " + BuildConfig.ENGINE_BRANCH));
         about.addView(infoLine("App source", BuildConfig.APP_COMMIT));
         about.addView(infoLine("Built for", BuildConfig.BUILD_ABIS));
+        if (BuildConfig.TEST_BUILD) about.addView(infoLine("Profile", "test: reduced game data, for automated testing"));
         about.addView(infoLine("This device", Build.MANUFACTURER + " " + Build.MODEL + ", Android " + Build.VERSION.RELEASE
                 + " (" + Build.VERSION.SDK_INT + "), " + Arrays.toString(Build.SUPPORTED_ABIS)));
         about.addView(ui.heading("Licence and source"));

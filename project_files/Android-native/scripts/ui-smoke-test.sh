@@ -7,10 +7,10 @@
 #   GRADLE_OFFLINE=1       pass --offline to Gradle
 . "$(dirname "$0")/common.sh"
 "$HOST_DIR/scripts/fetch-robolectric.sh"
-log "UI smoke test (Robolectric, SDK 34 and 35)"
+log "UI smoke test (Robolectric, SDK 34 and 35, profile $PROFILE)"
 cd "$HOST_DIR"
 export ROBOLECTRIC_DEPS="${ROBOLECTRIC_DEPS:-$HOME/.cache/hedgeparty/robolectric}"
 export HP_MAVEN_MIRROR="${HP_MAVEN_MIRROR-https://maven-central.storage-download.googleapis.com/maven2}"
 export BUILD_DIR THIRD_PARTY
-./gradlew --no-daemon ${GRADLE_OFFLINE:+--offline} -Pabis="$(echo $ABIS | tr ' ' ',')" testDebugUnitTest --tests 'org.hedgewars.android.LaunchSmokeTest' --rerun-tasks
+./gradlew --no-daemon ${GRADLE_OFFLINE:+--offline} -Pprofile="$PROFILE" -Pabis="$(echo $ABIS | tr ' ' ',')" testDebugUnitTest --tests 'org.hedgewars.android.LaunchSmokeTest' --rerun-tasks
 echo "UI smoke test passed"

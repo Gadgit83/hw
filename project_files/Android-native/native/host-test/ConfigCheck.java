@@ -78,7 +78,7 @@ public class ConfigCheck {
         for (int t : types) {
             SetupModel m = teams(d, rnd, 2, 4);
             m.mapType = t;
-            if (t == SetupModel.MAP_IMAGE) m.imageMap = d.imageMaps().get(0);
+            if (t == SetupModel.MAP_IMAGE) m.imageMap = d.imageMaps().isEmpty() ? "Hedgewars" : d.imageMaps().get(0);   // the test profile has no image maps
             m.mazeSize = 3;
             m.templateFilter = 4;
             m.featureSize = 7;
@@ -180,8 +180,44 @@ public class ConfigCheck {
             for (String s : a3) if (s.startsWith("--")) check(argNames.contains(s), "engine knows option " + s);
             for (String s : a2) if (s.startsWith("--")) check(argNames.contains(s), "engine knows option " + s);
         }
+        checkContentPresent(d, dataDir);
         System.out.println("ConfigCheck: " + checks + " checks, " + failures + " failures");
         System.exit(failures == 0 ? 0 : 1);
+    }
+
+    /**
+     * Nothing the app chooses at random may be missing from the data on disk (the test profile ships a reduced data set):
+     * default and random teams, the randomise button, random themes in the game config, and repair() of a setup that names
+     * content that is absent.
+     */
+    static void checkContentPresent(GameData d, File dataDir) {
+        check(!d.themes().isEmpty() && !d.forts().isEmpty() && !d.voices().isEmpty() && d.hats().contains("NoHat"), "data has a theme, fort, voice pack and NoHat");
+        for (int seed = 0; seed < 300; seed++) {
+            Random r = new Random(seed);
+            SetupModel m = teams(d, r, 2 + seed % 7, 8);
+            for (SetupModel.Team t : m.teams) {
+                check(d.graves().contains(t.grave) && d.forts().contains(t.fort) && d.voices().contains(t.voice), "random team grave, fort and voice are installed");
+                for (int h = 0; h < SetupModel.MAX_HOGS; h++) check(d.hats().contains(t.hogHat[h]), "random hat installed: " + t.hogHat[h]);
+            }
+            List<String> l = GameConfig.build(m, d, r);
+            for (String s : l) {
+                if (s.startsWith("etheme ")) check(d.themes().contains(s.substring(7)), "random theme installed: " + s);
+                if (s.startsWith("egrave ")) check(new File(dataDir, "Graphics/Graves/" + s.substring(7) + ".png").isFile(), "grave file: " + s);
+                if (s.startsWith("efort ")) check(new File(dataDir, "Forts/" + s.substring(6) + "L.png").isFile(), "fort file: " + s);
+                if (s.startsWith("evoicepack ")) check(new File(dataDir, "Sounds/voices/" + s.substring(11)).isDirectory(), "voice pack: " + s);
+                if (s.startsWith("eflag ")) check(new File(dataDir, "Graphics/Flags/" + s.substring(6) + ".png").isFile(), "flag file: " + s);
+                if (s.startsWith("ehat ")) check(new File(dataDir, "Graphics/Hats/" + s.substring(5) + ".png").isFile(), "hat file: " + s);
+            }
+        }
+        // A setup saved with the full data (hats, theme, fort, voice, image map, style that are not installed) is repaired.
+        SetupModel m = teams(d, new Random(3), 2, 4);
+        SetupModel.Team t = m.teams.get(0);
+        t.fort = "Castle"; t.voice = "Pirate"; t.grave = "NoSuchGrave"; t.hogHat[0] = "sth_Sonic";
+        m.theme = "Cake"; m.mapType = SetupModel.MAP_IMAGE; m.imageMap = "Hogville"; m.style = "NoSuchStyle";
+        m.repair(d, new Random(4));
+        check(d.forts().contains(t.fort) && d.voices().contains(t.voice) && d.graves().contains(t.grave) && t.hogHat[0].equals("NoHat"), "repair replaces missing team content");
+        check(m.theme.isEmpty() && m.style.isEmpty(), "repair clears a missing theme and style");
+        check(m.mapType != SetupModel.MAP_IMAGE || d.imageMaps().contains(m.imageMap), "repair leaves no missing image map");
     }
 
     static SetupModel teams(GameData d, Random rnd, int n, int hogs) {

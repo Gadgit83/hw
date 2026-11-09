@@ -2,8 +2,13 @@ plugins {
     id 'com.android.application'
 }
 
-// ABIs to build; override with -Pabis=arm64-v8a (or "arm64-v8a,x86_64").
-def abis = (project.findProperty('abis') ?: 'arm64-v8a,x86_64').split(',').collect { it.trim() }
+// Build profile: full (the normal app) or test (small APK for automated phone and TV tests: its own application id,
+// arm64-v8a only, reduced game data from scripts/stage-assets.sh). -Pprofile=test, or PROFILE=test in the environment.
+def profile = (project.findProperty('profile') ?: System.getenv('PROFILE') ?: 'full').toString()
+if (!(profile in ['full', 'test'])) throw new GradleException("Unknown profile '${profile}' (full or test)")
+def testProfile = profile == 'test'
+// ABIs to build; override with -Pabis=arm64-v8a (or "arm64-v8a,x86_64"). The test profile defaults to arm64-v8a only.
+def abis = (project.findProperty('abis') ?: (testProfile ? 'arm64-v8a' : 'arm64-v8a,x86_64')).split(',').collect { it.trim() }
 // Where things live. The engine is the repository this directory belongs to (../.. from the Gradle root);
 // third_party/ (the SDL2 clones) and build/ (generated inputs) can be redirected with the same environment
 // variables the scripts use (THIRD_PARTY, BUILD_DIR, HW_ENGINE_DIR).
@@ -38,8 +43,9 @@ if (appCommit != 'unknown' && !gitOut(rootDir, 'status', '--porcelain', '--untra
 
 // Identity of the build. The defaults are those of the first releases; override them to build another flavour,
 // for example  ./gradlew -PappId=org.hedgewars.hedgewars.nativeport -PappName=Hedgewars assembleDebug
-def appId = (project.findProperty('appId') ?: 'party.hedge.host').toString()
-def appName = (project.findProperty('appName') ?: 'Hedge Party').toString()
+// The test profile installs next to the normal app (its own id), under its own name.
+def appId = (project.findProperty('appId') ?: (testProfile ? 'party.hedge.host.test' : 'party.hedge.host')).toString()
+def appName = (project.findProperty('appName') ?: (testProfile ? 'Hedge Party (test)' : 'Hedge Party')).toString()
 // Where the corresponding source of this build can be found (shown under Options, Advanced, About).
 def sourceUrl = (project.findProperty('sourceUrl') ?: 'https://github.com/Gadgit83/hw/tree/android-master').toString()
 
@@ -56,9 +62,11 @@ android {
         minSdk 24
         targetSdk 34
         versionCode 8
-        versionName '0.2.2'
+        versionName testProfile ? '0.2.2-test' : '0.2.2'
         resValue 'string', 'app_name', appName
         buildConfigField 'String', 'APP_NAME', "\"${appName}\""
+        buildConfigField 'String', 'PROFILE', "\"${profile}\""
+        buildConfigField 'boolean', 'TEST_BUILD', testProfile.toString()
         buildConfigField 'String', 'SOURCE_URL', "\"${sourceUrl}\""
         // Shown on the About page and in the log report: which engine and which app source this APK was built from.
         buildConfigField 'String', 'ENGINE_COMMIT', "\"${engineCommit}\""

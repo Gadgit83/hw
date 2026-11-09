@@ -291,15 +291,82 @@ begin
 SafeInset:= round(px / cUIScale);
 end;
 
+// Horizontal distance in screen pixels that something whose nearest edge lies vpx pixels from the top or
+// bottom screen edge must keep from the side edge so that it does not run into a rounded display corner of
+// radius rpx (the corner is an arc around the point rpx in from both edges). 0 for square corners.
+function CornerClearPx(rpx, vpx: LongInt): LongInt;
+var r, d, v: GLfloat;
+begin
+CornerClearPx:= 0;
+if rpx <= 0 then
+    exit;
+r:= rpx;
+v:= vpx;
+if v < 0 then
+    v:= 0;
+if v >= r then
+    exit;
+d:= r - sqrt(r * r - (r - v) * (r - v));
+CornerClearPx:= round(d + 0.5);
+end;
+
+// Vertical distance in UI units kept free at the top (isTop) or the bottom edge: cut-out or bar plus the margin.
+function VInset(isTop: boolean): LongInt;
+begin
+if isTop then
+    VInset:= SafeInset(cSafeInsetT + cEdgeMargin)
+else
+    VInset:= SafeInset(cSafeInsetB + cEdgeMargin);
+end;
+
+// Distance in UI units from the left or right screen edge that an element covering the rows yTopU to yBotU
+// (UI units from the top, inside UISwapIn) must keep clear: the cut-out when it reaches that high, the rounded
+// corner it is next to and the margin. isTop tells which corner the element is next to.
+function HInset(isLeft, isTop: boolean; yTopU, yBotU: LongInt): LongInt;
+var depth, y0, y1, rad, v, c: LongInt;
+begin
+if isLeft then
+    begin
+    depth:= cSafeInsetL;
+    y0:= cCutLY0;
+    y1:= cCutLY1;
+    if isTop then
+        rad:= cCornerTL
+    else
+        rad:= cCornerBL;
+    end
+else
+    begin
+    depth:= cSafeInsetR;
+    y0:= cCutRY0;
+    y1:= cCutRY1;
+    if isTop then
+        rad:= cCornerTR
+    else
+        rad:= cCornerBR;
+    end;
+// a cut-out with a known vertical extent only matters to the elements that overlap it
+if (y1 > y0) and ((yBotU * cUIScale <= y0) or (yTopU * cUIScale >= y1)) then
+    depth:= 0;
+if isTop then
+    v:= round(yTopU * cUIScale)
+else
+    v:= round((cScreenHeight - yBotU) * cUIScale);
+c:= CornerClearPx(rad, v);
+if c > depth then
+    depth:= c;
+HInset:= SafeInset(depth + cEdgeMargin);
+end;
+
 procedure InitTouchInterface;
-var sl, st, sr, sb: LongInt;
+var vt, vb, pad: LongInt;
 begin
 {$IFDEF USE_TOUCH_INTERFACE}
 UISwapIn;
-sl:= SafeInset(cSafeInsetL);
-st:= SafeInset(cSafeInsetT);
-sr:= SafeInset(cSafeInsetR);
-sb:= SafeInset(cSafeInsetB);
+// Every control sits just clear of its own corner: vt and vb are the room kept at the top and bottom edge and
+// HInset adds what the cut-out and the rounding of that corner need at the side (see HInset).
+vt:= VInset(true);
+vb:= VInset(false);
 
 //positioning of the buttons
 buttonScale:= 1 / cDefaultZoomLevel;
@@ -311,8 +378,11 @@ with JumpWidget do
     sprite:= sprJumpWidget;
     frame.w:= Round(spritesData[sprite].Texture^.w * buttonScale);
     frame.h:= Round(spritesData[sprite].Texture^.h * buttonScale);
-    frame.x:= (cScreenWidth shr 1) - Round(frame.w * 1.2) - sr;
-    frame.y:= cScreenHeight - frame.h * 2 - sb;
+    frame.y:= cScreenHeight - frame.h * 2 - vb;
+    pad:= HInset(false, false, frame.y, frame.y + frame.h);
+    if pad < Round(frame.w * 0.2) then
+        pad:= Round(frame.w * 0.2);
+    frame.x:= (cScreenWidth shr 1) - frame.w - pad;
     active.x:= frame.x;
     active.y:= frame.y;
     active.w:= frame.w;
@@ -325,8 +395,13 @@ with AMWidget do
     sprite:= sprAMWidget;
     frame.w:= Round(spritesData[sprite].Texture^.w * buttonScale);
     frame.h:= Round(spritesData[sprite].Texture^.h * buttonScale);
-    frame.x:= (cScreenWidth shr 1) - frame.w * 2 - sr;
-    frame.y:= cScreenHeight - Round(frame.h * 1.2) - sb;
+    frame.y:= cScreenHeight - Round(frame.h * 1.2) - vb;
+    pad:= HInset(false, false, frame.y, frame.y + frame.h);
+    if pad < Round(frame.w * 0.2) then
+        pad:= Round(frame.w * 0.2);
+    frame.x:= (cScreenWidth shr 1) - frame.w - pad;
+    if frame.x > JumpWidget.frame.x - Round(frame.w * 0.8) then
+        frame.x:= JumpWidget.frame.x - Round(frame.w * 0.8);
     active.x:= frame.x;
     active.y:= frame.y;
     active.w:= frame.w;
@@ -339,8 +414,11 @@ with arrowLeft do
     sprite:= sprArrowLeft;
     frame.w:= Round(spritesData[sprite].Texture^.w * buttonScale);
     frame.h:= Round(spritesData[sprite].Texture^.h * buttonScale);
-    frame.x:= -(cScreenWidth shr 1) + Round(frame.w * 0.25) + sl;
-    frame.y:= cScreenHeight - Round(frame.h * 1.5) - sb;
+    frame.y:= cScreenHeight - Round(frame.h * 1.2) - vb;
+    pad:= HInset(true, false, frame.y, frame.y + frame.h);
+    if pad < Round(frame.w * 0.1) then
+        pad:= Round(frame.w * 0.1);
+    frame.x:= -(cScreenWidth shr 1) + pad;
     active.x:= frame.x;
     active.y:= frame.y;
     active.w:= frame.w;
@@ -353,8 +431,8 @@ with arrowRight do
     sprite:= sprArrowRight;
     frame.w:= Round(spritesData[sprite].Texture^.w * buttonScale);
     frame.h:= Round(spritesData[sprite].Texture^.h * buttonScale);
-    frame.x:= -(cScreenWidth shr 1) + Round(frame.w * 1.5) + sl;
-    frame.y:= cScreenHeight - Round(frame.h * 1.5) - sb;
+    frame.x:= arrowLeft.frame.x + Round(frame.w * 1.25);
+    frame.y:= arrowLeft.frame.y;
     active.x:= frame.x;
     active.y:= frame.y;
     active.w:= frame.w;
@@ -381,7 +459,7 @@ with arrowUp do
     sprite:= sprArrowUp;
     frame.w:= Round(spritesData[sprite].Texture^.w * buttonScale);
     frame.h:= Round(spritesData[sprite].Texture^.h * buttonScale);
-    frame.x:= (cScreenWidth shr 1) - frame.w * 2 - sr;
+    frame.x:= AMWidget.frame.x;
     frame.y:= jumpWidget.frame.y - Round(frame.h * 1.25);
     active.x:= frame.x;
     active.y:= frame.y;
@@ -402,7 +480,7 @@ with arrowDown do
     sprite:= sprArrowDown;
     frame.w:= Round(spritesData[sprite].Texture^.w * buttonScale);
     frame.h:= Round(spritesData[sprite].Texture^.h * buttonScale);
-    frame.x:= (cScreenWidth shr 1) - frame.w * 2 - sr;
+    frame.x:= AMWidget.frame.x;
     frame.y:= jumpWidget.frame.y - Round(frame.h * 1.25);
     active.x:= frame.x;
     active.y:= frame.y;
@@ -423,8 +501,8 @@ with pauseButton do
     sprite:= sprPauseButton;
     frame.w:= Round(spritesData[sprPauseButton].Texture^.w * buttonScale);
     frame.h:= Round(spritesData[sprPauseButton].Texture^.h * buttonScale);
-    frame.x:= cScreenWidth div 2 - frame.w - sr;
-    frame.y:= st;
+    frame.y:= vt;
+    frame.x:= cScreenWidth div 2 - frame.w - HInset(false, true, frame.y, frame.y + frame.h);
     active.x:= frame.x;
     active.y:= frame.y;
     active.w:= frame.w;
@@ -688,8 +766,8 @@ if(AmmoMenuInvalidated) then
     if cUIScale <> 1.0 then
         begin
         // touch HUD on a dense screen: at the right, inside the safe area, above the team bars
-        AmmoRect.x:= (cScreenWidth shr 1) - AmmoRect.w - round((cSafeInsetR + 8 * cUIScale) / cMenuScale);
-        AmmoRect.y:= cScreenHeight - AmmoRect.h - round((cSafeInsetB + 46 * cUIScale) / cMenuScale);
+        AmmoRect.x:= (cScreenWidth shr 1) - AmmoRect.w - round((max(cSafeInsetR, CornerClearPx(cCornerBR, cSafeInsetB + cEdgeMargin + round(46 * cUIScale))) + cEdgeMargin + 8 * cUIScale) / cMenuScale);
+        AmmoRect.y:= cScreenHeight - AmmoRect.h - round((cSafeInsetB + cEdgeMargin + 46 * cUIScale) / cMenuScale);
         // keep clear of the pause button when the menu reaches up to it
         if AmmoRect.y * cMenuScale < (pauseButton.frame.y + pauseButton.frame.h) * cUIScale then
             AmmoRect.x:= min(AmmoRect.x, round(pauseButton.frame.x * cUIScale / cMenuScale) - round(8 * cUIScale / cMenuScale) - AmmoRect.w);
@@ -937,7 +1015,7 @@ menuH:= 4 + rows * AMSlotSize + rows - 1;
 m:= cMenuTarget;
 if m < cUIScale then
     m:= cUIScale;
-avail:= uiRealH - cSafeInsetT - cSafeInsetB - 56 * cUIScale - 8 * cUIScale;
+avail:= uiRealH - cSafeInsetT - cSafeInsetB - 2 * cEdgeMargin - 56 * cUIScale - 8 * cUIScale;
 if m > avail / menuH then
     m:= avail / menuH;
 if m < 1.0 then
@@ -1046,6 +1124,66 @@ if WorldDy < lowBound then
     WorldDy:= lowBound;
 end;
 
+// Touch builds: at the start of a turn (and when the turn-start switcher moves to another hedgehog) the camera
+// glides to the active hedgehog and, once, zooms in a little. Only the camera (WorldDx, WorldDy, ZoomValue) is
+// touched, which the simulation never reads, so a remote turn behaves the same and nothing differs between players.
+var turnCamLeft: LongInt = 0;
+    lastCamHog: PHedgehog = nil;
+
+procedure TurnStartCamera(Lag: LongInt);
+{$IFDEF USE_TOUCH_INTERFACE}
+var tz: real;
+    tx, ty: LongInt;
+    f: GLfloat;
+begin
+if (CurrentHedgehog <> lastCamHog) then
+    begin
+    lastCamHog:= CurrentHedgehog;
+    cTurnCamPending:= true;
+    end;
+if (not cTurnCamPending) and (turnCamLeft = 0) then
+    exit;
+if (CurrentHedgehog = nil) or (CurrentHedgehog^.Gear = nil) or CurrentHedgehog^.Unplaced or PlacingHogs or
+   (not autoCameraOn) or (not (cTurnCentre or (cTurnZoom > 0))) then
+    begin
+    cTurnCamPending:= false;
+    turnCamLeft:= 0;
+    exit;
+    end;
+if cTurnCamPending then
+    begin
+    cTurnCamPending:= false;
+    turnCamLeft:= 800;
+    if cTurnZoom > 0 then
+        begin
+        // a bigger zoom value is a closer view (the scale factor), cMinZoomLevel is the closest the engine allows
+        tz:= cDefaultZoomLevel * cTurnZoom / 100;
+        if tz > cMinZoomLevel then
+            tz:= cMinZoomLevel;
+        if ZoomValue < tz then       // a view that is already closer (pinched in) stays
+            ZoomValue:= tz;
+        end;
+    WriteLnToConsole('[Camera] tick ' + inttostr(GameTicks) + ' turn start, hedgehog ' + CurrentHedgehog^.Name + ', centre ' + inttostr(ord(cTurnCentre)) + ', zoom target ' + inttostr(round(ZoomValue * 100)));
+    end;
+if cTurnCentre then
+    begin
+    tx:= -hwRound(CurrentHedgehog^.Gear^.X);
+    ty:= cScreenHeight div 2 - hwRound(CurrentHedgehog^.Gear^.Y);
+    f:= Lag / 140;
+    if f > 1 then
+        f:= 1;
+    WorldDx:= WorldDx + round((tx - WorldDx) * f);
+    WorldDy:= WorldDy + round((ty - WorldDy) * f);
+    end;
+dec(turnCamLeft, Lag);
+if turnCamLeft < 0 then
+    turnCamLeft:= 0;
+{$ELSE}
+begin
+Lag:= Lag; // avoid hint
+{$ENDIF}
+end;
+
 procedure DrawWorld(Lag: LongInt);
 begin
     if ZoomValue < zoom then
@@ -1067,7 +1205,11 @@ begin
 {$IFDEF MOBILE}
     // the camera can be dragged while paused
     if (not isAFK) and (GameType <> gmtRecord) then
+        begin
+        if not isPaused then
+            TurnStartCamera(Lag);
         MoveCamera
+        end
 {$ELSE}
     if (not isPaused) and (not isAFK) and (GameType <> gmtRecord) then
         MoveCamera
@@ -1320,7 +1462,7 @@ var i, t: LongInt;
     spr: TSprite;
     r: TSDL_Rect;
     s: shortstring;
-    offsetX, offsetY, screenBottom: LongInt;
+    offsetX, offsetY, screenBottom, hr: LongInt;
     replicateToLeft, replicateToRight, isNotHiddenByCinematic: boolean;
 {$IFDEF USE_VIDEO_RECORDING}
     a: Byte;
@@ -1636,11 +1778,14 @@ else if CinematicSteps > 0 then
 if (UIDisplay <> uiNone) and (isNotHiddenByCinematic) then
     begin
 {$IFDEF USE_TOUCH_INTERFACE}
-    offsetX:= cScreenHeight - 13 - SafeInset(cSafeInsetT);
+    offsetX:= cScreenHeight - 13 - VInset(true);
 {$ELSE}
     offsetX:= 48;
 {$ENDIF}
-    offsetY:= cOffsetY + SafeInset(cSafeInsetL);
+    offsetY:= cOffsetY;
+{$IFDEF USE_TOUCH_INTERFACE}
+    offsetY:= offsetY + HInset(true, true, 13 + VInset(true), 51 + VInset(true));
+{$ENDIF}
     if ((TurnTimeLeft <> 0) and (TurnTimeLeft < 999000)) or (ReadyTimeLeft <> 0) then
         begin
         if ReadyTimeLeft <> 0 then
@@ -1692,28 +1837,33 @@ if ((UIDisplay = uiAll) or (UIDisplay = uiNoTeams)) and (isNotHiddenByCinematic)
 
     inc(t, CurrentHedgehog^.HealthTagTex^.h);
     cDemoClockFPSOffsetY:= t;
+{$IFDEF USE_TOUCH_INTERFACE}
+    hr:= HInset(false, true, i, i + CurrentHedgehog^.HealthTagTex^.h);
+{$ELSE}
+    hr:= SafeInset(cSafeInsetR);
+{$ENDIF}
 
     // Hide health and healh icons in gfInvulnerable mode (except heResurrectable)
     if ((GameFlags and gfInvulnerable) = 0) then
     begin
     // Health tag
-    DrawTexture(cScreenWidth div 2 - SafeInset(cSafeInsetR) - CurrentHedgehog^.HealthTagTex^.w - 16, i, CurrentHedgehog^.HealthTagTex);
+    DrawTexture(cScreenWidth div 2 - hr - CurrentHedgehog^.HealthTagTex^.w - 16, i, CurrentHedgehog^.HealthTagTex);
 
     t:= SpritesData[sprHealthHud].Width + 18;
     // Main health icon. Appearance depends on game mode and poisoning state
     if ((GameFlags and gfResetHealth) = 0) then
         if (CurrentHedgehog^.Effects[hePoisoned] <> 0) then
-            DrawSprite(sprHealthPoisonHud, (cScreenWidth div 2 - SafeInset(cSafeInsetR) - CurrentHedgehog^.HealthTagTex^.w - t), i, 0)
+            DrawSprite(sprHealthPoisonHud, (cScreenWidth div 2 - hr - CurrentHedgehog^.HealthTagTex^.w - t), i, 0)
         else
-            DrawSprite(sprHealthHud, (cScreenWidth div 2 - SafeInset(cSafeInsetR) - CurrentHedgehog^.HealthTagTex^.w - t), i, 0)
+            DrawSprite(sprHealthHud, (cScreenWidth div 2 - hr - CurrentHedgehog^.HealthTagTex^.w - t), i, 0)
     else
         if (CurrentHedgehog^.Effects[hePoisoned] <> 0) then
-            DrawSprite(sprMedicPoisonHud, (cScreenWidth div 2 - SafeInset(cSafeInsetR) - CurrentHedgehog^.HealthTagTex^.w - t), i, 0)
+            DrawSprite(sprMedicPoisonHud, (cScreenWidth div 2 - hr - CurrentHedgehog^.HealthTagTex^.w - t), i, 0)
         else
-            DrawSprite(sprMedicHud, (cScreenWidth div 2 - SafeInset(cSafeInsetR) - CurrentHedgehog^.HealthTagTex^.w - t), i, 0);
+            DrawSprite(sprMedicHud, (cScreenWidth div 2 - hr - CurrentHedgehog^.HealthTagTex^.w - t), i, 0);
     // Put halo above health icon for resurrectable hog
     if (CurrentHedgehog^.Effects[heResurrectable] <> 0) then
-        DrawSprite(sprHaloHud, (cScreenWidth div 2 - SafeInset(cSafeInsetR) - CurrentHedgehog^.HealthTagTex^.w - t - 2), i - SpritesData[sprHaloHud].Height + 1, 0);
+        DrawSprite(sprHaloHud, (cScreenWidth div 2 - hr - CurrentHedgehog^.HealthTagTex^.w - t - 2), i - SpritesData[sprHaloHud].Height + 1, 0);
 
     // Additional health-related states
     inc(t, 2);
@@ -1721,19 +1871,19 @@ if ((UIDisplay = uiAll) or (UIDisplay = uiNoTeams)) and (isNotHiddenByCinematic)
     if (CurrentHedgehog^.Effects[heInvulnerable] <> 0) then
         begin
         inc(t, SpritesData[sprInvulnHud].Width + 2);
-        DrawSprite(sprInvulnHud, (cScreenWidth div 2 - SafeInset(cSafeInsetR) - CurrentHedgehog^.HealthTagTex^.w - t), i, 0)
+        DrawSprite(sprInvulnHud, (cScreenWidth div 2 - hr - CurrentHedgehog^.HealthTagTex^.w - t), i, 0)
         end
     // Karma
     else if ((GameFlags and gfKarma) <> 0) then
         begin
         inc(t, SpritesData[sprKarmaHud].Width + 2);
-        DrawSprite(sprKarmaHud, (cScreenWidth div 2 - SafeInset(cSafeInsetR) - CurrentHedgehog^.HealthTagTex^.w - t), i, 0)
+        DrawSprite(sprKarmaHud, (cScreenWidth div 2 - hr - CurrentHedgehog^.HealthTagTex^.w - t), i, 0)
         end;
     // Vampirism
     if cVampiric then
         begin
         inc(t, SpritesData[sprVampHud].Width + 2);
-        DrawSprite(sprVampHud, (cScreenWidth div 2 - SafeInset(cSafeInsetR) - CurrentHedgehog^.HealthTagTex^.w - t), i, 0);
+        DrawSprite(sprVampHud, (cScreenWidth div 2 - hr - CurrentHedgehog^.HealthTagTex^.w - t), i, 0);
         end;
     end
     // in gfInvulnerable mode ...
@@ -1741,15 +1891,15 @@ if ((UIDisplay = uiAll) or (UIDisplay = uiNoTeams)) and (isNotHiddenByCinematic)
         begin
         // Invulnerable
         inc(t, 8);
-        DrawSprite(sprInvulnHud, cScreenWidth div 2 - SafeInset(cSafeInsetR) - t, i, 0);
+        DrawSprite(sprInvulnHud, cScreenWidth div 2 - hr - t, i, 0);
         if (CurrentHedgehog^.Effects[heResurrectable] <> 0) then
             // show halo for resurrectable hog
-            DrawSprite(sprHaloHud, cScreenWidth div 2 - SafeInset(cSafeInsetR) - t - 2, i - SpritesData[sprHaloHud].Height + 1, 0);
+            DrawSprite(sprHaloHud, cScreenWidth div 2 - hr - t - 2, i - SpritesData[sprHaloHud].Height + 1, 0);
         // Vampirism
         if cVampiric then
             begin
             inc(t, SpritesData[sprVampHud].Width + 2);
-            DrawSprite(sprVampHud, (cScreenWidth div 2 - SafeInset(cSafeInsetR) - t), i, 0);
+            DrawSprite(sprVampHud, (cScreenWidth div 2 - hr - t), i, 0);
             end;
         end;
     end
@@ -1760,7 +1910,7 @@ else
 if (UIDisplay <> uiNone) and (isNotHiddenByCinematic) then
     begin
 {$IFDEF USE_TOUCH_INTERFACE}
-    offsetX:= cScreenHeight - 13 - SafeInset(cSafeInsetT);
+    offsetX:= cScreenHeight - 13 - VInset(true);
     offsetY:= (cScreenWidth shr 1) + 74;
 {$ELSE}
     offsetX:= 30;
@@ -1795,7 +1945,7 @@ if (UIDisplay <> uiNone) and (isNotHiddenByCinematic) then
     begin
 {$IFDEF USE_TOUCH_INTERFACE}
     offsetX:= (cScreenWidth shr 1) - 95;
-    offsetY:= cScreenHeight - 21 - SafeInset(cSafeInsetT);
+    offsetY:= cScreenHeight - 21 - VInset(true);
 {$ELSE}
     offsetX:= 45;
     offsetY:= 51;
@@ -1862,7 +2012,7 @@ if UIDisplay <> uiNone then
 
 // Lag alert
 if isInLag then
-    DrawSprite(sprLag, 32 + SafeInset(cSafeInsetL) - (cScreenWidth shr 1), 32 + SafeInset(cSafeInsetT), (RealTicks shr 7) mod 12);
+    DrawSprite(sprLag, 32 + HInset(true, true, 32 + VInset(true), 64 + VInset(true)) - (cScreenWidth shr 1), 32 + VInset(true), (RealTicks shr 7) mod 12);
 
 // Chat
 DrawChat;
@@ -1920,7 +2070,10 @@ offsetY:= cDemoClockFPSOffsetY + 10 + pauseButton.frame.y + pauseButton.frame.h;
 {$ELSE}
 offsetY:= cDemoClockFPSOffsetY + 10;
 {$ENDIF}
-offsetX:= cOffsetY + SafeInset(cSafeInsetR);
+offsetX:= cOffsetY;
+{$IFDEF USE_TOUCH_INTERFACE}
+offsetX:= offsetX + HInset(false, true, offsetY, offsetY + 30);
+{$ENDIF}
 if (RM = rmDefault) or (RM = rmRightEye) then
     begin
     inc(Frames);
@@ -2397,7 +2550,12 @@ procedure SetUtilityWidgetState(ammoType: TAmmoType);
 begin
 {$IFDEF USE_TOUCH_INTERFACE}
 if(ammoType = amNothing)then
+    begin
     ammoType:= CurrentHedgehog^.CurAmmoType;
+    // the switcher that scheme flag gfSwitchHog starts at the turn start is a gear, the selected weapon is something else
+    if (CurAmmoGear <> nil) and (CurAmmoGear^.Kind = gtSwitcher) then
+        ammoType:= amSwitch;
+    end;
 
 if(CurrentHedgehog <> nil)then
     if ((Ammoz[ammoType].Ammo.Propz and ammoprop_Timerable) <> 0) and (ammoType <> amDrillStrike) then

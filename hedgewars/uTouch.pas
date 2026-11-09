@@ -80,6 +80,8 @@ var
     //Pinch to zoom
     pinchSize : LongInt;
     baseZoomValue: GLFloat;
+    switcherShown: boolean;
+    lastTouchHog: PHedgehog;
 
     //aiming
     aimingCrosshair: boolean;
@@ -151,6 +153,7 @@ if isOnWidget(arrowDown, finger^) then
 
 if isOnWidget(pauseButton, finger^) then
     begin
+    WriteLnToConsole('[Touch] pressed pause');
     ParseCommand('pause', true);
     moveCursor:= false;
     finger^.pressedWidget:= @pauseButton;
@@ -331,6 +334,15 @@ if (buttonsDown > 0) and (widget <> nil) then
     begin
     dec(buttonsDown);
 
+    // test aid: one line per released control, so the host tap test can see which one reacted
+    if widget = @arrowLeft then WriteLnToConsole('[Touch] released arrowLeft')
+    else if widget = @arrowRight then WriteLnToConsole('[Touch] released arrowRight')
+    else if widget = @arrowUp then WriteLnToConsole('[Touch] released arrowUp')
+    else if widget = @arrowDown then WriteLnToConsole('[Touch] released arrowDown')
+    else if widget = @fireButton then WriteLnToConsole('[Touch] released fire')
+    else if widget = @utilityWidget then WriteLnToConsole('[Touch] released utility')
+    else if widget = @utilityWidget2 then WriteLnToConsole('[Touch] released utility2');
+
     if widget = @arrowLeft then
         ParseTeamCommand('-left');
 
@@ -351,7 +363,12 @@ if (buttonsDown > 0) and (widget <> nil) then
 
     if widget = @utilityWidget then
         if (CurrentHedgehog <> nil)then
-            if(Ammoz[CurrentHedgehog^.CurAmmoType].Ammo.Propz and ammoprop_NeedTarget <> 0)then
+            if (CurAmmoGear <> nil) and (CurAmmoGear^.Kind = gtSwitcher) then
+                begin
+                WriteLnToConsole('[Touch] switch, hedgehog ' + CurrentHedgehog^.Name);
+                ParseTeamCommand('switch');
+                end
+            else if(Ammoz[CurrentHedgehog^.CurAmmoType].Ammo.Propz and ammoprop_NeedTarget <> 0)then
                 begin
                 ParseTeamCommand('put');
                 targetted:= true;
@@ -399,12 +416,14 @@ if bShowAmmoMenu then
 
 if isOnCurrentHog(finger) or isOnWidget(AMWidget, finger) then
     begin
+    if isOnWidget(AMWidget, finger) then WriteLnToConsole('[Touch] tapped weapon chest');
     bShowAmmoMenu := true;
     exit;
     end;
 
 if isOnWidget(jumpWidget, finger) then
     begin
+    WriteLnToConsole('[Touch] tapped jump');
     ParseTeamCommand('hjump');
     exit;
     end;
@@ -496,7 +515,31 @@ procedure NewTurnBeginning;
 begin
 targetted:= false;
 targetting:= false;
+cTurnCamPending:= true;
 SetUtilityWidgetState(amNothing);
+end;
+
+// The turn-start switcher (scheme flag "switch hedgehog at turn start") is a gear, not a selected weapon, so the
+// switch button has to follow the gear: shown while the switcher is there, hidden when it ends (any other action).
+procedure UpdateSwitchButton;
+var active: boolean;
+begin
+active:= (CurrentHedgehog <> nil) and (CurAmmoGear <> nil) and (CurAmmoGear^.Kind = gtSwitcher);
+if active <> switcherShown then
+    begin
+    switcherShown:= active;
+    SetUtilityWidgetState(amNothing);
+    if active then
+        WriteLnToConsole('[Touch] switch button shown, hedgehog ' + CurrentHedgehog^.Name)
+    else
+        WriteLnToConsole('[Touch] switch button hidden');
+    end;
+if (CurrentHedgehog <> lastTouchHog) then
+    begin
+    lastTouchHog:= CurrentHedgehog;
+    if CurrentHedgehog <> nil then
+        WriteLnToConsole('[Touch] active hedgehog ' + CurrentHedgehog^.Name);
+    end;
 end;
 
 
@@ -504,6 +547,7 @@ procedure ProcessTouch;
 var
     deltaAngle: LongInt;
 begin
+UpdateSwitchButton;
 invertCursor := not(bShowAmmoMenu or targetting);
 if aimingCrosshair then
     if CurrentHedgehog^.Gear <> nil then
@@ -729,6 +773,8 @@ procedure initModule;
 var
     index: Longword;
 begin
+    switcherShown:= false;
+    lastTouchHog:= nil;
     buttonsDown:= 0;
     pointerCount:= 0;
     bounceButtonPressed:= false;

@@ -144,14 +144,28 @@ public class GameActivity extends SDLActivity {
         SDLActivity.onNativeKeyUp(keyCode);
     }
 
-    /** Escape opens the engine's quit question, Y confirms it; if the engine was already asking, a second round settles it. */
+    /** The launcher (hp_ipc.c): tells the relay the player is leaving and makes the engine quit whatever its UI state. */
+    private static native int nativeUserQuit();
+
+    /**
+     * The player confirmed. First the launcher is told (it sends the relay an explicit "user quit" and the engine its
+     * own forcequit command), which works even with the chat open. As a fallback, the keys a player would press follow
+     * if the engine is still up: Escape then Y, repeated so that an open chat is closed first.
+     */
     private void quitEngine() {
         if (quitting) return;
         quitting = true;
-        tap(KeyEvent.KEYCODE_ESCAPE);
-        uiHandler.postDelayed(() -> tap(KeyEvent.KEYCODE_Y), 300);
-        uiHandler.postDelayed(() -> { if (!isFinishing()) tap(KeyEvent.KEYCODE_ESCAPE); }, 2000);
-        uiHandler.postDelayed(() -> { if (!isFinishing()) tap(KeyEvent.KEYCODE_Y); }, 2300);
+        try {
+            nativeUserQuit();
+        } catch (Throwable e) {
+            android.util.Log.w(Diag.TAG, "nativeUserQuit failed: " + e);
+        }
+        // Pairs of Escape then Y: the first pair may only close an open chat, the next opens the question and confirms it.
+        for (int i = 0; i < 3; i++) {
+            final long at = 2000 + i * 900L;
+            uiHandler.postDelayed(() -> { if (!isFinishing()) tap(KeyEvent.KEYCODE_ESCAPE); }, at);
+            uiHandler.postDelayed(() -> { if (!isFinishing()) tap(KeyEvent.KEYCODE_Y); }, at + 300);
+        }
         // The engine did not answer: leave anyway (the host then sees this phone dropped).
         uiHandler.postDelayed(() -> { if (!isFinishing()) finish(); }, 10000);
     }

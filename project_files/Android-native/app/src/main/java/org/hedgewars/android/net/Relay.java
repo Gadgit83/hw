@@ -37,7 +37,7 @@ import java.util.function.Supplier;
  * <li>{@code {"t":"hello","role":"engine","token":...}}: an engine link. The relay answers {@code {"t":"ok"}}
  *     and from then on both sides speak the engine's IPC framing (one length byte, then that many bytes).
  *     A frame whose first byte is 0 is a control frame ({@code \0E<text>} engine error from the phone,
- *     {@code \0X<text>} the relay ends the game).</li>
+ *     {@code \0X<text>} the relay ends the game, {@code \0Q} the player confirmed leaving: same as the engine's Q).</li>
  * </ul>
  * Threads: an accept thread; one reader thread per connection; one writer thread per recipient (bounded
  * queue, so a slow recipient never blocks anyone: see {@link Outbox}); a watchdog thread (lobby pings, link
@@ -57,6 +57,8 @@ public final class Relay {
     private static final int S_SETUP = 0, S_STARTING = 1, S_PLAYING = 2;
     /** Phones in one lobby, connections in their handshake or lobby, and TV viewers, at most. */
     /** The end reason when the host's player leaves the game screen with Quit: the game ends for everyone. */
+    /** The most TV viewer report lines and viewer events kept per game; older ones are only counted. */
+    private static final int MAX_VIEWER_LINES = 50;
     public static final String HOST_ENDED = "The host ended the game";
     public static final int MAX_PLAYERS = 8, MAX_CONNECTIONS = 32, MAX_VIEWERS = 16;
     /** A line of the setup is one engine message: a length byte, so at most 255 bytes; the viewer's first message counts them in one byte. */
@@ -358,6 +360,7 @@ public final class Relay {
         final List<TeamRef> teams = new ArrayList<>();
         List<String> canonical;
         List<String> viewerLines;
+        int viewerReportDropped, viewerEventsDropped, viewerEventsKept;
         final ByteArrayOutputStream log = new ByteArrayOutputStream();
         final Fnv logHash = new Fnv();
         long logMsgs;
@@ -878,6 +881,11 @@ public final class Relay {
                     g.events.add(p.name + " reported an engine error: " + p.fatal);
                     log(p.name + " engine error: " + p.fatal);
                     if (p.fatal.toLowerCase().contains("desync")) noteDesync(p);
+                } else if (msg.length > 1 && msg[1] == 'Q') {
+                    // The player confirmed "leave the game" in the app: the same as the engine's own Q, but sent by the
+                    // launcher, so it does not depend on the engine's UI state (an open chat swallows Escape and Y).
+                    p.quit = true;
+                    log(p.name + " confirmed leaving the game (control frame)");
                 }
                 return;
             }
@@ -1076,7 +1084,9 @@ public final class Relay {
             s.digests.add("turn " + d.seq + ": " + d.checksum + " tick " + d.tick + " from " + (pl == null ? "?" : pl.name));
         }
         closeViewers(reason.equals(HOST_ENDED) ? "the host ended the game" : "the game ended");
+        if (g.viewerReportDropped > 0) s.viewers.add("(" + g.viewerReportDropped + " earlier TV viewer lines not listed; the last " + MAX_VIEWER_LINES + " follow)");
         s.viewers.addAll(g.viewerReport);
+        if (g.viewerEventsDropped > 0) s.events.add("(" + g.viewerEventsDropped + " earlier TV viewer events not listed; the last " + MAX_VIEWER_LINES + " are kept)");
         s.events.addAll(g.events);
         s.endReason = reason;
         for (Player q : players.values()) {
@@ -1378,7 +1388,7 @@ public final class Relay {
                 me.out.offer(Ws.frame(2, first));
                 viewers.add(me);
                 viewersEver++;
-                game.events.add("TV viewer joined from " + me.from + " (first message " + first.length + " bytes)");
+                addViewerEvent(game, "TV viewer joined from " + me.from + " (first message " + first.length + " bytes)");
                 log("viewer joined from " + me.from + ", first message " + first.length + " bytes, log " + game.logMsgs + " messages");
             }
             v = me;
@@ -1419,6 +1429,18 @@ public final class Relay {
         try { v.sock.close(); } catch (IOException ignored) { }
     }
 
+    /** Lock held. A TV that keeps reconnecting must not grow the report without bound: keep the last MAX_VIEWER_LINES viewer events and count the rest. */
+    private void addViewerEvent(Game g, String ev) {
+        g.events.add(ev);
+        if (++g.viewerEventsKept > MAX_VIEWER_LINES) {
+            for (int i = 0; i < g.events.size(); i++) {
+                if (g.events.get(i).startsWith("TV viewer ")) { g.events.remove(i); break; }
+            }
+            g.viewerEventsKept--;
+            g.viewerEventsDropped++;
+        }
+    }
+
     /** Lock held. Takes the viewer out of the list and records its statistics and why it ended; false if it was already gone. */
     private boolean retire(Viewer v, String why) {
         if (!viewers.remove(v)) return false;
@@ -1426,7 +1448,8 @@ public final class Relay {
         Game g = game;
         if (g != null) {
             g.viewerReport.add(line);
-            g.events.add("TV viewer " + v.from + " left (" + why + ")");
+            if (g.viewerReport.size() > MAX_VIEWER_LINES) { g.viewerReport.remove(0); g.viewerReportDropped++; }
+            addViewerEvent(g, "TV viewer " + v.from + " left (" + why + ")");
         }
         log("viewer " + v.from + " left: " + why);
         return true;

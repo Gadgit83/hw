@@ -43,6 +43,9 @@ public class HostService extends Service {
      */
     static volatile String hostSecret = "";
 
+    /** Counts Stop requests, so a start that is still opening its ports can tell that a Stop arrived meanwhile. */
+    private static int stopCount;
+
     /** Called by the screen, before it starts the service: clears the old error synchronously and numbers the attempt. */
     static synchronized int begin() {
         error = "";
@@ -77,6 +80,8 @@ public class HostService extends Service {
 
     private void startRelay(int gen) {
         final Context app = getApplicationContext();
+        final int stopsAtStart;
+        synchronized (HostService.class) { stopsAtStart = stopCount; }
         try {
             Relay.Config cfg = new Relay.Config();
             cfg.port = Relay.PHONE_PORT;
@@ -106,8 +111,23 @@ public class HostService extends Service {
             }
             Relay r = new Relay(cfg);
             startWithRetry(r);
-            hostSecret = cfg.hostSecret;
-            relay = r;
+            boolean stale;
+            synchronized (HostService.class) {
+                stale = stopCount != stopsAtStart;
+                if (!stale) {
+                    hostSecret = cfg.hostSecret;
+                    relay = r;
+                }
+            }
+            if (stale) {
+                // Stop arrived while the ports were being opened (relay was still null, so it stopped nothing): do not keep hosting.
+                android.util.Log.i(Diag.TAG, "host start cancelled by a stop that arrived meanwhile");
+                Thread t = new Thread(r::stop, "host-stop");
+                t.setDaemon(true);
+                t.start();
+                stopSelf();
+                return;
+            }
             NetSession.acquireLocks(app);
             List<String> addr = NetSession.localAddresses();
             String where = addr.isEmpty() ? "no Wi-Fi address found" : addr.get(0) + ":" + Relay.PHONE_PORT;
@@ -164,9 +184,13 @@ public class HostService extends Service {
     }
 
     private void stopHosting() {
-        Relay r = relay;
-        relay = null;
-        hostSecret = "";
+        Relay r;
+        synchronized (HostService.class) {
+            stopCount++;
+            r = relay;
+            relay = null;
+            hostSecret = "";
+        }
         NetSession.leave();
         NetSession.hosting = false;
         // Relay.stop() closes sockets (and can block): never on the main thread.

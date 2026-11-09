@@ -112,6 +112,14 @@ static void redirect_stdio(void)
     if (pthread_create(&t, NULL, log_pump, (void *)(intptr_t)fds[0]) == 0) pthread_detach(t);
 }
 
+/* GameActivity.nativeUserQuit(): the player confirmed leaving a network game (see hp_ipc_user_quit). */
+JNIEXPORT jint JNICALL Java_org_hedgewars_android_GameActivity_nativeUserQuit(JNIEnv *env, jclass cls)
+{
+    (void)env;
+    (void)cls;
+    return hp_ipc_user_quit();
+}
+
 /* Asks GameActivity.engineDisplayInfo() (see there) for the HUD scale, the weapon menu scale and the
  * safe area insets. On any failure the defaults stay (scale 100 %, no insets, which is the desktop layout). */
 static void query_display(int out[15])

@@ -4,6 +4,17 @@ All notable changes to the native Android app (`project_files/Android-native`), 
 
 Only some builds were put on a phone, so a version below is a build that was made, not necessarily one that was released. Releases are tags on `android-master` with the APK attached; there is none yet.
 
+## 0.3.0-tv4 (105): leaving with the chat open (test build)
+
+Review fixes on 0.3.0-tv3. `HP_PROFILE=test`, versionName `0.3.0-tv4-test`.
+
+### Fixed
+
+- Leaving a network game with Back and confirming while the chat was open (half a message typed) did not quit the engine: Escape only closed the chat and Y was ignored, so the game process was ended after 10 seconds and the others saw "engine link closed". The launcher now sends the relay an explicit user-quit control frame (`\0Q`, treated like the engine's own `Q`) and makes the engine quit with its `forcequit` command, whatever its UI state; the Escape and Y keys remain as a fallback. New host-test scenarios `hostquitchat` and `joinerquitchat`.
+- Network games: a tap in the old pause corner no longer falls through to a map press or click (engine commit "Touch UI: swallow taps in the old pause corner in network games").
+- A Stop that arrived while the host service was still opening its ports no longer leaves the relay hosting.
+- The relay report keeps the last 50 TV viewer lines and events and counts the older ones.
+
 ## 0.3.0-tv3 (104): leaving a network game, TV round trip (test build)
 
 Fixes from the phone-hosts, TV-watches device test of 0.3.0-tv2 (13 turns, passed), plus the reviewer's leftovers. `HP_PROFILE=test`, versionName `0.3.0-tv3-test`. 0.3.0-tv2 (103) moved the relay's and the lobby client's socket work off the UI thread (StrictMode in test builds).

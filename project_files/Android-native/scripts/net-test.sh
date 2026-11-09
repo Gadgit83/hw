@@ -19,6 +19,8 @@
 #   hostquit    two phones; the host's engine gets Escape then Y (what the app's Back confirmation sends) after a few turns:
 #               clean engine exit, the relay ends the game for everyone with "The host ended the game"
 #   joinerquit  the same on phone B: clean exit, the relay says B quit, B is told "You left the game."
+#   hostquitchat, joinerquitchat   the same with the chat open and half a message typed: the app's launcher sends the relay an
+#               explicit user quit (control frame Q) and the engine a forcequit, so the wording is still right
 #   malformed   no engines: hostile and malformed input to the relay (JSON bombs, huge lines, bad UTF-8, bad WebSocket
 #               frames, hostile team fields, silence-rule arming, host role, caps); the relay must stay up
 #   all         every scenario above in turn, with a summary at the end
@@ -39,7 +41,7 @@
 SCEN="${1:-basic}"
 if [ "$SCEN" = all ]; then
   rc=0; summary=""
-  for s in malformed basic basic3 dropout dropout3 stall slowstart negcontrol solo viewer1 viewer2 viewer3 viewerflap hostquit joinerquit; do
+  for s in malformed basic basic3 dropout dropout3 stall slowstart negcontrol solo viewer1 viewer2 viewer3 viewerflap hostquit joinerquit hostquitchat joinerquitchat; do
     "$0" "$s" > "$BUILD_DIR/host-test-net-$s.log" 2>&1; r=$?
     res="$(grep '^RESULT:' "$BUILD_DIR/host-test-net-$s.log" | tail -1)"
     summary+="$(printf '%-11s exit %d  %s' "$s" "$r" "${res:-(no result line)}")"$'\n'

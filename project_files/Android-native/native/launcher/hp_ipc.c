@@ -591,6 +591,24 @@ static void *server_thread(void *arg)
     return NULL;
 }
 
+/* The player confirmed "leave the game" in the app (GameActivity, through JNI). Independent of the engine's UI state, which an
+ * open chat would otherwise block: tell the relay first (control frame Q, treated like the engine's own Q message), then ask the
+ * engine to quit with its "forcequit" command over the local IPC socket. Only the app's own process can call this; nothing
+ * that arrives from the relay is ever turned into such a command. Returns 0 when the engine was asked. */
+int hp_ipc_user_quit(void)
+{
+    static const char cmd[] = "eforcequit";
+    int rc = -1;
+    if (g_net) net_send_control('Q', "user quit");
+    pthread_mutex_lock(&g_wr_lock);
+    if (g_engine_fd >= 0) {
+        unsigned char len = (unsigned char)(sizeof cmd - 1);
+        rc = (write_full(g_engine_fd, &len, 1) == 0 && write_full(g_engine_fd, cmd, sizeof cmd - 1) == 0) ? 0 : -1;
+    }
+    pthread_mutex_unlock(&g_wr_lock);
+    return rc;
+}
+
 #ifdef HP_HOST_TEST
 /* Test hook (host test script action "ipc:<text>"): sends one message to the engine as the frontend would, e.g. "Fteamname"
  * (a team left, the engine runs "teamgone u..."). Returns 0 when sent. */

@@ -36,6 +36,8 @@ import java.util.concurrent.TimeUnit;
  *   hostquit   two phones; at turn NET_TURNS_BEFORE_KILL the host phone's engine gets Escape then Y, exactly what the app's
  *              Back confirmation sends: the host's engine must exit cleanly (0) and the relay must end the game for everyone
  *              with "The host ended the game" (the other phone is told by the launcher)
+ *   hostquitchat / joinerquitchat  the same with the chat open and half a message typed, quitting through the launcher's explicit
+ *              user quit (control frame Q to the relay plus the engine's forcequit), as the app now does
  *   joinerquit the same on phone B: B's engine exits 0, the relay says B quit (not dropped by force), A is unaffected
  *   negcontrol two phones, the relay deliberately alters one byte of the first turn checksum N sent to phone B: the
  *              desync detection MUST fire (this scenario passes only if it does)
@@ -148,7 +150,7 @@ public class NetHarness {
         bTeams.add(team(d, rnd, "Bravo Bot", 2, 3, bTeams));
         if (scenario.equals("solo") || scenario.startsWith("viewer1") || scenario.equals("viewer3") || scenario.equals("viewerflap")) { aTeams.add(team(d, rnd, "Alpha Three", 3, 4, aTeams)); bTeams.clear(); }
         java.util.Set<String> known = new java.util.HashSet<>(java.util.Arrays.asList("basic", "basic3", "dropout", "dropout3", "stall",
-                "slowstart", "solo", "viewer1", "viewer2", "viewer3", "viewerflap", "hostquit", "joinerquit", "negcontrol"));
+                "slowstart", "solo", "viewer1", "viewer2", "viewer3", "viewerflap", "hostquit", "joinerquit", "hostquitchat", "joinerquitchat", "negcontrol"));
         if (!known.contains(scenario)) {
             System.out.println("[harness] unknown scenario '" + scenario + "'; known: " + new java.util.TreeSet<>(known));
             System.exit(2);
@@ -194,11 +196,14 @@ public class NetHarness {
         String script = System.getenv("NET_SCRIPT");
         if (script == null && System.getenv("NET_INPUT") != null) script = inputScript(400);
         // hostquit / joinerquit: the quitter's engine waits for a file the harness creates, then gets Escape and Y (the app's Back confirmation).
-        boolean quitScenario = scenario.equals("hostquit") || scenario.equals("joinerquit");
+        boolean quitScenario = scenario.startsWith("hostquit") || scenario.startsWith("joinerquit");
+        boolean chatQuit = scenario.endsWith("chat");
         Path quitFlag = root.resolve("quit.now");
-        String quitScript = "0:waitfile:" + quitFlag + ";0:key:esc;600:key:y";
-        Phone pa = new Phone("Phone A", root.resolve("phoneA"), true, aTeams, hosttest, data, scenario.equals("hostquit") ? quitScript : script);
-        Phone pb = new Phone("Phone B", root.resolve("phoneB"), false, bTeams, hosttest, data, scenario.equals("joinerquit") ? quitScript : script);
+        // The chat variants open the chat and leave half a message in it, then confirm the way GameActivity now does (hp_ipc_user_quit).
+        String quitScript = chatQuit ? "0:waitfile:" + quitFlag + ";0:key:enter;400:text:half typed;800:userquit"
+                : "0:waitfile:" + quitFlag + ";0:key:esc;600:key:y";
+        Phone pa = new Phone("Phone A", root.resolve("phoneA"), true, aTeams, hosttest, data, scenario.startsWith("hostquit") ? quitScript : script);
+        Phone pb = new Phone("Phone B", root.resolve("phoneB"), false, bTeams, hosttest, data, scenario.startsWith("joinerquit") ? quitScript : script);
         Phone pc = new Phone("Phone C", root.resolve("phoneC"), false, cTeams, hosttest, data, script);
         pa.client = new RelayClient("127.0.0.1", relay.port(), "Phone A", "harness", true, aTeams, pa).hostSecret(cfg.hostSecret);
         if (scenario.equals("slowstart")) pb.extraEnv.put("HP_NET_TX_DELAY_MS", System.getenv().getOrDefault("NET_DELAY_MS", "30000"));
@@ -258,7 +263,7 @@ public class NetHarness {
                 }
             }
             if (quitScenario && !Files.exists(quitFlag) && relay.turns() >= killAfterTurns) {
-                System.out.println("[harness] === " + scenario + ": " + (scenario.equals("hostquit") ? "the host" : "phone B") + " confirms 'leave the game' (Escape then Y) after " + relay.turns() + " turn checksums ===");
+                System.out.println("[harness] === " + scenario + ": " + (scenario.startsWith("hostquit") ? "the host" : "phone B") + " confirms 'leave the game' (" + (chatQuit ? "chat open with typed text, then the launcher quit" : "Escape then Y") + ") after " + relay.turns() + " turn checksums ===");
                 Files.write(quitFlag, new byte[] { 1 });
             }
             if (!killed && (scenario.startsWith("dropout") || scenario.equals("stall")) && relay.turns() >= killAfterTurns) {
@@ -360,8 +365,8 @@ public class NetHarness {
         System.out.println("viewer backlog framing available after the game: " + (vb == null ? "no (game cleared)" : vb.length + " bytes"));
 
         // Verdict ---------------------------------------------------------------------------------
-        boolean droppedScenario = scenario.startsWith("dropout") || scenario.equals("stall") || scenario.equals("joinerquit");
-        boolean hostQuit = scenario.equals("hostquit");
+        boolean droppedScenario = scenario.startsWith("dropout") || scenario.equals("stall") || scenario.startsWith("joinerquit");
+        boolean hostQuit = scenario.startsWith("hostquit");
         int desyncLines = 0;
         for (int v : desyncs.values()) desyncLines += v;
         boolean relayDesync = false;
@@ -392,6 +397,12 @@ public class NetHarness {
             String nl = Files.exists(q.dir.resolve("netgame.txt")) ? new String(Files.readAllBytes(q.dir.resolve("netgame.txt"))) : "";
             System.out.println("quit check: " + q.name + " engine log: " + grep(ql, "engine returned") + "; launcher: " + grep(nl, "CONTROL") + " / SUMMARY " + (nl.contains("SUMMARY") ? "written" : "missing"));
             if (!ql.contains("engine returned 0")) fails.add(q.name + ": the engine log does not show a clean exit ('engine returned 0')");
+            if (chatQuit) {
+                boolean ctl = false;
+                for (String l : relayLog) if (l.contains(q.name + " confirmed leaving the game")) ctl = true;
+                System.out.println("quit check: relay saw the explicit user-quit control frame: " + ctl + "; chat typed: " + ql.contains("half typed"));
+                if (!ctl) fails.add("the relay did not log the explicit user-quit control frame from " + q.name);
+            }
         }
         if (hostQuit) {
             if (!gs.endReason.equals(Relay.HOST_ENDED)) fails.add("end reason '" + gs.endReason + "', expected '" + Relay.HOST_ENDED + "'");
@@ -404,7 +415,7 @@ public class NetHarness {
             System.out.println("quit check: Phone B launcher: " + grep(bl, "LINK ") + "; engine: " + grep(bres, "engine returned"));
             if (!bl.contains("The host ended the game")) fails.add("Phone B was not told 'The host ended the game'");
             if (pa.lastNotice.contains("dropped")) fails.add("the host phone was told it was dropped: " + pa.lastNotice);
-        } else if (scenario.equals("joinerquit")) {
+        } else if (scenario.startsWith("joinerquit")) {
             System.out.println("quit check: Phone B was told: '" + pb.lastNotice + "'");
             if (!pb.lastNotice.contains("You left the game")) fails.add("Phone B was not told 'You left the game.' (" + pb.lastNotice + ")");
             for (String e : gs.events) if (e.contains("Phone B dropped")) System.out.println("quit check: relay event: " + e);

@@ -43,6 +43,8 @@ static void *restore_thread(void *arg)
  *   ipc:<text>                                         (a message to the engine as the frontend sends it, e.g. ipc:FGood Night: that team left)
  *   waitfile:<path>                                    (blocks the script until the file exists: the shell or the net-test harness decides when)
  *   key:esc  key:y                                     (a key press and release, as GameActivity sends for Back and the confirm in a network game)
+ *   key:enter  text:<chars>                            (opens the chat, types into it)
+ *   userquit                                           (what GameActivity does when the player confirms leaving: hp_ipc_user_quit)
  *   log:<text>                                         (marks the engine log, for the shell driver) */
 static void push_key(SDL_Keycode sym, SDL_Scancode sc)
 {
@@ -107,6 +109,9 @@ static void *script_thread(void *arg)
         else if (!strncmp(act, "waitfile:", 9)) { for (int i = 0; i < 20000 && access(act + 9, F_OK) != 0; i++) usleep(50000); }
         else if (!strcmp(act, "key:esc")) push_key(SDLK_ESCAPE, SDL_SCANCODE_ESCAPE);
         else if (!strcmp(act, "key:y")) push_key(SDLK_y, SDL_SCANCODE_Y);
+        else if (!strcmp(act, "key:enter")) push_key(SDLK_RETURN, SDL_SCANCODE_RETURN);
+        else if (!strncmp(act, "text:", 5)) { SDL_Event e; memset(&e, 0, sizeof e); e.type = SDL_TEXTINPUT; e.text.windowID = 1; snprintf(e.text.text, sizeof e.text.text, "%s", act + 5); SDL_PushEvent(&e); }
+        else if (!strcmp(act, "userquit")) fprintf(stderr, "[hosttest] user quit -> %d\n", hp_ipc_user_quit());
         else if (!strcmp(act, "focuslost")) push_window(SDL_WINDOWEVENT_FOCUS_LOST);
         else if (!strcmp(act, "focusgained")) push_window(SDL_WINDOWEVENT_FOCUS_GAINED);
         else if (!strcmp(act, "minimized")) push_window(SDL_WINDOWEVENT_MINIMIZED);

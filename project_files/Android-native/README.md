@@ -93,7 +93,7 @@ The engine's own touch interface (`uTouch.pas`) is enabled through the `MOBILE` 
 | Switch button (above the arrows, same place as the timer button) | With the scheme rule "Switch hedgehog in a turn" the turn starts with a hedgehog switcher: tap this button to move to the next hedgehog of your team, as Tab does on the desktop. The button goes away when you walk, aim, jump, fire or pick a weapon (the switcher ends then, as on the desktop). Picking Switch in the weapon menu shows it too |
 | One finger drag on empty map | Move the camera (the camera then stops following the hedgehog until the next turn) |
 | Two finger pinch | Zoom |
-| Pause button (top right, yellow II) | Pause. While paused, tap it or anywhere else to resume (the resuming tap is not also a click, and a finger that went down before the pause does not resume on lift); the map can still be dragged |
+| Pause button (top right, yellow II) | Pause. In a network game only the host's phone has this button and it pauses the game for every phone (the others show "Paused by the host"); a joining phone cannot pause or resume. Otherwise: pause. While paused, tap it or anywhere else to resume (the resuming tap is not also a click, and a finger that went down before the pause does not resume on lift); the map can still be dragged |
 | Android Back key | Opens the engine's quit dialog (Escape) |
 
 Losing focus (home button, notification shade, phone call) pauses the game and getting focus back resumes it. A pause you chose with the button stays until you tap. Computer teams need no input: the game plays their turn by itself.

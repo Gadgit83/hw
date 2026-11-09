@@ -949,6 +949,92 @@ public class RelayTests {
         f.stop();
     }
 
+    static void testPause() throws Exception {
+        System.out.println("pause: only the host's link pauses; the silence rule is off while paused; the cap and a vanished host end it");
+        // silence 1.5 s, no grace worth speaking of, pause cap 4 s
+        final Game g = new Game(1500, 500);
+        g.ea.send("Mdigest-one");
+        g.eb.send("Mdigest-one");
+        Thread.sleep(300);
+        // a joiner's request, and malformed ones, change nothing
+        g.eb.send(new byte[] { 0, 'P' });
+        g.eb.send(new byte[] { 0, 'P', 'x' });
+        g.ea.send(new byte[] { 0, 'P', 'x' });
+        Thread.sleep(400);
+        check(g.ea.controls.isEmpty() && g.eb.controls.isEmpty(), "a joiner's pause request and malformed pause frames are ignored: no control frame went out");
+        check(g.f.logged("PhoneB asked to pause: ignored"), "  the joiner's request is logged");
+        // the engine whitelist: a pause letter or an 'e' command in an ordinary message never gets forwarded
+        final int before = g.ea.received.size();          // B's map digest has been forwarded already
+        g.eb.send("epause");
+        g.eb.send("enetpause 1");
+        g.eb.send("I");
+        g.eb.send("y1");
+        Thread.sleep(300);
+        check(g.ea.received.size() == before, "  'epause', 'enetpause 1', 'I' and 'y1' from a joiner are not forwarded to the host's engine");
+        // the host's request reaches both engines, the host's too
+        g.ea.send(new byte[] { 0, 'P' });
+        check(waitFor(() -> g.ea.controls.contains("P") && g.eb.controls.contains("P"), 2000), "the host's pause is sent to both engine links, the host's own included");
+        // paused for much longer than the silence limit: nobody is dropped
+        Thread.sleep(3000);
+        check(!dropped(g.f, "PhoneA") && !dropped(g.f, "PhoneB"), "3 s paused (silence limit 1.5 s): nobody dropped");
+        // a second pause request while paused changes nothing; a joiner cannot resume
+        g.ea.send(new byte[] { 0, 'P' });
+        g.eb.send(new byte[] { 0, 'R' });
+        Thread.sleep(300);
+        check(g.ea.controls.size() == 1 && g.eb.controls.size() == 1, "a repeated pause and a joiner's resume change nothing");
+        g.ea.send(new byte[] { 0, 'R' });
+        check(waitFor(() -> g.ea.controls.contains("R") && g.eb.controls.contains("R"), 2000), "the host's resume is sent to both");
+        // the silence clock restarts at the resume: not dropped at once, dropped after the limit when somebody really stalls
+        Thread.sleep(600);
+        check(!dropped(g.f, "PhoneA") && !dropped(g.f, "PhoneB"), "0.6 s after the resume: nobody dropped (the clock restarted)");
+        check(waitFor(() -> dropped(g.f, "PhoneA") || dropped(g.f, "PhoneB"), 6000), "after the resume the silence rule is back: a silent phone is dropped");
+        g.end();
+
+        // the relay's cap, and a host that vanishes while paused
+        Fix.pingMs = 300;
+        final Game h = new Game(60000, 60000);
+        h.ea.send("Mdigest-one");
+        h.eb.send("Mdigest-one");
+        Thread.sleep(300);
+        h.ea.send(new byte[] { 0, 'P' });
+        check(waitFor(() -> h.eb.controls.contains("P"), 2000), "pause 2: sent");
+        h.ea.close();                       // the host's engine link vanishes while paused
+        check(waitFor(() -> h.eb.controls.contains("R"), 4000), "a pause whose host is gone is ended by the relay (resume sent to the other phone)");
+        h.end();
+    }
+
+    /** The plain GET on the viewer port: the old fields stay, and host, players, compatible, reason and engine are added; polling counts as waiting. */
+    static void testStatusGet() throws Exception {
+        System.out.println("status GET: the JSON shape the TV viewer reads");
+        Game g = new Game(20000, 1000);
+        // the game is already running here (state playing); players are the two phones
+        for (String path : new String[] { "/", "/?proto=1", "/?proto=7" }) {
+            try (Socket c = new Socket("127.0.0.1", g.f.relay.viewerPort())) {
+                c.setSoTimeout(3000);
+                c.getOutputStream().write(("GET " + path + " HTTP/1.1\r\nHost: x\r\n\r\n").getBytes(StandardCharsets.UTF_8));
+                c.getOutputStream().flush();
+                ByteArrayOutputStream all = new ByteArrayOutputStream();
+                byte[] buf = new byte[4096];
+                int n;
+                while ((n = c.getInputStream().read(buf)) > 0) all.write(buf, 0, n);
+                String resp = new String(all.toByteArray(), StandardCharsets.UTF_8);
+                String body = resp.substring(resp.indexOf("\r\n\r\n") + 4);
+                check(resp.startsWith("HTTP/1.1 200") && resp.contains("Access-Control-Allow-Origin: *"), "GET " + path + ": 200 with CORS");
+                @SuppressWarnings("unchecked") Map<String, Object> j = (Map<String, Object>) Json.parse(body);
+                check(j.get("state") instanceof String && j.containsKey("game") && j.containsKey("viewers") && j.containsKey("viewersEver"), "  the old fields are there: " + body);
+                check(j.get("host") instanceof String && !((String) j.get("host")).isEmpty(), "  host is a name");
+                check(j.get("players") instanceof List && ((List<?>) j.get("players")).size() == 2, "  players lists the 2 phones");
+                Object p0 = ((List<?>) j.get("players")).get(0);
+                check(p0 instanceof Map && ((Map<?, ?>) p0).get("name") instanceof String && ((Map<?, ?>) p0).get("teams") instanceof Number, "  a player has a name and a team count");
+                check(j.get("compatible") instanceof Boolean && j.get("reason") instanceof String && j.get("engine") instanceof String && !((String) j.get("engine")).isEmpty() , "  compatible, reason and engine have the right types");
+                boolean bad = path.equals("/?proto=7");
+                check(((Boolean) j.get("compatible")) == !bad && (bad == !((String) j.get("reason")).isEmpty()), "  compatible is " + !bad + (bad ? ", with a reason: " + j.get("reason") : ""));
+            }
+        }
+        check(g.f.relay.viewersWaiting() == 1, "three polls from one TV count as 1 waiting (" + g.f.relay.viewersWaiting() + ")");
+        g.end();
+    }
+
     public static void main(String[] a) throws Exception {
         data = new GameData(new File(a[0]));
         data.warm();
@@ -960,6 +1046,8 @@ public class RelayTests {
         testHostRole();
         testEngineAbuse();
         testSilenceRule();
+        testPause();
+        testStatusGet();
         testViewerCount();
         testViewerAbuse();
         testViewerReconnect();

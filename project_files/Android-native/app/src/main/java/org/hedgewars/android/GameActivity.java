@@ -139,6 +139,21 @@ public class GameActivity extends SDLActivity {
         backDialog = BackConfirm.show(this, role == BackConfirm.HOST, this::quitEngine);
     }
 
+    /**
+     * SDLActivity consumes the Back key in its own dispatchKeyEvent and forwards it to the engine as a key, so
+     * {@link #onBackPressed} is never reached (device test of 0.3.0-tv4: no dialog in a network game). In a network game Back is
+     * taken here, before SDL sees it: the dialog opens when the key goes up (a held key does not repeat it). A local game
+     * still forwards Back to the engine as before. The soft keyboard handles its own Back before the activity sees it.
+     */
+    @Override
+    public boolean dispatchKeyEvent(KeyEvent event) {
+        if (event.getKeyCode() == KeyEvent.KEYCODE_BACK && BackConfirm.role(getFilesDir()) != BackConfirm.LOCAL) {
+            if (event.getAction() == KeyEvent.ACTION_UP && !event.isCanceled()) onBackPressed();
+            return true;
+        }
+        return super.dispatchKeyEvent(event);
+    }
+
     private static void tap(int keyCode) {
         SDLActivity.onNativeKeyDown(keyCode);
         SDLActivity.onNativeKeyUp(keyCode);

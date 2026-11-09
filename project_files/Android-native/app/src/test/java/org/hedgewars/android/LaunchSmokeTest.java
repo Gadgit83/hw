@@ -372,6 +372,38 @@ public class LaunchSmokeTest {
         System.out.println("SDK " + android.os.Build.VERSION.SDK_INT + ": Back confirmation dialog states ok");
     }
 
+    /**
+     * Device test of 0.3.0-tv4: Back in a network game showed no dialog, because SDLActivity consumed the key and sent it to the
+     * engine. A real KEYCODE_BACK KeyEvent (down, then up) is dispatched to GameActivity in network mode (role in net.cfg): the
+     * dialog must appear, and the key must not reach SDL (whose native key calls would throw here, there is no native library).
+     */
+    @Test
+    public void gameBackKey_opensDialogInNetworkGame() throws Exception {
+        TestSupport.installData(app());
+        java.io.File dir = app().getFilesDir();
+        for (String role : new String[] { "player", "host" }) {
+            java.nio.file.Files.write(new java.io.File(dir, "net.cfg").toPath(), ("host=1.2.3.4\nport=46633\ntoken=x\nrole=" + role + "\n").getBytes("UTF-8"));
+            org.robolectric.android.controller.ActivityController<GameActivity> c = Robolectric.buildActivity(GameActivity.class);
+            GameActivity a;
+            try {
+                a = c.create().get();
+            } catch (Throwable e) {
+                a = c.get();                              // SDL's onCreate needs its native library; the key handling does not
+            }
+            android.view.KeyEvent down = new android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN, android.view.KeyEvent.KEYCODE_BACK);
+            android.view.KeyEvent up = new android.view.KeyEvent(android.view.KeyEvent.ACTION_UP, android.view.KeyEvent.KEYCODE_BACK);
+            assertTrue("Back down is consumed", a.dispatchKeyEvent(down));
+            assertTrue("Back up is consumed", a.dispatchKeyEvent(up));
+            TestSupport.settle(100);
+            android.app.AlertDialog d = org.robolectric.shadows.ShadowAlertDialog.getLatestAlertDialog();
+            assertTrue("the Back dialog is showing for the " + role, d != null && d.isShowing());
+            assertTrue(String.valueOf(org.robolectric.Shadows.shadowOf(d).getTitle()).equals(role.equals("host") ? "End the game for everyone?" : "Leave the game?"));
+            d.dismiss();
+        }
+        new java.io.File(dir, "net.cfg").delete();
+        System.out.println("SDK " + android.os.Build.VERSION.SDK_INT + ": Back key opens the dialog in a network game ok");
+    }
+
     /** What each phone is told when the game ends or it leaves, and the interface filter. */
     @Test
     public void netSession_wordingAndInterfaces() {

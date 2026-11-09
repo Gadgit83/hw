@@ -21,6 +21,13 @@
 #   joinerquit  the same on phone B: clean exit, the relay says B quit, B is told "You left the game."
 #   hostquitchat, joinerquitchat   the same with the chat open and half a message typed: the app's launcher sends the relay an
 #               explicit user quit (control frame Q) and the engine a forcequit, so the wording is still right
+#   hostpause   two phones and the TV viewer: the host taps the pause button mid-turn, 30 s later (longer than the 20 s silence
+#               limit) resumes, then a second short pause (Phone B's launcher applies pause and resume 700 ms late, and it has
+#               scripted touch input that must be ignored while paused); no desync, nobody dropped, the turn count frozen during
+#               the pause, the game plays on to a normal end, the viewer sees the game over
+#   hostpausequit  the host pauses, then leaves while paused: everyone gets "The host ended the game"
+#   joinerpause two phones: Phone B's launcher sends pause and resume control frames; the relay ignores them (logged), nobody pauses
+#   pausecap    the host pauses and never resumes: the relay resumes everyone after the cap (NET_PAUSE_MAX_MS, 15 s here; 10 min in the app)
 #   malformed   no engines: hostile and malformed input to the relay (JSON bombs, huge lines, bad UTF-8, bad WebSocket
 #               frames, hostile team fields, silence-rule arming, host role, caps); the relay must stay up
 #   all         every scenario above in turn, with a summary at the end
@@ -41,7 +48,7 @@
 SCEN="${1:-basic}"
 if [ "$SCEN" = all ]; then
   rc=0; summary=""
-  for s in malformed basic basic3 dropout dropout3 stall slowstart negcontrol solo viewer1 viewer2 viewer3 viewerflap hostquit joinerquit hostquitchat joinerquitchat; do
+  for s in malformed basic basic3 dropout dropout3 stall slowstart negcontrol solo viewer1 viewer2 viewer3 viewerflap hostquit joinerquit hostquitchat joinerquitchat hostpause hostpausequit joinerpause pausecap; do
     "$0" "$s" > "$BUILD_DIR/host-test-net-$s.log" 2>&1; r=$?
     res="$(grep '^RESULT:' "$BUILD_DIR/host-test-net-$s.log" | tail -1)"
     summary+="$(printf '%-11s exit %d  %s' "$s" "$r" "${res:-(no result line)}")"$'\n'
@@ -71,7 +78,7 @@ fi
 log "launcher (network mode)"
 cmake -S "$HOST_DIR/native/host-test" -B "$B" -G Ninja -DCMAKE_BUILD_TYPE=Release -DHP_ASAN="${ASAN:-OFF}" >/dev/null
 ninja -C "$B" | tail -1
-if [[ "$SCEN" == viewer* ]]; then
+if [[ "$SCEN" == viewer* || "$SCEN" == hostpause ]]; then
   # The existing TV stand-ins from hedgewars-party (tv/e2e-host): the viewer page's test client and the spectator engine launcher.
   PARTY="${PARTY_REPO:-/home/user/hedgewars-party}"; PC="$BUILD_DIR/host-test/pc_host"; mkdir -p "$PC/src"
   { git -C "$PARTY" show origin/main:tv/e2e-host/src/pc_host.c; echo 'void hw_device_rumble(int ms) { (void)ms; }   /* the engine now calls this hook */'; } > "$PC/src/pc_host.c"

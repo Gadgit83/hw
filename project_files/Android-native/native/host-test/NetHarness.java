@@ -150,7 +150,8 @@ public class NetHarness {
         bTeams.add(team(d, rnd, "Bravo Bot", 2, 3, bTeams));
         if (scenario.equals("solo") || scenario.startsWith("viewer1") || scenario.equals("viewer3") || scenario.equals("viewerflap")) { aTeams.add(team(d, rnd, "Alpha Three", 3, 4, aTeams)); bTeams.clear(); }
         java.util.Set<String> known = new java.util.HashSet<>(java.util.Arrays.asList("basic", "basic3", "dropout", "dropout3", "stall",
-                "slowstart", "solo", "viewer1", "viewer2", "viewer3", "viewerflap", "hostquit", "joinerquit", "hostquitchat", "joinerquitchat", "negcontrol"));
+                "slowstart", "solo", "viewer1", "viewer2", "viewer3", "viewerflap", "hostquit", "joinerquit", "hostquitchat", "joinerquitchat", "negcontrol",
+                "hostpause", "hostpausequit", "joinerpause", "pausecap"));
         if (!known.contains(scenario)) {
             System.out.println("[harness] unknown scenario '" + scenario + "'; known: " + new java.util.TreeSet<>(known));
             System.exit(2);
@@ -170,6 +171,7 @@ public class NetHarness {
         cfg.silenceMs = Long.parseLong(System.getenv().getOrDefault("NET_SILENCE_MS", "20000"));
         cfg.graceMs = Long.parseLong(System.getenv().getOrDefault("NET_GRACE_MS", "40000"));
         cfg.hostSecret = "harness-secret";
+        if (scenario.equals("pausecap")) cfg.pauseMaxMs = Long.parseLong(System.getenv().getOrDefault("NET_PAUSE_MAX_MS", "15000"));
         final java.util.concurrent.atomic.AtomicBoolean tampered = new java.util.concurrent.atomic.AtomicBoolean();
         final int[] tamperId = { -1 };
         if (scenario.equals("negcontrol")) {
@@ -196,14 +198,31 @@ public class NetHarness {
         String script = System.getenv("NET_SCRIPT");
         if (script == null && System.getenv("NET_INPUT") != null) script = inputScript(400);
         // hostquit / joinerquit: the quitter's engine waits for a file the harness creates, then gets Escape and Y (the app's Back confirmation).
-        boolean quitScenario = scenario.startsWith("hostquit") || scenario.startsWith("joinerquit");
+        boolean quitScenario = scenario.startsWith("hostquit") || scenario.startsWith("joinerquit") || scenario.equals("hostpausequit");
         boolean chatQuit = scenario.endsWith("chat");
         Path quitFlag = root.resolve("quit.now");
         // The chat variants open the chat and leave half a message in it, then confirm the way GameActivity now does (hp_ipc_user_quit).
         String quitScript = chatQuit ? "0:waitfile:" + quitFlag + ";0:key:enter;400:text:half typed;800:userquit"
                 : "0:waitfile:" + quitFlag + ";0:key:esc;600:key:y";
-        Phone pa = new Phone("Phone A", root.resolve("phoneA"), true, aTeams, hosttest, data, scenario.startsWith("hostquit") ? quitScript : script);
-        Phone pb = new Phone("Phone B", root.resolve("phoneB"), false, bTeams, hosttest, data, scenario.startsWith("joinerquit") ? quitScript : script);
+        // Host pause scenarios. The host's script taps the pause button (top right of the touch HUD) when the harness creates a flag
+        // file, so the whole path is exercised: touch, engine, launcher, relay, every launcher, every engine. Phone B has scripted
+        // touch input of its own, which must be ignored while the game is paused, and a launcher that applies pause and resume 700 ms
+        // late, so the engines pause and resume at different wall-clock moments.
+        boolean pauseScenario = scenario.equals("hostpause") || scenario.equals("hostpausequit") || scenario.equals("pausecap");
+        String tapPause = "0:down:5:" + PAUSE_X + ":" + PAUSE_Y + ";80:up:5:" + PAUSE_X + ":" + PAUSE_Y + ";";
+        String hostScript = script;
+        if (pauseScenario) {
+            hostScript = "0:waitfile:" + root.resolve("pause1.now") + ";" + tapPause;
+            if (scenario.equals("hostpause")) hostScript += "0:waitfile:" + root.resolve("resume1.now") + ";" + tapPause
+                    + "0:waitfile:" + root.resolve("pause2.now") + ";" + tapPause + "0:waitfile:" + root.resolve("resume2.now") + ";" + tapPause;
+            if (scenario.equals("hostpausequit")) hostScript += "0:waitfile:" + quitFlag + ";" + (System.getenv("NET_PAUSEQUIT_KEYS") != null ? "0:key:esc;600:key:y" : "0:userquit");
+        }
+        String joinerScript = script;
+        if (pauseScenario) joinerScript = inputScript(400);
+        if (scenario.equals("joinerpause")) joinerScript = "0:waitfile:" + root.resolve("jp.now") + ";0:ctl:P;1500:ctl:P;1500:ctl:R";
+        Phone pa = new Phone("Phone A", root.resolve("phoneA"), true, aTeams, hosttest, data, scenario.startsWith("hostquit") ? quitScript : hostScript);
+        Phone pb = new Phone("Phone B", root.resolve("phoneB"), false, bTeams, hosttest, data, scenario.startsWith("joinerquit") ? quitScript : joinerScript);
+        if (pauseScenario) pb.extraEnv.put("HP_NET_PAUSE_JITTER_MS", "700");
         Phone pc = new Phone("Phone C", root.resolve("phoneC"), false, cTeams, hosttest, data, script);
         pa.client = new RelayClient("127.0.0.1", relay.port(), "Phone A", "harness", true, aTeams, pa).hostSecret(cfg.hostSecret);
         if (scenario.equals("slowstart")) pb.extraEnv.put("HP_NET_TX_DELAY_MS", System.getenv().getOrDefault("NET_DELAY_MS", "30000"));
@@ -232,10 +251,11 @@ public class NetHarness {
 
         long t0 = System.currentTimeMillis();
         boolean killed = false;
+        final PauseState ps = new PauseState();
         // TV viewer (scenarios viewer*): the existing e2e-host spectator test. viewer-sim.js plays the TV page
         // (WebSocket client, TL->TN and erdriven, pushes into) pc_host spec, a second desktop engine as the TV's engine.
         // viewerflap runs three such sessions one after the other, killing the first two.
-        boolean wantViewer = scenario.startsWith("viewer");
+        boolean wantViewer = scenario.startsWith("viewer") || scenario.equals("hostpause");
         boolean flap = scenario.equals("viewerflap");
         int viewerAfter = Integer.parseInt(System.getenv().getOrDefault("NET_VIEWER_AFTER_TURNS", scenario.equals("viewer2") ? "3" : flap ? "1" : "0"));
         final int[] killAt = flap ? new int[] { viewerAfter + 1, viewerAfter + 3 } : new int[0];
@@ -262,7 +282,8 @@ public class NetHarness {
                     reconnectAt = System.currentTimeMillis() + 1500;
                 }
             }
-            if (quitScenario && !Files.exists(quitFlag) && relay.turns() >= killAfterTurns) {
+            if (pauseScenario || scenario.equals("joinerpause")) pauseDriver(scenario, relay, root, ps);
+            if (quitScenario && !scenario.equals("hostpausequit") && !Files.exists(quitFlag) && relay.turns() >= killAfterTurns) {
                 System.out.println("[harness] === " + scenario + ": " + (scenario.startsWith("hostquit") ? "the host" : "phone B") + " confirms 'leave the game' (" + (chatQuit ? "chat open with typed text, then the launcher quit" : "Escape then Y") + ") after " + relay.turns() + " turn checksums ===");
                 Files.write(quitFlag, new byte[] { 1 });
             }
@@ -366,7 +387,7 @@ public class NetHarness {
 
         // Verdict ---------------------------------------------------------------------------------
         boolean droppedScenario = scenario.startsWith("dropout") || scenario.equals("stall") || scenario.startsWith("joinerquit");
-        boolean hostQuit = scenario.startsWith("hostquit");
+        boolean hostQuit = scenario.startsWith("hostquit") || scenario.equals("hostpausequit");
         int desyncLines = 0;
         for (int v : desyncs.values()) desyncLines += v;
         boolean relayDesync = false;
@@ -445,12 +466,120 @@ public class NetHarness {
             for (String e : gs.events) if (e.contains("dropped")) fails.add("unexpected dropout: " + e);
             if (!gs.endReason.contains("every engine finished")) fails.add("the game did not end by every engine finishing: " + gs.endReason);
         }
+        if (pauseScenario || scenario.equals("joinerpause")) pauseChecks(scenario, gs, relayLog, phones, ps, fails);
         System.out.println("\nchecks: desync lines " + desyncLines + ", checksum mismatches " + mismatches + ", turns " + gs.digests.size() + ", engine exits " + exits);
         System.out.println(fails.isEmpty() ? "RESULT: PASS (0 Desync detected, " + gs.digests.size() + " turn checksums identical on all " + phones.length + " phones)"
                 : "RESULT: FAIL " + fails);
         System.exit(fails.isEmpty() ? 0 : 1);
     }
 
+
+    /** Where the host's pause button is on the touch HUD (fractions of the screen): top right, left of the screen edge by its own width. */
+    static final String PAUSE_X = System.getenv().getOrDefault("NET_PAUSE_X", "0.945"), PAUSE_Y = System.getenv().getOrDefault("NET_PAUSE_Y", "0.075");
+
+    static final class PauseState {
+        int stage;
+        long at;                         // when the current stage began
+        int turnsAtPause, turnsFrozen, turnsAtResume;
+        long firstPauseMs;
+        boolean frozenChecked;
+        final List<String> notes = new ArrayList<>();
+    }
+
+    static void flag(Path root, String name) throws Exception {
+        Files.write(root.resolve(name), new byte[] { 1 });
+    }
+
+    /** Called once a second from the main loop: drives the pause, the waits and the resumes by the relay's turn count. */
+    static void pauseDriver(String sc, Relay relay, Path root, PauseState ps) throws Exception {
+        long now = System.currentTimeMillis();
+        int turns = relay.turns();
+        long pauseLen = Long.parseLong(System.getenv().getOrDefault("NET_PAUSE_S", "30")) * 1000;
+        switch (sc) {
+            case "joinerpause":
+                if (ps.stage == 0 && turns >= 2) { ps.stage = 1; ps.at = now; ps.turnsAtPause = turns; flag(root, "jp.now");
+                    System.out.println("[harness] === joinerpause: Phone B's launcher sends pause, pause, resume control frames after " + turns + " turns ==="); }
+                else if (ps.stage == 1 && now - ps.at > 20000) { ps.stage = 2; ps.turnsAtResume = turns;
+                    System.out.println("[harness] === joinerpause: 20 s later " + turns + " turns (was " + ps.turnsAtPause + "), the game must have gone on ==="); }
+                break;
+            case "hostpause":
+                if (ps.stage == 0 && turns >= 2) { ps.stage = 1; ps.at = now; }                                   // let the turn get going first
+                else if (ps.stage == 1 && now - ps.at > 4000) { ps.stage = 2; ps.at = now; ps.turnsAtPause = turns; flag(root, "pause1.now");
+                    System.out.println("[harness] === hostpause: the host taps pause mid-turn, " + turns + " turns so far; held for " + pauseLen / 1000 + " s ==="); }
+                else if (ps.stage == 2 && now - ps.at > 5000 && !ps.frozenChecked) { ps.frozenChecked = true; ps.turnsFrozen = turns; }
+                else if (ps.stage == 2 && now - ps.at > pauseLen) { ps.stage = 3; ps.at = now; ps.turnsAtResume = turns; ps.firstPauseMs = pauseLen; flag(root, "resume1.now");
+                    System.out.println("[harness] === hostpause: the host resumes after " + pauseLen / 1000 + " s; turns " + ps.turnsAtPause + " at pause, " + ps.turnsFrozen + " 5 s into it, " + turns + " at resume ==="); }
+                else if (ps.stage == 3 && turns >= ps.turnsAtResume + 2) { ps.stage = 4; ps.at = now; ps.notes.add("turns after the resume: " + turns + " (" + ps.turnsAtResume + " at the resume)"); }
+                else if (ps.stage == 4 && now - ps.at > 3000) { ps.stage = 5; ps.at = now; flag(root, "pause2.now");
+                    System.out.println("[harness] === hostpause: second pause (short) after " + turns + " turns ==="); }
+                else if (ps.stage == 5 && now - ps.at > 3000) { ps.stage = 6; ps.at = now; flag(root, "resume2.now");
+                    System.out.println("[harness] === hostpause: second resume ==="); }
+                break;
+            case "pausecap":
+                if (ps.stage == 0 && turns >= 2) { ps.stage = 1; ps.at = now; }
+                else if (ps.stage == 1 && now - ps.at > 4000) { ps.stage = 2; ps.at = now; ps.turnsAtPause = turns; flag(root, "pause1.now");
+                    System.out.println("[harness] === pausecap: the host pauses and never resumes; the relay's cap resumes after the configured time ==="); }
+                break;
+            case "hostpausequit":
+                if (ps.stage == 0 && turns >= 2) { ps.stage = 1; ps.at = now; }
+                else if (ps.stage == 1 && now - ps.at > 4000) { ps.stage = 2; ps.at = now; ps.turnsAtPause = turns; flag(root, "pause1.now");
+                    System.out.println("[harness] === hostpausequit: the host pauses ==="); }
+                else if (ps.stage == 2 && now - ps.at > 6000) { ps.stage = 3; ps.turnsFrozen = turns; flag(root, "quit.now");
+                    System.out.println("[harness] === hostpausequit: the host, still paused, confirms 'leave the game' (" + (System.getenv("NET_PAUSEQUIT_KEYS") != null ? "Escape then Y" : "the launcher quit, as the app's Back dialog does") + ") ==="); }
+                break;
+            default:
+        }
+    }
+
+    static void pauseChecks(String sc, Relay.GameSummary gs, List<String> relayLog, Phone[] phones, PauseState ps, List<String> fails) throws Exception {
+        int paused = 0, resumed = 0, ignored = 0, cap = 0;
+        long firstLen = -1;
+        for (String e : gs.events) {
+            if (e.endsWith("(the host) paused the game")) paused++;
+            if (e.contains("(the host) resumed the game after")) {
+                resumed++;
+                if (firstLen < 0) firstLen = Long.parseLong(e.replaceAll(".*after (\\d+) s$", "$1"));
+            }
+            if (e.contains("asked to") && e.contains("ignored")) ignored++;
+            if (e.startsWith("Pause limit")) cap++;
+        }
+        int[] diagOn = new int[phones.length], diagOff = new int[phones.length];
+        for (int i = 0; i < phones.length; i++) {
+            Path g = phones[i].dir.resolve("netgame.txt");
+            String d = Files.exists(g) ? new String(Files.readAllBytes(g)) : "";
+            diagOn[i] = count(d, "PAUSE on"); diagOff[i] = count(d, "PAUSE off");
+        }
+        System.out.println("pause check: relay events: host paused " + paused + "x, resumed " + resumed + "x (first pause " + firstLen + " s), ignored requests " + ignored
+                + ", cap resumes " + cap + "; launcher PAUSE on/off per phone: " + java.util.Arrays.toString(diagOn) + " / " + java.util.Arrays.toString(diagOff));
+        for (String n : ps.notes) System.out.println("pause check: " + n);
+        switch (sc) {
+            case "hostpause":
+                if (paused != 2 || resumed != 2) fails.add("expected 2 pauses and 2 resumes by the host, saw " + paused + " / " + resumed);
+                long want = ps.firstPauseMs / 1000 - 2;
+                if (firstLen < want) fails.add("the first pause lasted " + firstLen + " s in the relay's books, expected at least " + want + " s (longer than the silence limit)");
+                if (ps.turnsFrozen != ps.turnsAtPause && ps.turnsFrozen != ps.turnsAtPause + 1) fails.add("the game moved during the pause: turns " + ps.turnsAtPause + " -> " + ps.turnsFrozen);
+                if (ps.turnsAtResume != ps.turnsFrozen) fails.add("the turn count changed during the pause: " + ps.turnsFrozen + " -> " + ps.turnsAtResume);
+                if (ps.notes.isEmpty()) fails.add("the game did not go on after the first resume");
+                for (int i = 0; i < phones.length; i++) if (diagOn[i] != 2 || diagOff[i] != 2) fails.add(phones[i].name + ": its launcher saw " + diagOn[i] + " pauses / " + diagOff[i] + " resumes, expected 2 / 2");
+                break;
+            case "pausecap":
+                if (paused != 1 || cap != 1) fails.add("expected 1 pause and 1 cap resume, saw " + paused + " / " + cap);
+                for (int i = 0; i < phones.length; i++) if (diagOn[i] != 1 || diagOff[i] != 1) fails.add(phones[i].name + ": its launcher saw " + diagOn[i] + " pauses / " + diagOff[i] + " resumes, expected 1 / 1");
+                break;
+            case "hostpausequit":
+                if (paused != 1) fails.add("expected 1 pause, saw " + paused);
+                if (ps.turnsFrozen != ps.turnsAtPause && ps.turnsFrozen != ps.turnsAtPause + 1) fails.add("the game moved during the pause: turns " + ps.turnsAtPause + " -> " + ps.turnsFrozen);
+                for (int i = 0; i < phones.length; i++) if (diagOn[i] != 1) fails.add(phones[i].name + ": its launcher saw " + diagOn[i] + " pauses, expected 1");
+                break;
+            case "joinerpause":
+                if (paused != 0 || resumed != 0) fails.add("a joiner's request changed the pause state: " + paused + " / " + resumed);
+                if (ignored < 3) fails.add("expected the relay to log 3 ignored requests from the joiner, saw " + ignored);
+                for (int i = 0; i < phones.length; i++) if (diagOn[i] != 0 || diagOff[i] != 0) fails.add(phones[i].name + ": its launcher saw a pause (" + diagOn[i] + "/" + diagOff[i] + ")");
+                if (ps.turnsAtResume < ps.turnsAtPause + 1) fails.add("the game did not go on while the joiner asked for a pause (turns " + ps.turnsAtPause + " -> " + ps.turnsAtResume + ")");
+                break;
+            default:
+        }
+    }
 
     /** One TV viewer session: viewer-sim.js (the TV page's stand-in) feeding a spectator engine, both from hedgewars-party's e2e-host. */
     static final class ViewerRun {

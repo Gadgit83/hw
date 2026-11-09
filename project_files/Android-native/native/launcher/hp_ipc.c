@@ -94,6 +94,7 @@ static int write_full(int fd, const void *buf, size_t n)
 static int g_net;
 static char g_net_host[128], g_net_token[160], g_net_nick[64] = "Player", g_net_diag[1024];
 static int g_net_port;
+static int g_net_is_host;                 /* net.cfg says role=host: this phone's engine may ask for a pause (see net_pause_request) */
 static int g_net_pending;                 /* config sent, connect to the relay after the engine's next '?' */
 static int g_relay_fd = -1;
 static volatile int g_net_up, g_net_ending, g_net_lost;
@@ -159,6 +160,7 @@ int hp_ipc_net_config(const char *path)
         else if (!strcmp(line, "token")) snprintf(g_net_token, sizeof g_net_token, "%s", eq);
         else if (!strcmp(line, "nick") && *eq) snprintf(g_net_nick, sizeof g_net_nick, "%s", eq);
         else if (!strcmp(line, "diag")) snprintf(g_net_diag, sizeof g_net_diag, "%s", eq);
+        else if (!strcmp(line, "role")) g_net_is_host = !strcmp(eq, "host");
     }
     fclose(f);
     if (!g_net_host[0] || g_net_port <= 0 || !g_net_token[0]) return -1;
@@ -314,6 +316,34 @@ static void net_send_control(char kind, const char *text)
     diag("CONTROL %c %s", kind, text);
 }
 
+/* The relay says the host paused (P) or resumed (R): tell this phone's own engine through the trusted local IPC ('e' command;
+ * the relay's engine whitelist never lets another phone's message become a command). If the engine is not connected yet the
+ * pause is simply not applied: nothing moves before every engine is up, so nothing can desync. */
+static void net_apply_pause(int pause)
+{
+    unsigned char frame[16];
+    const char cmd[] = "enetpause 0";
+    size_t n = sizeof cmd - 1;
+    frame[0] = (unsigned char)n;
+    memcpy(frame + 1, cmd, n);
+    frame[n] = pause ? '1' : '0';
+    /* Test hook (HP_NET_PAUSE_JITTER_MS, set only by the host tests): apply pause and resume this late, so that the engines of one
+       game pause and resume at different wall-clock moments. */
+    const char *j = getenv("HP_NET_PAUSE_JITTER_MS");
+    if (j && atoi(j) > 0) usleep((useconds_t)atoi(j) * 1000u);
+    diag("PAUSE %s", pause ? "on (the host paused)" : "off (resumed)");
+    engine_write(frame, n + 1);
+}
+
+/* The engine (host phone only, touch on the pause button) asks for a pause or resume: message 'y' + '1' or '0'. Not an engine
+ * game message: it is not tapped to the relay as one; it goes as the control frame P / R, which the relay accepts from the
+ * host's link only. */
+static void net_pause_request(int pause)
+{
+    if (!g_net_is_host) return;
+    net_send_control(pause ? 'P' : 'R', "");
+}
+
 static void *down_thread(void *arg)
 {
     (void)arg;
@@ -334,6 +364,7 @@ static void *down_thread(void *arg)
                 else snprintf(m, sizeof m, "The game ended: %s", t);
                 net_lost(m);
             }
+            if (len == 2 && (msg[1] == 'P' || msg[1] == 'R')) net_apply_pause(msg[1] == 'P');
             continue;
         }
         unsigned char frame[257];
@@ -491,6 +522,11 @@ static int send_config(int fd)
         count++;
     }
     fclose(f);
+    if (g_net && g_net_is_host) {
+        /* Tells the engine this phone is the host (shows the pause button). Written by the launcher from the app's own net.cfg only. */
+        static const unsigned char hostmsg[] = { 8, 'e', 'n', 'e', 't', 'h', 'o', 's', 't' };
+        if (write_full(fd, hostmsg, sizeof hostmsg)) return -1;
+    }
     LOGI("sent %d config messages", count);
     return 0;
 }
@@ -524,7 +560,7 @@ static void *server_thread(void *arg)
         if (read_full(fd, &len, 1)) break;
         if (len && read_full(fd, msg, len)) break;
         /* Network mode: tap every engine message (right after the read) into the queue for the relay link. */
-        if (g_net && len && msg[0] != 'C' && msg[0] != '?') net_tap(msg, len);
+        if (g_net && len && msg[0] != 'C' && msg[0] != '?' && msg[0] != 'y') net_tap(msg, len);
         if (len && msg[0] == 'C') {
             /* The engine asks for the game configuration. */
             if (send_config(fd)) break;
@@ -544,6 +580,8 @@ static void *server_thread(void *arg)
                     break;
                 }
             }
+        } else if (len >= 2 && msg[0] == 'y') {
+            if (g_net) net_pause_request(msg[1] == '1');
         } else if (len > 1 && msg[0] == 'E') {
             /* The engine reports a fatal error and is about to exit the process. */
             char text[256];
@@ -610,6 +648,13 @@ int hp_ipc_user_quit(void)
 }
 
 #ifdef HP_HOST_TEST
+/* Test hook (host test script action "ctl:<letter>"): sends a control frame to the relay as a (buggy or hostile) launcher would,
+ * e.g. "ctl:P" from a joining phone, which the relay must ignore. */
+void hp_ipc_send_control(char kind)
+{
+    net_send_control(kind, "");
+}
+
 /* Test hook (host test script action "ipc:<text>"): sends one message to the engine as the frontend would, e.g. "Fteamname"
  * (a team left, the engine runs "teamgone u..."). Returns 0 when sent. */
 int hp_ipc_send(const char *payload)

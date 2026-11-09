@@ -41,6 +41,7 @@ static void *restore_thread(void *arg)
  *   down:<finger>:<x>:<y>   move:<finger>:<x>:<y>   up:<finger>:<x>:<y>   (x, y normalised 0..1, as SDL2 gives them)
  *   focuslost  focusgained  minimized  restored      (window events, as the phone sends them)
  *   ipc:<text>                                         (a message to the engine as the frontend sends it, e.g. ipc:FGood Night: that team left)
+ *   ctl:<letter>                                       (a control frame to the relay as the launcher would send it: ctl:P pause, ctl:R resume)
  *   waitfile:<path>                                    (blocks the script until the file exists: the shell or the net-test harness decides when)
  *   key:esc  key:y                                     (a key press and release, as GameActivity sends for Back and the confirm in a network game)
  *   key:enter  text:<chars>                            (opens the chat, types into it)
@@ -106,6 +107,7 @@ static void *script_thread(void *arg)
         else if (!strncmp(act, "move:", 5) && sscanf(act + 5, "%d:%f:%f", &id, &x, &y) == 3) push_finger(SDL_FINGERMOTION, id, x, y, &px[id & 15], &py[id & 15]);
         else if (!strncmp(act, "up:", 3) && sscanf(act + 3, "%d:%f:%f", &id, &x, &y) == 3) push_finger(SDL_FINGERUP, id, x, y, &px[id & 15], &py[id & 15]);
         else if (!strncmp(act, "ipc:", 4)) fprintf(stderr, "[hosttest] ipc send %s -> %d\n", act + 4, hp_ipc_send(act + 4));
+        else if (!strncmp(act, "ctl:", 4) && act[4]) { hp_ipc_send_control(act[4]); fprintf(stderr, "[hosttest] control frame %c sent to the relay\n", act[4]); }
         else if (!strncmp(act, "waitfile:", 9)) { for (int i = 0; i < 20000 && access(act + 9, F_OK) != 0; i++) usleep(50000); }
         else if (!strcmp(act, "key:esc")) push_key(SDLK_ESCAPE, SDL_SCANCODE_ESCAPE);
         else if (!strcmp(act, "key:y")) push_key(SDLK_y, SDL_SCANCODE_Y);

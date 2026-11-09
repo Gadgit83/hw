@@ -24,6 +24,7 @@ int hp_ipc_user_quit(void);
 #ifdef HP_HOST_TEST
 /* Test hook for the host test: send one message to the engine, e.g. "Fteamname". Returns 0 when sent. */
 int hp_ipc_send(const char *payload);
+void hp_ipc_send_control(char kind);
 #endif
 /* Network mode. Reads the relay link (host, port, token, nick, diag) from a small key=value file. Call before
  * hp_ipc_start; returns 0 when the file is valid, and the launcher then joins the game through the relay

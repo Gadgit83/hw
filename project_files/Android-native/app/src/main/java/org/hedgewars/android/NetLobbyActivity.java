@@ -228,9 +228,10 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
                 tv.setTypeface(Typeface.DEFAULT_BOLD);
                 tv.setTextIsSelectable(true);
                 card.addView(tv);
-                card.addView(ui.hint("TVs watching now: " + hi.viewers + ". The TV viewer connects here (open its page with ?ws="
+                card.addView(ui.hint("TVs watching now: " + hi.viewers + ", waiting for a game: " + hi.waiting
+                        + ". The TV finds this phone by itself on the same Wi-Fi. This address is the fallback: open the TV page with ?ws="
                         + (addr.isEmpty() ? "ws://IP:" + hi.viewerPort : "ws://" + addr.get(0) + ":" + hi.viewerPort)
-                        + ", or set HW_WS_URL in the page). It retries by itself until a game is started. There is no automatic discovery yet."));
+                        + " (or set HW_WS_URL in the page) if it does not. The TV keeps trying until a game is started."));
                 for (String vl : hi.viewerLines) {
                     TextView t = ui.text("TV " + vl, 12, Color.WHITE);
                     t.setTypeface(Typeface.MONOSPACE);

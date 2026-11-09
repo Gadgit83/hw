@@ -93,6 +93,7 @@ public class HostService extends Service {
             cfg.data = Store.data(app);
             cfg.hostSetup = () -> Store.loadSetup(app, cfg.data);
             cfg.build = Diag.versionName(app);
+            cfg.engine = BuildConfig.ENGINE_COMMIT;
             cfg.hostName = android.os.Build.MODEL;
             cfg.listener = new Relay.Listener() {
                 @Override public void log(String line) {

@@ -4,6 +4,31 @@ All notable changes to the native Android app (`project_files/Android-native`), 
 
 Only some builds were put on a phone, so a version below is a build that was made, not necessarily one that was released. Releases are tags on `android-master` with the APK attached; there is none yet.
 
+## 0.3.0-tv5 (106): the host can pause a network game (test build)
+
+`HP_PROFILE=test`, versionName `0.3.0-tv5-test`.
+
+### Added
+
+- The host can pause and resume a network game for everyone. The pause button is shown again, on the host's phone only, in network games; tapping it (or, while paused, tapping anywhere) asks the relay. The other phones show "Paused by the host" and cannot resume. The TV viewer simply receives no moves until the host resumes (a "paused" indicator on the TV page is not part of this build: the TV page is a separate project).
+- How it works: the host's engine tells its launcher (`y1` / `y0`, a local message that is never sent on as a game message); the launcher sends the relay the control frame `\0P` / `\0R`; the relay accepts it from the host's engine link only (a joiner's request is logged and ignored), records it in the event list of the report, and sends `\0P` / `\0R` to every engine link, the host's included; each launcher pauses its own engine with the local command `enetpause 1` / `enetpause 0` (the engine's local IPC channel, which no network message can reach). The launcher tells the host's engine that it is the host with `enethost` (from `role=host` in net.cfg).
+- The engine pause is the real one (`isPaused`: game time stops, the Paused banner shows), not the away-from-keyboard toggle that the pause command does in network games. Engine commit "Network games: the host can pause" (guarded to network games, three local commands `nethost`, `netpause`, `netpausereq`).
+- While paused the relay's silence and map-wait rules are off (the pause is not blamed on anyone) and start again, from the moment of the resume, when the host resumes. A pause ends by itself after 10 minutes (`Config.pauseMaxMs`), or at once if the host's phone is gone. The relay's live text on the host's screen says "paused by the host".
+- Host test scenarios `hostpause`, `hostpausequit`, `joinerpause`, `pausecap` (scripts/net-test.sh).
+
+### Fixed
+
+- Back in a network game showed no dialog (device test of 0.3.0-tv4): SDLActivity consumed the Back key and forwarded it to the engine, so `onBackPressed` was never called. `GameActivity.dispatchKeyEvent` now takes Back before SDL sees it when `net.cfg` says this is a network game (the dialog opens when the key goes up); local games still forward Back as Escape. New smoke test `gameBackKey_opensDialogInNetworkGame` dispatches real Back key events in network mode (checked to fail without the fix).
+
+### Changed
+
+- The viewer port's plain GET status JSON keeps `state`, `game`, `viewers`, `viewersEver` and adds `host` (the phone's name), `players` (one `{name, teams, host}` per phone in the lobby), `compatible` and `reason` (false with a reason when the request names another protocol, `?proto=N`), and `engine` (app version and engine commit). Checked in `RelayTests` (`testStatusGet`).
+- The host screen no longer says there is no automatic discovery: the TV finds the phone on the same Wi-Fi; the address is the fallback. It also shows "waiting for a game": TVs that polled the status GET in the last 10 s.
+
+### Why a pause cannot desync
+
+Game time in Hedgewars network play moves by ticks, never by the wall clock. The engine of the team whose turn it is runs the game and stamps every message it sends with its tick; the other engines only advance to the tick of the next message they hold. A paused engine stops advancing and sends nothing; messages that reach it are queued and used after the resume. Whatever the wall-clock moments at which each phone pauses and resumes, every engine computes the same sequence of ticks and messages. The tests pause one phone 700 ms later than the other on purpose.
+
 ## 0.3.0-tv4 (105): leaving with the chat open (test build)
 
 Review fixes on 0.3.0-tv3. `HP_PROFILE=test`, versionName `0.3.0-tv4-test`.

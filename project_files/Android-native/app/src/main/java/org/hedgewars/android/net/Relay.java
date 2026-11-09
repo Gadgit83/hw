@@ -20,6 +20,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.Random;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -37,7 +38,10 @@ import java.util.function.Supplier;
  * <li>{@code {"t":"hello","role":"engine","token":...}}: an engine link. The relay answers {@code {"t":"ok"}}
  *     and from then on both sides speak the engine's IPC framing (one length byte, then that many bytes).
  *     A frame whose first byte is 0 is a control frame ({@code \0E<text>} engine error from the phone,
- *     {@code \0X<text>} the relay ends the game, {@code \0Q} the player confirmed leaving: same as the engine's Q).</li>
+ *     {@code \0X<text>} the relay ends the game, {@code \0Q} the player confirmed leaving: same as the engine's Q;
+ *     {@code \0P} / {@code \0R} from the host's launcher: pause / resume the game, which the relay answers by sending
+ *     {@code \0P} / {@code \0R} to every engine link. Accepted only from the host's link while the game runs; never forwarded
+ *     as an engine message, never in the game log or the viewers' stream).</li>
  * </ul>
  * Threads: an accept thread; one reader thread per connection; one writer thread per recipient (bounded
  * queue, so a slow recipient never blocks anyone: see {@link Outbox}); a watchdog thread (lobby pings, link
@@ -82,6 +86,8 @@ public final class Relay {
         public GameData data;
         public Supplier<SetupModel> hostSetup;
         public String build = "dev";
+        /** Engine identification for the status GET (the app sets the engine commit), free text. */
+        public String engine = "";
         public String hostName = "Host";
         /** Silence of the current team's owner before the relay drops it. */
         public long silenceMs = 20000;
@@ -98,6 +104,8 @@ public final class Relay {
         public long graceMs = 40000;
         /** How long after the start gate a phone may take to send its map digest before it is dropped. */
         public long mapWaitMs = 180000;
+        /** The longest the host's pause may last: after this the relay resumes everyone itself (the silence rule is off while paused). */
+        public long pauseMaxMs = 600000;
         /** Test hook, never set by the app: called for each frame about to go to a phone; returns the frame to send or null to lose it. */
         public BiFunction<Integer, byte[], byte[]> fault;
     }
@@ -206,6 +214,43 @@ public final class Relay {
 
     public String viewerError() {
         return viewerError;
+    }
+
+    /** TVs that polled the status GET in the last 10 s (they wait for a game to start): remote address to the time of its last poll. */
+    private final Map<String, Long> pollers = new java.util.concurrent.ConcurrentHashMap<>();
+
+    public int viewersWaiting() {
+        long now = System.currentTimeMillis();
+        int n = 0;
+        for (Iterator<Map.Entry<String, Long>> it = pollers.entrySet().iterator(); it.hasNext(); ) {
+            if (now - it.next().getValue() <= 10000) n++; else it.remove();
+        }
+        return n;
+    }
+
+    /**
+     * The body of the status GET on the viewer port. Keeps the fields of the e2e-host bridge (state, game, viewers, viewersEver)
+     * and adds what the TV page reads: host (this phone's name), players (one object per phone in the lobby: name, teams, host),
+     * compatible and reason (false when the TV page named a protocol in the request, ?proto=N, that this relay does not speak),
+     * engine (the app version and the engine commit).
+     */
+    String statusJson(String requestLine) {
+        String reason = "";
+        int q = requestLine == null ? -1 : requestLine.indexOf("proto=");
+        if (q >= 0) {
+            int e = q + 6;
+            while (e < requestLine.length() && Character.isDigit(requestLine.charAt(e))) e++;
+            String v = requestLine.substring(q + 6, e);
+            if (v.isEmpty() || v.length() > 9 || Integer.parseInt(v) != PROTO) reason = "The TV page speaks protocol " + (v.isEmpty() ? "?" : v) + ", this host speaks " + PROTO + ".";
+        }
+        synchronized (lock) {
+            List<Object> pl = new ArrayList<>();
+            for (Player p : players.values()) pl.add(Json.obj("name", p.name, "teams", (long) p.teams.size(), "host", p.host));
+            return Json.write(Json.obj("state", state == S_SETUP ? "setup" : "playing", "game", game == null ? 0L : (long) game.no,
+                    "viewers", (long) viewers.size(), "viewersEver", (long) viewersEver,
+                    "host", cfg.hostName, "players", pl, "compatible", reason.isEmpty(), "reason", reason,
+                    "engine", (cfg.build + (cfg.engine.isEmpty() ? "" : ", engine " + cfg.engine)).trim()));
+        }
     }
 
     public int viewerCount() {
@@ -382,6 +427,10 @@ public final class Relay {
         final Set<Integer> mSeen = new HashSet<>();
         long maxGapMs;
         String endReason = "";
+        /** The host's pause: while it lasts the silence and map-wait rules are off (nobody is sending anything, by design). */
+        boolean paused;
+        long pausedAt, pausedTotalMs;
+        int pauseCount;
         /** One line for each TV viewer that has left (or was still watching at the end): round trip, queue depth, why it ended. */
         final List<String> viewerReport = new ArrayList<>();
     }
@@ -886,6 +935,8 @@ public final class Relay {
                     // launcher, so it does not depend on the engine's UI state (an open chat swallows Escape and Y).
                     p.quit = true;
                     log(p.name + " confirmed leaving the game (control frame)");
+                } else if (msg.length == 2 && (msg[1] == 'P' || msg[1] == 'R')) {
+                    pauseControl(g, p, msg[1] == 'P', System.currentTimeMillis());
                 }
                 return;
             }
@@ -925,6 +976,59 @@ public final class Relay {
             if (type == 'M') updateArmed(g, p.lastMsg);
         }
         for (Runnable r : after) r.run();
+    }
+
+    /**
+     * Lock held. The host's launcher asks to pause or resume. Only the host's own engine link may (a joiner's request is
+     * logged and ignored), only while the game runs. The relay answers every engine link with the same control frame, host
+     * included, so all phones pause the same way and the host's engine does not pause on its own tap.
+     */
+    private void pauseControl(Game g, Player p, boolean pause, long now) {
+        if (!p.host || state != S_PLAYING) {
+            String why = !p.host ? "only the host can pause" : "the game is not running";
+            g.events.add(p.name + " asked to " + (pause ? "pause" : "resume") + " the game: ignored (" + why + ")");
+            log(p.name + " asked to " + (pause ? "pause" : "resume") + ": ignored, " + why);
+            return;
+        }
+        if (pause == g.paused) return;
+        if (pause) {
+            g.paused = true;
+            g.pausedAt = now;
+            g.pauseCount++;
+            g.events.add(p.name + " (the host) paused the game");
+            log(p.name + " (the host) paused the game; the silence rule is off until it resumes (at most " + cfg.pauseMaxMs / 1000 + " s)");
+        } else {
+            endPause(g, now, p.name + " (the host) resumed the game");
+        }
+        broadcastPause(pause);
+    }
+
+    /** Lock held. Ends the pause in the relay's books: the silence and map-wait clocks start again from now. */
+    private void endPause(Game g, long now, String what) {
+        long len = now - g.pausedAt;
+        g.paused = false;
+        g.pausedTotalMs += len;
+        g.lastKeptAt = now;
+        g.gateOpenAt += len;
+        g.events.add(what + " after " + len / 1000 + " s");
+        log(what + " after " + len / 1000 + " s");
+    }
+
+    /** Lock held. Control frame {@code \0P} or {@code \0R} to every live engine link. */
+    private void broadcastPause(boolean pause) {
+        byte[] f = Frames.frame(new byte[] { 0, (byte) (pause ? 'P' : 'R') });
+        for (Player q : players.values()) {
+            if (q.dropped || q.finished || q.engineOut == null) continue;
+            q.engineOut.offer(f);
+        }
+    }
+
+    /** Lock held. A pause nobody can end (the host is gone) is ended by the relay. */
+    private void resumeIfHostGone(Game g) {
+        if (!g.paused) return;
+        for (Player q : players.values()) if (q.host && !q.dropped && !q.finished && q.linkOpen) return;
+        endPause(g, System.currentTimeMillis(), "The host is gone: the relay resumed the game");
+        broadcastPause(false);
     }
 
     /** Lock held. Arms the silence rule once every live phone has sent its map digest: until then nobody can be blamed. */
@@ -1015,6 +1119,7 @@ public final class Relay {
         g.events.add(ev);
         log(ev);
         p.closeAll(false);
+        resumeIfHostGone(g);
         List<Runnable> after = new ArrayList<>();
         if (state == S_PLAYING || state == S_STARTING) {
             for (String team : p.teamNames) {
@@ -1152,7 +1257,7 @@ public final class Relay {
         synchronized (lock) {
             if (game == null) return state == S_SETUP ? "Lobby" : "";
             Game g = game;
-            return "Game " + g.no + ": " + g.digests.size() + " turns, log " + g.logMsgs + " messages";
+            return "Game " + g.no + ": " + g.digests.size() + " turns, log " + g.logMsgs + " messages" + (g.paused ? ", paused by the host" : "");
         }
     }
 
@@ -1199,6 +1304,12 @@ public final class Relay {
                         if (!q.linked && !q.dropped) dropPlayer(q, "its engine did not connect in " + cfg.linkWaitMs / 1000 + " s");
                     if (state == S_STARTING) maybeOpenGate();
                     checkEnd();
+                } else if (state == S_PLAYING && g.paused) {
+                    // Nobody sends anything while the host has paused; a pause is not unlimited.
+                    if (now - g.pausedAt > cfg.pauseMaxMs) {
+                        endPause(g, now, "Pause limit of " + cfg.pauseMaxMs / 1000 + " s reached: the relay resumed the game");
+                        broadcastPause(false);
+                    }
                 } else if (state == S_PLAYING && !g.armed) {
                     // The silence rule is off until every live phone has sent its map digest. A phone that is still
                     // generating the map must not be blamed; one that never finishes is dropped after a long wait.
@@ -1358,13 +1469,11 @@ public final class Relay {
             OutputStream os = s.getOutputStream();
             String key = Ws.header(head, "sec-websocket-key");
             if (key == null) {
-                String body;
-                synchronized (lock) {
-                    body = Json.write(Json.obj("state", state == S_SETUP ? "setup" : "playing", "game", game == null ? 0L : (long) game.no,
-                            "viewers", (long) viewers.size(), "viewersEver", (long) viewersEver));
-                }
+                pollers.put(String.valueOf(s.getInetAddress()), System.currentTimeMillis());
+                int nl = head.indexOf('\n');
+                String body = statusJson(nl < 0 ? head : head.substring(0, nl));
                 os.write(("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\nContent-Length: "
-                        + body.length() + "\r\n\r\n" + body).getBytes(StandardCharsets.UTF_8));
+                        + body.getBytes(StandardCharsets.UTF_8).length + "\r\n\r\n" + body).getBytes(StandardCharsets.UTF_8));
                 os.flush();
                 s.close();
                 return;

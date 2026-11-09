@@ -233,7 +233,7 @@ public final class RelayClient {
             w.write("token=" + s.token + "\n");
             w.write("nick=" + s.nick.replace('\n', ' ') + "\n");
             w.write("diag=" + diagPath + "\n");
-            w.write("role=" + (s.asHost ? "host" : "player") + "\n");          // read by GameActivity (the launcher ignores it)
+            w.write("role=" + (s.asHost ? "host" : "player") + "\n");          // read by GameActivity (Back) and by the launcher (the host alone gets the pause button, see hp_ipc.c)
         }
     }
 }

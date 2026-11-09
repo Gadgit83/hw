@@ -259,6 +259,8 @@ final class NetSession {
     static final class HostInfo {
         final List<String> addresses;
         final int viewerPort, viewers;
+        /** TVs that polled the host's status page in the last 10 s: waiting for a game to start. */
+        int waiting;
         final String viewerError, live;
         final List<String> viewerLines;
 
@@ -272,7 +274,7 @@ final class NetSession {
         }
 
         String key() {
-            return addresses + "|" + viewerPort + "|" + viewers + "|" + viewerError + "|" + live + "|" + viewerLines;
+            return addresses + "|" + viewerPort + "|" + viewers + "|" + waiting + "|" + viewerError + "|" + live + "|" + viewerLines;
         }
     }
 
@@ -302,6 +304,7 @@ final class NetSession {
                     else {
                         List<String> vl = r.viewerLines();
                         info = new HostInfo(addr, r.viewerPort(), vl.size(), r.viewerError(), r.liveText(), vl);
+                        info.waiting = r.viewersWaiting();
                     }
                     hostInfo = info;
                     String k = info.key();

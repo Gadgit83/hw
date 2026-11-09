@@ -358,11 +358,196 @@ if c > depth then
 HInset:= SafeInset(depth + cEdgeMargin);
 end;
 
-procedure InitTouchInterface;
+// The android-master placement. Used when no screen shape and no inset is given (every value is 0), so builds
+// without --screen-shape (upstream) keep the layout they always had.
+procedure InitTouchLegacy;
+var sl, st, sr, sb: LongInt;
+begin
+{$IFDEF USE_TOUCH_INTERFACE}
+sl:= SafeInset(cSafeInsetL);
+st:= SafeInset(cSafeInsetT);
+sr:= SafeInset(cSafeInsetR);
+sb:= SafeInset(cSafeInsetB);
+
+//positioning of the buttons
+buttonScale:= 1 / cDefaultZoomLevel;
+
+
+with JumpWidget do
+    begin
+    show:= true;
+    sprite:= sprJumpWidget;
+    frame.w:= Round(spritesData[sprite].Texture^.w * buttonScale);
+    frame.h:= Round(spritesData[sprite].Texture^.h * buttonScale);
+    frame.x:= (cScreenWidth shr 1) - Round(frame.w * 1.2) - sr;
+    frame.y:= cScreenHeight - frame.h * 2 - sb;
+    active.x:= frame.x;
+    active.y:= frame.y;
+    active.w:= frame.w;
+    active.h:= frame.h;
+    end;
+
+with AMWidget do
+    begin
+    show:= true;
+    sprite:= sprAMWidget;
+    frame.w:= Round(spritesData[sprite].Texture^.w * buttonScale);
+    frame.h:= Round(spritesData[sprite].Texture^.h * buttonScale);
+    frame.x:= (cScreenWidth shr 1) - frame.w * 2 - sr;
+    frame.y:= cScreenHeight - Round(frame.h * 1.2) - sb;
+    active.x:= frame.x;
+    active.y:= frame.y;
+    active.w:= frame.w;
+    active.h:= frame.h;
+    end;
+
+with arrowLeft do
+    begin
+    show:= true;
+    sprite:= sprArrowLeft;
+    frame.w:= Round(spritesData[sprite].Texture^.w * buttonScale);
+    frame.h:= Round(spritesData[sprite].Texture^.h * buttonScale);
+    frame.x:= -(cScreenWidth shr 1) + Round(frame.w * 0.25) + sl;
+    frame.y:= cScreenHeight - Round(frame.h * 1.5) - sb;
+    active.x:= frame.x;
+    active.y:= frame.y;
+    active.w:= frame.w;
+    active.h:= frame.h;
+    end;
+
+with arrowRight do
+    begin
+    show:= true;
+    sprite:= sprArrowRight;
+    frame.w:= Round(spritesData[sprite].Texture^.w * buttonScale);
+    frame.h:= Round(spritesData[sprite].Texture^.h * buttonScale);
+    frame.x:= -(cScreenWidth shr 1) + Round(frame.w * 1.5) + sl;
+    frame.y:= cScreenHeight - Round(frame.h * 1.5) - sb;
+    active.x:= frame.x;
+    active.y:= frame.y;
+    active.w:= frame.w;
+    active.h:= frame.h;
+    end;
+
+with firebutton do
+    begin
+    show:= true;
+    sprite:= sprFireButton;
+    frame.w:= Round(spritesData[sprite].Texture^.w * buttonScale);
+    frame.h:= Round(spritesData[sprite].Texture^.h * buttonScale);
+    frame.x:= arrowRight.frame.x + arrowRight.frame.w;
+    frame.y:= arrowRight.frame.y + (arrowRight.frame.w shr 1) - (frame.w shr 1);
+    active.x:= frame.x;
+    active.y:= frame.y;
+    active.w:= frame.w;
+    active.h:= frame.h;
+    end;
+
+with arrowUp do
+    begin
+    show:= false;
+    sprite:= sprArrowUp;
+    frame.w:= Round(spritesData[sprite].Texture^.w * buttonScale);
+    frame.h:= Round(spritesData[sprite].Texture^.h * buttonScale);
+    frame.x:= (cScreenWidth shr 1) - frame.w * 2 - sr;
+    frame.y:= jumpWidget.frame.y - Round(frame.h * 1.25);
+    active.x:= frame.x;
+    active.y:= frame.y;
+    active.w:= frame.w;
+    active.h:= frame.h;
+    with moveAnim do
+         begin
+         target.x:= frame.x;
+         target.y:= frame.y;
+         source.x:= frame.x - Round(frame.w * 0.75);
+         source.y:= frame.y;
+         end;
+    end;
+
+with arrowDown do
+    begin
+    show:= false;
+    sprite:= sprArrowDown;
+    frame.w:= Round(spritesData[sprite].Texture^.w * buttonScale);
+    frame.h:= Round(spritesData[sprite].Texture^.h * buttonScale);
+    frame.x:= (cScreenWidth shr 1) - frame.w * 2 - sr;
+    frame.y:= jumpWidget.frame.y - Round(frame.h * 1.25);
+    active.x:= frame.x;
+    active.y:= frame.y;
+    active.w:= frame.w;
+    active.h:= frame.h;
+    with moveAnim do
+        begin
+        target.x:= frame.x;
+        target.y:= frame.y;
+        source.x:= frame.x + Round(frame.w * 0.75);
+        source.y:= frame.y;
+        end;
+    end;
+
+with pauseButton do
+    begin
+    show:= true;
+    sprite:= sprPauseButton;
+    frame.w:= Round(spritesData[sprPauseButton].Texture^.w * buttonScale);
+    frame.h:= Round(spritesData[sprPauseButton].Texture^.h * buttonScale);
+    frame.x:= cScreenWidth div 2 - frame.w - sr;
+    frame.y:= st;
+    active.x:= frame.x;
+    active.y:= frame.y;
+    active.w:= frame.w;
+    active.h:= frame.h;
+    end;
+
+with utilityWidget do
+    begin
+    show:= false;
+    sprite:= sprTimerButton;
+    frame.w:= Round(spritesData[sprite].Texture^.w * buttonScale);
+    frame.h:= Round(spritesData[sprite].Texture^.h * buttonScale);
+    frame.x:= arrowLeft.frame.x;
+    frame.y:= arrowLeft.frame.y - Round(frame.h * 1.25);
+    active.x:= frame.x;
+    active.y:= frame.y;
+    active.w:= frame.w;
+    active.h:= frame.h;
+    with moveAnim do
+        begin
+        target.x:= frame.x;
+        target.y:= frame.y;
+        source.x:= frame.x;
+        source.y:= frame.y;
+        end;
+    end;
+
+with utilityWidget2 do
+    begin
+    show:= false;
+    sprite:= sprBounceButton;
+    frame.w:= Round(spritesData[sprite].Texture^.w * buttonScale);
+    frame.h:= Round(spritesData[sprite].Texture^.h * buttonScale);
+    frame.x:= utilityWidget.frame.x + Round(frame.w * 1.25);
+    frame.y:= arrowLeft.frame.y - Round(frame.h * 1.25);
+    active.x:= frame.x;
+    active.y:= frame.y;
+    active.w:= frame.w;
+    active.h:= frame.h;
+    with moveAnim do
+        begin
+        target.x:= frame.x;
+        target.y:= frame.y;
+        source.x:= frame.x;
+        source.y:= frame.y;
+        end;
+    end;
+{$ENDIF}
+end;
+
+// Per-corner placement, used when a screen shape or an inset is given (see InitTouchInterface).
+procedure InitTouchPlaced;
 var vt, vb, pad: LongInt;
 begin
 {$IFDEF USE_TOUCH_INTERFACE}
-UISwapIn;
 // Every control sits just clear of its own corner: vt and vb are the room kept at the top and bottom edge and
 // HInset adds what the cut-out and the rounding of that corner need at the side (see HInset).
 vt:= VInset(true);
@@ -551,6 +736,22 @@ with utilityWidget2 do
         end;
     end;
 
+{$ENDIF}
+end;
+
+procedure InitTouchInterface;
+var noShape: boolean;
+begin
+{$IFDEF USE_TOUCH_INTERFACE}
+UISwapIn;
+// no screen shape and no inset at all: the android-master layout, otherwise the per-corner placement
+noShape:= (cSafeInsetL = 0) and (cSafeInsetT = 0) and (cSafeInsetR = 0) and (cSafeInsetB = 0)
+    and (cCornerTL = 0) and (cCornerTR = 0) and (cCornerBL = 0) and (cCornerBR = 0)
+    and (cEdgeMargin = 0) and (cCutLY0 = 0) and (cCutLY1 = 0) and (cCutRY0 = 0) and (cCutRY1 = 0);
+if noShape then
+    InitTouchLegacy
+else
+    InitTouchPlaced;
 UISwapOut;
 {$ENDIF}
 end;
@@ -2552,7 +2753,13 @@ begin
 if(ammoType = amNothing)then
     begin
     if CurrentHedgehog = nil then
+        begin
+        if utilityWidget.show then
+            animateWidget(@utilityWidget, true, false);
+        if utilityWidget2.show then
+            animateWidget(@utilityWidget2, true, false);
         exit;
+        end;
     ammoType:= CurrentHedgehog^.CurAmmoType;
     // the switcher that scheme flag gfSwitchHog starts at the turn start is a gear, the selected weapon is something else
     if (CurAmmoGear <> nil) and (CurAmmoGear^.Kind = gtSwitcher) then

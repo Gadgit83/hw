@@ -3,12 +3,14 @@
 # Nothing from the engine checkout is committed to this repository.
 #   HP_MUSIC=lite|full|none   music tracks to keep (default lite: a handful of tracks)
 #   HP_LOCALES=en|all         locale files to keep (default en)
-#   PROFILE=full|test         test: the reduced data of the test profile (no music, no maps, 3 themes, one fort, one voice
+#   HP_PROFILE=full|test      test: the reduced data of the test profile (no music, no maps, 3 themes, one fort, one voice
 #                             pack, a few hats); see README "Build profiles". full (default) is unchanged.
+# The data folder ends with a marker, Data/.profile, holding the profile it was staged for. The Gradle build refuses
+# to package data staged for the other profile (app/build.gradle, preBuild).
 . "$(dirname "$0")/common.sh"
 SRC="$HW_ENGINE_DIR/share/hedgewars/Data"
 OUT="$BUILD_DIR/assets/Data"
-[ "$PROFILE" = test ] && HP_MUSIC="${HP_MUSIC:-none}"
+[ "$HP_PROFILE" = test ] && HP_MUSIC="${HP_MUSIC:-none}"
 HP_MUSIC="${HP_MUSIC:-lite}"
 HP_LOCALES="${HP_LOCALES:-en}"
 [ -d "$SRC" ] || { echo "game data not found at $SRC"; exit 1; }
@@ -45,7 +47,7 @@ case "$HP_MUSIC" in
   *) echo "unknown HP_MUSIC=$HP_MUSIC"; exit 1 ;;
 esac
 
-if [ "$PROFILE" = test ]; then
+if [ "$HP_PROFILE" = test ]; then
   # Reduced data for automated phone and TV tests. What is kept is a whitelist (see README "Build profiles"); the setup screen lists
   # only what is on disk (GameData) and SetupModel.repair() replaces anything missing, so nothing here has to be known to the app.
   TEST_THEMES="Nature Snow Hell"            # all three are also in the TV viewer's data package (it ships every theme)
@@ -71,7 +73,7 @@ if [ "$PROFILE" = test ]; then
   }
   rm -rf "$OUT/Maps" "$OUT/Music" "$OUT/Missions"             # generated maps (random, maze, perlin, wfc, forts) read nothing from Maps
   keep_only "$OUT/Themes" $TEST_THEMES $TEST_HIDDEN_THEMES
-  for t in $TEST_HIDDEN_THEMES; do rm -f "$OUT"/Themes/$t/icon*; done
+  for t in $TEST_HIDDEN_THEMES; do find "$OUT/Themes/$t" -maxdepth 1 -name 'icon*' -delete; done
   keep_only "$OUT/Forts" $(for f in $TEST_FORTS; do printf '%s*.png ' "$f"; done)
   keep_only "$OUT/Sounds/voices" $TEST_VOICES
   # Hats/Reserved is kept whole: the engine loads Reserved/chef (and Reserved/Zombie) itself, and crashes without chef
@@ -79,11 +81,17 @@ if [ "$PROFILE" = test ]; then
   keep_only "$OUT/Graphics/Flags" $(for f in $TEST_FLAGS; do printf '%s.png ' "$f"; done)
   find "$OUT" -type f \( -name '*.svg' -o -name '*.xcf' -o -name '*.sifz' \) -delete
   for t in $TEST_THEMES $TEST_HIDDEN_THEMES; do [ -f "$OUT/Themes/$t/theme.cfg" ] || { echo "test profile: theme $t missing from the engine data"; exit 1; }; done
+  for t in $TEST_HIDDEN_THEMES; do
+    [ -z "$(find "$OUT/Themes/$t" -maxdepth 1 -name 'icon*')" ] || { echo "test profile: hidden theme $t still has an icon, so it would be offered"; exit 1; }
+  done
+  for t in $TEST_THEMES; do [ -f "$OUT/Themes/$t/icon.png" ] || { echo "test profile: theme $t has no icon.png, so it would not be offered"; exit 1; }; done
   [ -f "$OUT/Forts/EarthL.png" ] && [ -d "$OUT/Sounds/voices/Default" ] || { echo "test profile: fort or voice pack missing"; exit 1; }
   set +f
   printf 'Test profile data: themes %s (hidden, for game styles: %s); forts %s; voice packs %s; hats %s; no image maps, no music.\n' \
     "$TEST_THEMES" "$TEST_HIDDEN_THEMES" "$TEST_FORTS" "$TEST_VOICES" "$TEST_HATS" > "$OUT/TEST_PROFILE.txt"
 fi
+
+printf '%s\n' "$HP_PROFILE" > "$OUT/.profile"
 
 # Licence texts travel with the data (GFDL art and sound, GPL engine).
 cp "$HW_ENGINE_DIR/COPYING" "$OUT/COPYING" 2>/dev/null || true

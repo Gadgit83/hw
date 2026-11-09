@@ -8,11 +8,17 @@ Only some builds were put on a phone, so a version below is a build that was mad
 
 ### Added
 
-- **Test profile** (`PROFILE=test scripts/build-apk.sh`, or `-Pprofile=test` for Gradle): a small APK for automated phone and TV tests that can be kept in git. Application id `party.hedge.host.test` (installs next to the normal app, the log FileProvider authority follows it), label "Hedge Party (test)", `versionName` 0.2.2-test, arm64-v8a only, the same debug signing key, and a red "TEST BUILD" badge on the setup screen and on the About page. The game data is cut to three themes (Nature, Snow, Hell; EarthRise and Cave are installed hidden because two game styles set them), the Earth fort, the Default voice pack, thirteen hats and three flags, with no music and no image maps: about 11 MB staged and a 14 MB APK. Themes, hats and map types were chosen to be present in the TV viewer's data package too. The full profile is the default and its application id, data and APK content are unchanged. See the README, "Build profiles".
+- **Test profile** (`HP_PROFILE=test scripts/build-apk.sh`, or `-Pprofile=test` for Gradle): a small APK for automated phone and TV tests that can be kept in git. Application id `party.hedge.host.test` (installs next to the normal app, the log FileProvider authority follows it), label "Hedge Party (test)", `versionName` 0.2.2-test, arm64-v8a only, the same debug signing key, and a red "TEST BUILD" badge on the setup screen and on the About page. The game data is cut to three themes (Nature, Snow, Hell; EarthRise and Cave are installed hidden because two game styles set them), the Earth fort, the Default voice pack, thirteen hats and three flags, with no music and no image maps: about 11 MB staged and a 14 MB APK. Themes, hats and map types were chosen to be present in the TV viewer's data package too. The full profile is the default and its application id, data and APK content are unchanged. See the README, "Build profiles".
 - `config-test.sh` checks that nothing the app picks at random (teams, hats, themes, forts, voices, graves, flags) or by default names content that is missing from the data, and that `repair()` replaces what is missing.
+
+### Fixed
+
+- The test profile offered five themes, not three: `stage-assets.sh` tried to delete the icons of the hidden themes EarthRise and Cave with a glob that `set -f` had switched off, so both kept `icon.png` and `icon@2x.png`. It now uses `find`, and the staging stops if a hidden theme still has an icon or a visible one has none. `config-test.sh` checks that the test data offers exactly Nature, Snow and Hell.
+- A test data set could be packaged into a full APK, and the other way round. `stage-assets.sh` writes the profile into `build/assets/Data/.profile`, and `preBuild` stops with a message when it does not match the Gradle profile.
 
 ### Changed
 
+- The profile variable is `HP_PROFILE` (was `PROFILE`, a name other tools set). The scripts stop with a message if `PROFILE` is set and `HP_PROFILE` is not, so an old `PROFILE=test` command cannot silently build the full app.
 - The map type list offers "Image map" only when the game data has image maps (it showed a "No image maps were found" message before).
 - Random themed hats skip hats that are not installed (`GameData.typeHats`); with the full data nothing changes.
 

@@ -3,8 +3,8 @@ plugins {
 }
 
 // Build profile: full (the normal app) or test (small APK for automated phone and TV tests: its own application id,
-// arm64-v8a only, reduced game data from scripts/stage-assets.sh). -Pprofile=test, or PROFILE=test in the environment.
-def profile = (project.findProperty('profile') ?: System.getenv('PROFILE') ?: 'full').toString()
+// arm64-v8a only, reduced game data from scripts/stage-assets.sh). -Pprofile=test, or HP_PROFILE=test in the environment.
+def profile = (project.findProperty('profile') ?: System.getenv('HP_PROFILE') ?: 'full').toString()
 if (!(profile in ['full', 'test'])) throw new GradleException("Unknown profile '${profile}' (full or test)")
 def testProfile = profile == 'test'
 // ABIs to build; override with -Pabis=arm64-v8a (or "arm64-v8a,x86_64"). The test profile defaults to arm64-v8a only.
@@ -168,6 +168,16 @@ tasks.matching { it.name == 'preBuild' }.configureEach {
         }
         if (!missing.isEmpty()) {
             throw new GradleException("Missing generated inputs: ${missing.join(', ')}. Run project_files/Android-native/scripts/build-apk.sh, or the listed scripts first.")
+        }
+        // The data must be the profile this build packages: a test set in a full APK (or the reverse) is a silent mistake.
+        // stage-assets.sh writes the profile it staged for into Data/.profile.
+        def marker = new File(genDir, 'assets/Data/.profile')
+        def staged = marker.exists() ? marker.text.trim() : null
+        if (staged != profile) {
+            def stagedFor = staged ? "profile '${staged}'" : 'an unknown profile (no .profile marker, staged by an older script)'
+            throw new GradleException("build/assets holds game data staged for ${stagedFor}, but this build is profile '${profile}'. " +
+                "Stage again for this profile: HP_PROFILE=${profile} project_files/Android-native/scripts/stage-assets.sh " +
+                "(or run build-apk.sh with HP_PROFILE=${profile}).")
         }
     }
 }

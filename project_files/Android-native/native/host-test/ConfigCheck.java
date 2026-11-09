@@ -5,6 +5,8 @@ import org.hedgewars.android.Rules;
 import org.hedgewars.android.SetupModel;
 
 import java.io.File;
+import java.util.Arrays;
+import java.util.Collections;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.ArrayList;
@@ -181,8 +183,24 @@ public class ConfigCheck {
             for (String s : a2) if (s.startsWith("--")) check(argNames.contains(s), "engine knows option " + s);
         }
         checkContentPresent(d, dataDir);
+        // stage-assets.sh writes the profile into Data/.profile; the test data offers exactly three themes.
+        File marker = new File(dataDir, ".profile");
+        if (marker.isFile() && read(marker).trim().equals("test")) checkTestThemes(d);
         System.out.println("ConfigCheck: " + checks + " checks, " + failures + " failures");
         System.exit(failures == 0 ? 0 : 1);
+    }
+
+    /**
+     * The test profile offers exactly Nature, Snow and Hell in the theme pickers; EarthRise and Cave are installed hidden
+     * (no icon) because two game styles set them.
+     */
+    static void checkTestThemes(GameData d) {
+        List<String> offered = new ArrayList<>(d.themes());
+        Collections.sort(offered);
+        check(offered.equals(Arrays.asList("Hell", "Nature", "Snow")), "test data offers exactly Nature, Snow and Hell: " + offered);
+        for (String h : Arrays.asList("EarthRise", "Cave")) {
+            check(d.hasTheme(h) && !d.themes().contains(h), "test data has " + h + " installed and hidden");
+        }
     }
 
     /**

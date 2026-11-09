@@ -20,11 +20,15 @@ export ANDROID_SDK_ROOT="$ANDROID_HOME"
 NDK="${ANDROID_NDK_HOME:-$ANDROID_HOME/ndk/$NDK_VERSION}"
 TOOLCHAIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64"
 # Build profile: full (default, the normal app) or test (small APK for automated phone and TV tests, see README "Build profiles").
-PROFILE="${PROFILE:-full}"
-case "$PROFILE" in
+# It is set with HP_PROFILE, not PROFILE: PROFILE is a generic name that other tools set, and a silent full build is the worse failure.
+if [ -n "${PROFILE:-}" ] && [ -z "${HP_PROFILE:-}" ]; then
+  echo "PROFILE is no longer read; use HP_PROFILE=$PROFILE (full or test)"; exit 1
+fi
+HP_PROFILE="${HP_PROFILE:-full}"
+case "$HP_PROFILE" in
   full) ABIS="${ABIS:-arm64-v8a x86_64}" ;;
   test) ABIS="${ABIS:-arm64-v8a}" ;;
-  *) echo "unknown PROFILE=$PROFILE (full or test)"; exit 1 ;;
+  *) echo "unknown HP_PROFILE=$HP_PROFILE (full or test)"; exit 1 ;;
 esac
-export PROFILE
+export HP_PROFILE
 log() { printf '\n==> %s\n' "$*"; }

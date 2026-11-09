@@ -91,6 +91,7 @@ static int write_full(int fd, const void *buf, size_t n)
  * turn checksum (N) and map digest (M) that crosses the link in either direction, so that two phones'
  * sequences can be compared.
  * ------------------------------------------------------------------------------------------- */
+#define HP_NET_FLUSH_DEFAULT_MS 100   /* see net_flush note in CHANGELOG 0.3.0-tv5b; the env var HP_NET_FLUSH_MS overrides it (harness) */
 static int g_net;
 static char g_net_host[128], g_net_token[160], g_net_nick[64] = "Player", g_net_diag[1024];
 static int g_net_port;
@@ -115,6 +116,11 @@ static unsigned long g_tx_msgs, g_rx_msgs, g_tx_dropped_local;
 static unsigned long g_tx_type[256], g_rx_type[256];
 static uint64_t g_tx_fnv = 0xcbf29ce484222325ULL, g_rx_fnv = 0xcbf29ce484222325ULL;
 static int g_turn_seq;
+/* Timing of the engine's empty '+' time marks as they leave the phone (wall clock), and bytes sent: the figures for the flush interval. */
+static unsigned long g_tx_bytes, g_plus_n, g_plus_bucket[8];   /* buckets: <=25 <=50 <=75 <=100 <=250 <=500 <=1000 >1000 ms */
+static unsigned g_plus_max_ms;
+static int g_net_trace;                   /* HP_NET_TRACE set: log every sent message's type and game-time stamp (harness measurements) */
+static struct timespec g_plus_last;
 static FILE *g_diag;
 static struct timespec g_t0;
 static pthread_mutex_t g_diag_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -267,6 +273,21 @@ static void net_tap(const unsigned char *msg, unsigned len)
     if (!g_net_up || g_net_lost) return;
     g_tx_msgs++;
     g_tx_type[msg[0]]++;
+    g_tx_bytes += len + 1;
+    if (g_diag && g_net_trace && len >= 3) diag("TX %c %u", msg[0] >= 32 && msg[0] < 127 ? msg[0] : '?', (unsigned)(msg[len - 2] << 8 | msg[len - 1]));   /* measurement only */
+    if (msg[0] == '+') {
+        struct timespec t;
+        clock_gettime(CLOCK_MONOTONIC, &t);
+        if (g_plus_n++) {
+            long ms = (t.tv_sec - g_plus_last.tv_sec) * 1000 + (t.tv_nsec - g_plus_last.tv_nsec) / 1000000;
+            static const long lim[7] = { 25, 50, 75, 100, 250, 500, 1000 };
+            int b = 0;
+            while (b < 7 && ms > lim[b]) b++;
+            g_plus_bucket[b]++;
+            if (ms > (long)g_plus_max_ms) g_plus_max_ms = (unsigned)ms;
+        }
+        g_plus_last = t;
+    }
     unsigned char f = (unsigned char)len;
     fnv_add(&g_tx_fnv, &f, 1);
     fnv_add(&g_tx_fnv, msg, len);
@@ -390,6 +411,7 @@ static int net_connect(void)
     snprintf(portstr, sizeof portstr, "%d", g_net_port);
     clock_gettime(CLOCK_MONOTONIC, &g_t0);
     if (g_net_diag[0]) g_diag = fopen(g_net_diag, "w");
+    g_net_trace = getenv("HP_NET_TRACE") != NULL;
     diag("engine link to %s:%d as '%s'", g_net_host, g_net_port, g_net_nick);
     if (getaddrinfo(g_net_host, portstr, &hints, &res) || !res) {
         diag("LINK cannot resolve %s", g_net_host);
@@ -483,6 +505,9 @@ static void net_finish(void)
             if (g_tx_type[i] || g_rx_type[i])
                 u += (size_t)snprintf(types + u, sizeof types - u, " %c:%lu/%lu", i >= 32 && i < 127 ? i : '?', g_tx_type[i], g_rx_type[i]);
         }
+        diag("PLUSGAPS %lu '+' messages, %lu bytes sent in all, gap ms buckets <=25:%lu <=50:%lu <=75:%lu <=100:%lu <=250:%lu <=500:%lu <=1000:%lu >1000:%lu, longest %u ms",
+             g_plus_n, g_tx_bytes, g_plus_bucket[0], g_plus_bucket[1], g_plus_bucket[2], g_plus_bucket[3], g_plus_bucket[4],
+             g_plus_bucket[5], g_plus_bucket[6], g_plus_bucket[7], g_plus_max_ms);
         diag("SUMMARY tx %lu messages hash %016llx, rx %lu messages hash %016llx, turns %d, by type tx/rx:%s",
              g_tx_msgs, (unsigned long long)g_tx_fnv, g_rx_msgs, (unsigned long long)g_rx_fnv, g_turn_seq, types);
         fclose(g_diag);
@@ -526,6 +551,20 @@ static int send_config(int fd)
         /* Tells the engine this phone is the host (shows the pause button). Written by the launcher from the app's own net.cfg only. */
         static const unsigned char hostmsg[] = { 8, 'e', 'n', 'e', 't', 'h', 'o', 's', 't' };
         if (write_full(fd, hostmsg, sizeof hostmsg)) return -1;
+    }
+    if (g_net) {
+        /* Network games only: how often this engine sends its empty '+' time mark and flushes its buffered messages
+         * (game ms). The engine default is 1000, which made every viewer wait up to a second for the next time mark. */
+        int ms = HP_NET_FLUSH_DEFAULT_MS;
+        const char *e = getenv("HP_NET_FLUSH_MS");
+        if (e && *e) ms = atoi(e);
+        if (ms >= 10 && ms < 1000) {
+            unsigned char fm[24];
+            int fl = snprintf((char *)fm + 1, sizeof fm - 1, "enetflush %d", ms);
+            fm[0] = (unsigned char)fl;
+            if (write_full(fd, fm, (size_t)fl + 1)) return -1;
+            LOGI("network flush interval %d ms", ms);
+        }
     }
     LOGI("sent %d config messages", count);
     return 0;

@@ -4,6 +4,26 @@ All notable changes to the native Android app (`project_files/Android-native`), 
 
 Only some builds were put on a phone, so a version below is a build that was made, not necessarily one that was released. Releases are tags on `android-master` with the APK attached; there is none yet.
 
+## 0.3.0-tv5b (107): less lag between phones and the TV (test build)
+
+`HP_PROFILE=test`, versionName `0.3.0-tv5b-test`.
+
+### Changed
+
+- The engine of a network game now flushes its outgoing messages and sends its empty `+` time mark every 100 game ms instead of every 1000. A device run of tv5 showed 643 `+` in about 660 s with a longest gap of 1035 ms while the relay round trip was about 3 ms, so nearly all of the 1.5 to 2 s of lag after a TV rejoin was this batching (a key press waited in the engine's send buffer until the next flush) plus the TV's own buffering. The engine got a trusted local IPC command `netflush N` (10 to 1000 ms; engine commit "Network games: lower the interval of the empty '+' time mark..."); its default stays 1000, so desktop, local games and upstream are untouched. The launcher sends `enetflush 100` in network games only (`HP_NET_FLUSH_DEFAULT_MS` in hp_ipc.c; the harness can override it with `HP_NET_FLUSH_MS`).
+- Why this cannot change a game: every command carries the sender's own game-time stamp and receivers apply it at exactly that tick. The `+` only tells a receiver that nothing earlier is still to come, so that it may advance; a shorter interval lets it advance sooner and changes nothing it computes. Replays and the relay log hold the same commands with the same stamps, only with more `+` lines.
+- The launcher's netgame.txt now has a `PLUSGAPS` line (count of `+`, bytes sent, histogram of wall-clock gaps between them) and, with `HP_NET_TRACE` set, one `TX type stamp` line per sent message (harness measurements only).
+
+### Measured (Linux harness, scenario viewer3: one phone with three teams, 20 turns, TV viewer connected from the start, about 200 s)
+
+| flush interval | `+` gap median / p95 / longest | phone to relay | per viewer | input held in the engine before sending (mean / p95) |
+|---|---|---|---|---|
+| 1000 (before) | 1005 / 5574 / 11819 ms (long gaps are times with no game time moving) | 1.7 msg/s, 11 B/s | 1.3 msg/s, 14 B/s | 132 / 892 ms |
+| 100 (now) | 105 / 194 / 322 ms | 10.1 msg/s, 44 B/s | 9.7 msg/s, 48 B/s | 32 / 7 ms |
+| 50 (tried) | 56 / 59 / 173 ms | 18.9 msg/s, 80 B/s | 18.5 msg/s, 84 B/s | 0 / 1 ms |
+
+Each viewer and each further phone receives about 8 messages and 34 bytes a second more than before (payload, before the WebSocket or TCP headers); 100 ms was chosen because 50 ms doubles that for no visible gain. The relay round trip stayed at 0.3 to 0.4 ms (average about 1 ms) with no frames queued behind it in every run. All three runs: PASS, 0 desync, 20 identical turn checksums.
+
 ## 0.3.0-tv5 (106): the host can pause a network game (test build)
 
 `HP_PROFILE=test`, versionName `0.3.0-tv5-test`.

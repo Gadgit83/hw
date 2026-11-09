@@ -159,7 +159,9 @@ if isOnWidget(arrowDown, finger^) then
     exit;
     end;
 
-if isOnWidget(pauseButton, finger^) then
+// A network game cannot pause (the pause command only toggles away-from-keyboard there), so the button is not drawn
+// and not pressable; leaving goes through the Back key.
+if (GameType <> gmtNet) and isOnWidget(pauseButton, finger^) then
     begin
     WriteLnToConsole('[Touch] pressed pause');
     ParseCommand('pause', true);

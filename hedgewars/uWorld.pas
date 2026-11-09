@@ -2204,7 +2204,7 @@ DrawScreenWidget(@jumpWidget);
 DrawScreenWidget(@AMWidget);
 DrawScreenWidget(@utilityWidget);
 DrawScreenWidget(@utilityWidget2);
-DrawScreenWidget(@pauseButton);
+if GameType <> gmtNet then DrawScreenWidget(@pauseButton);
 {$ENDIF}
 
 // Captions

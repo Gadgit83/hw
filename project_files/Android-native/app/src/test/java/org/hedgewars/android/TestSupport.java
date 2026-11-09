@@ -58,6 +58,7 @@ final class TestSupport {
         // The network session is process-wide state too.
         set(NetSession.class, "hosting", false);
         set(NetSession.class, "joined", false);
+        set(NetSession.class, "watching", false);
         set(NetSession.class, "target", "");
         set(NetSession.class, "state", null);
         set(NetSession.class, "closedReason", "");

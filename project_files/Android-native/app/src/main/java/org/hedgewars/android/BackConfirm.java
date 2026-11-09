@@ -19,7 +19,9 @@ final class BackConfirm {
     private BackConfirm() { }
 
     /** How this phone takes part: no network game, a joining phone, or the hosting phone. */
-    static final int LOCAL = 0, PLAYER = 1, HOST = 2;
+    static final int LOCAL = 0, PLAYER = 1, HOST = 2, WATCH = 3;
+
+    private static final String RUNNING = " Unless the host has paused, the game keeps running while you decide.";
 
     static String title(boolean host) {
         return host ? "End the game for everyone?" : "Leave the game?";
@@ -27,8 +29,8 @@ final class BackConfirm {
 
     static String message(boolean host) {
         return host
-                ? "The game stops on every phone and on every TV watching. The game keeps running while you decide."
-                : "Your teams leave the game and the other players carry on. The game keeps running while you decide.";
+                ? "The game stops on every phone and on every TV watching." + RUNNING
+                : "Your teams leave the game and the other players carry on." + RUNNING;
     }
 
     static String yes(boolean host) {
@@ -39,6 +41,10 @@ final class BackConfirm {
         return "Keep playing";
     }
 
+    /** The question for a phone that only watches: it leaves nothing behind but its view. */
+    static final String WATCH_TITLE = "Stop watching?", WATCH_MESSAGE = "The game carries on for the players." + RUNNING,
+            WATCH_YES = "Stop watching", WATCH_NO = "Keep watching";
+
     /** The role written by the Network screen into net.cfg when it started the game; LOCAL when there is no such file. */
     static int role(File filesDir) {
         File f = new File(filesDir, "net.cfg");
@@ -47,11 +53,25 @@ final class BackConfirm {
         try (BufferedReader r = new BufferedReader(new InputStreamReader(new FileInputStream(f), StandardCharsets.UTF_8))) {
             for (String l; (l = r.readLine()) != null; ) {
                 if (l.trim().equals("role=host")) role = HOST;
+                if (l.trim().equals("role=watch")) role = WATCH;
             }
         } catch (IOException e) {
             // an unreadable file is still a network game
         }
         return role;
+    }
+
+    /** As {@link #show(Activity, boolean, Runnable)} for any role: a watching phone gets "Stop watching?". */
+    static AlertDialog show(Activity a, int role, Runnable onYes) {
+        if (role != WATCH) return show(a, role == HOST, onYes);
+        AlertDialog d = new AlertDialog.Builder(a)
+                .setTitle(WATCH_TITLE)
+                .setMessage(WATCH_MESSAGE)
+                .setPositiveButton(WATCH_YES, (dlg, w) -> onYes.run())
+                .setNegativeButton(WATCH_NO, null)
+                .create();
+        d.show();
+        return d;
     }
 
     /** Shows the question; {@code onYes} runs when the player confirms. */

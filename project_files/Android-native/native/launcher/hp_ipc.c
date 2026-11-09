@@ -95,6 +95,8 @@ static int g_net;
 static char g_net_host[128], g_net_token[160], g_net_nick[64] = "Player", g_net_diag[1024];
 static int g_net_port;
 static int g_net_is_host;                 /* net.cfg says role=host: this phone's engine may ask for a pause (see net_pause_request) */
+static int g_net_is_watch;                /* net.cfg says role=watch: this phone only watches; nothing from its engine goes to the relay (see net_tap) */
+static unsigned long g_watch_blocked;     /* engine messages a watching phone's launcher did not send */
 static int g_net_pending;                 /* config sent, connect to the relay after the engine's next '?' */
 static int g_relay_fd = -1;
 static volatile int g_net_up, g_net_ending, g_net_lost;
@@ -160,7 +162,7 @@ int hp_ipc_net_config(const char *path)
         else if (!strcmp(line, "token")) snprintf(g_net_token, sizeof g_net_token, "%s", eq);
         else if (!strcmp(line, "nick") && *eq) snprintf(g_net_nick, sizeof g_net_nick, "%s", eq);
         else if (!strcmp(line, "diag")) snprintf(g_net_diag, sizeof g_net_diag, "%s", eq);
-        else if (!strcmp(line, "role")) g_net_is_host = !strcmp(eq, "host");
+        else if (!strcmp(line, "role")) { g_net_is_host = !strcmp(eq, "host"); g_net_is_watch = !strcmp(eq, "watch"); }
     }
     fclose(f);
     if (!g_net_host[0] || g_net_port <= 0 || !g_net_token[0]) return -1;
@@ -265,6 +267,12 @@ static void *send_thread(void *arg)
 static void net_tap(const unsigned char *msg, unsigned len)
 {
     if (!g_net_up || g_net_lost) return;
+    if (g_net_is_watch && !(len == 1 && msg[0] == 'q')) {
+        /* A watching phone has no team: its engine has nothing to say to the game, so nothing is sent (the relay would ignore it
+         * all anyway). The one exception is the engine's own "game over" (q), which only tells the relay this phone has seen the end. */
+        if (++g_watch_blocked <= 5) diag("WATCH not sent to the relay: message '%c' (%u bytes)", msg[0] >= 32 && msg[0] < 127 ? msg[0] : '?', len);
+        return;
+    }
     g_tx_msgs++;
     g_tx_type[msg[0]]++;
     unsigned char f = (unsigned char)len;
@@ -483,6 +491,7 @@ static void net_finish(void)
             if (g_tx_type[i] || g_rx_type[i])
                 u += (size_t)snprintf(types + u, sizeof types - u, " %c:%lu/%lu", i >= 32 && i < 127 ? i : '?', g_tx_type[i], g_rx_type[i]);
         }
+        if (g_net_is_watch) diag("WATCH engine messages not sent: %lu", g_watch_blocked);
         diag("SUMMARY tx %lu messages hash %016llx, rx %lu messages hash %016llx, turns %d, by type tx/rx:%s",
              g_tx_msgs, (unsigned long long)g_tx_fnv, g_rx_msgs, (unsigned long long)g_rx_fnv, g_turn_seq, types);
         fclose(g_diag);
@@ -522,6 +531,11 @@ static int send_config(int fd)
         count++;
     }
     fclose(f);
+    if (g_net && g_net_is_watch) {
+        /* Tells the engine this phone only watches: it hides the playing controls (touch widgets, weapon menu). Local IPC, from the app's own net.cfg only. */
+        static const unsigned char watchmsg[] = { 9, 'e', 'n', 'e', 't', 'w', 'a', 't', 'c', 'h' };
+        if (write_full(fd, watchmsg, sizeof watchmsg)) return -1;
+    }
     if (g_net && g_net_is_host) {
         /* Tells the engine this phone is the host (shows the pause button). Written by the launcher from the app's own net.cfg only. */
         static const unsigned char hostmsg[] = { 8, 'e', 'n', 'e', 't', 'h', 'o', 's', 't' };
@@ -657,6 +671,22 @@ void hp_ipc_send_control(char kind)
 
 /* Test hook (host test script action "ipc:<text>"): sends one message to the engine as the frontend would, e.g. "Fteamname"
  * (a team left, the engine runs "teamgone u..."). Returns 0 when sent. */
+/* Test hook (host test script action "relay:<text>"): writes one message straight onto the relay link, past the launcher's own filter
+ * (what a hostile or broken launcher on a watching phone would send). The relay must ignore it. Returns 0 when written. */
+int hp_ipc_send_relay(const char *payload)
+{
+    size_t n = strlen(payload);
+    unsigned char buf[256];
+    int rc = -1;
+    if (n == 0 || n > 255 || !g_net_up || g_relay_fd < 0) return -1;
+    buf[0] = (unsigned char)n;
+    memcpy(buf + 1, payload, n);
+    pthread_mutex_lock(&g_relay_wr_lock);
+    rc = write_full(g_relay_fd, buf, n + 1);
+    pthread_mutex_unlock(&g_relay_wr_lock);
+    return rc;
+}
+
 int hp_ipc_send(const char *payload)
 {
     size_t n = strlen(payload);

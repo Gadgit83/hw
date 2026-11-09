@@ -31,6 +31,8 @@ public final class RelayClient {
         public int port;
         /** This phone is the one that hosts (its Quit ends the game for everyone). */
         public boolean asHost;
+        /** This phone only watches (it owns no team): its launcher sends the relay nothing and its screen has no playing controls. */
+        public boolean asWatcher;
     }
 
     public interface Handler {
@@ -52,6 +54,7 @@ public final class RelayClient {
     private final String name, build;
     private final boolean isHost;
     private String hostSecret = "";
+    private boolean watch;
     private final Handler handler;
     private Socket socket;
     private OutputStream out;
@@ -76,6 +79,12 @@ public final class RelayClient {
         return this;
     }
 
+    /** A phone that only watches: no teams, a spectator at the relay. Call before connect(). */
+    public RelayClient watch(boolean on) {
+        watch = on;
+        return this;
+    }
+
     /** Connects (blocking, 5 s limit) and starts the reader thread. */
     public void connect() throws IOException {
         socket = new Socket();
@@ -84,7 +93,7 @@ public final class RelayClient {
         socket.setKeepAlive(true);
         out = socket.getOutputStream();
         send(Json.obj("t", "hello", "role", "lobby", "proto", (long) Relay.PROTO, "name", name, "build", build,
-                "host", isHost, "secret", hostSecret, "teams", NetTeams.listToJson(teams)));
+                "host", isHost, "secret", hostSecret, "watch", watch, "teams", NetTeams.listToJson(watch ? new ArrayList<SetupModel.Team>() : teams)));
         Thread t = new Thread(this::readLoop, "relay-client");
         t.setDaemon(true);
         t.start();
@@ -156,6 +165,11 @@ public final class RelayClient {
         trySend(Json.obj("t", "start"));
     }
 
+    /** A watching phone asks for the running game again (after it stopped watching): the relay answers with a new start. */
+    public void watchAgain() {
+        trySend(Json.obj("t", "watch"));
+    }
+
     public void close() {
         close(null);
     }
@@ -198,6 +212,7 @@ public final class RelayClient {
                         s.host = host;
                         s.port = port;
                         s.asHost = isHost;
+                        s.asWatcher = watch;
                         handler.onStart(s);
                         break;
                     }
@@ -233,7 +248,8 @@ public final class RelayClient {
             w.write("token=" + s.token + "\n");
             w.write("nick=" + s.nick.replace('\n', ' ') + "\n");
             w.write("diag=" + diagPath + "\n");
-            w.write("role=" + (s.asHost ? "host" : "player") + "\n");          // read by GameActivity (Back) and by the launcher (the host alone gets the pause button, see hp_ipc.c)
+            // read by GameActivity (Back, the controls) and by the launcher (the host alone gets the pause button, a watcher sends nothing, see hp_ipc.c)
+            w.write("role=" + (s.asWatcher ? "watch" : s.asHost ? "host" : "player") + "\n");
         }
     }
 }

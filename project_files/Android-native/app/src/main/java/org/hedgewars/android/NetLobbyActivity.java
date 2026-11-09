@@ -113,7 +113,7 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
         }
         final boolean host = NetSession.hosting;
         new android.app.AlertDialog.Builder(this)
-                .setTitle(host ? "Stop hosting?" : "Leave the network game?")
+                .setTitle(host ? "Stop hosting?" : NetSession.watching ? "Stop watching?" : "Leave the network game?")
                 .setMessage(host ? "Every phone that has joined is disconnected." : "You are removed from the lobby.")
                 .setPositiveButton(host ? "Stop hosting" : "Leave", (d, w) -> {
                     leaveOrStop();
@@ -195,11 +195,16 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
         card.addView(nameField);
         card.addView(ui.heading("Host"));
         card.addView(ui.button(connecting ? "Starting..." : "Host network game", true, v -> host()), Ui.lp(ViewGroup.LayoutParams.MATCH_PARENT, ui.dp(52)));
-        card.addView(ui.heading("Join"));
+        card.addView(ui.heading("Join by address"));
         addressField = ui.field(address, "Host address, for example 192.168.1.20:46633");
         addressField.setInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
         card.addView(addressField);
-        card.addView(ui.button("Join by address", true, v -> join()), ui.margins(Ui.lp(ViewGroup.LayoutParams.MATCH_PARENT, ui.dp(52)), 0, 8, 0, 0));
+        card.addView(ui.hint("Play joins with your teams. Watch joins without any: you see the game on this phone, with no controls, "
+                + "and you do not count as a player."));
+        LinearLayout jb = ui.row();
+        jb.addView(ui.button("Join to play", true, v -> join(false)), ui.weight(1f));
+        jb.addView(ui.button("Join to watch", true, v -> join(true)), ui.margins(Ui.lp(0, ui.dp(52), 1f), 8, 0, 0, 0));
+        card.addView(jb, ui.margins(Ui.lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT), 0, 8, 0, 0));
         content.addView(card, ui.margins(Ui.lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT), 0, 8, 0, 0));
     }
 
@@ -248,9 +253,9 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
             TextView big = ui.text(hi == null ? "..." : addr.isEmpty() ? NO_WIFI : a.toString(), 18, Color.WHITE);
             big.setTypeface(Typeface.DEFAULT_BOLD);
             card.addView(big);
-            card.addView(ui.hint("Other phones type this address (Join by address). Not needed for a one-phone game with the TV."));
+            card.addView(ui.hint("Other phones type this address (Join to play or Join to watch). Not needed for a one-phone game with the TV."));
         } else {
-            card.addView(ui.heading("Joined"));
+            card.addView(ui.heading(NetSession.watching ? "Joined as a watcher" : "Joined"));
             card.addView(ui.text("Host " + NetSession.target + (st == null ? "" : " (" + Json.str(st, "host", "") + ")"), 18, Color.WHITE));
         }
         String phase = st == null ? "connecting..." : Json.str(st, "state", "");
@@ -258,6 +263,8 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
         card.addView(ui.hint("State: " + (playing ? "game running" : "lobby (setting up)")));
         NetSession.HostInfo live = NetSession.hostInfo;
         if (host && live != null && playing && !live.live.isEmpty()) card.addView(ui.hint(live.live));
+        long watchingN = st == null ? 0 : Json.num(st, "watching", 0);
+        if (host) card.addView(ui.text("Watching: " + watchingN, 16, Color.WHITE));
         card.addView(ui.heading("Phones and teams"));
         if (st != null) {
             long you = Json.num(st, "you", -1);
@@ -271,12 +278,13 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
                             .append(lvl > 0 ? " (computer " + lvl + ")" : "");
                 }
                 boolean me = Json.num(p, "id", 0) == you;
+                boolean watcher = Json.bool(p, "watching", false);
                 String line = Json.str(p, "name", "?") + (me ? " (you)" : "") + (Json.bool(p, "host", false) ? " [host]" : "")
-                        + (Json.bool(p, "ready", false) ? "   ready" : "   not ready");
+                        + (watcher ? "   Watching" : Json.bool(p, "ready", false) ? "   ready" : "   not ready");
                 LinearLayout row = ui.card();
                 row.setBackground(ui.round(Ui.PANEL_HI, 10));
                 row.addView(ui.text(line, 16, Color.WHITE));
-                row.addView(ui.hint(teams.length() == 0 ? "no teams" : teams.toString()));
+                row.addView(ui.hint(watcher ? "watching only, no teams" : teams.length() == 0 ? "no teams" : teams.toString()));
                 card.addView(row, ui.margins(Ui.lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT), 0, 4, 0, 0));
             }
         }
@@ -300,6 +308,15 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
             });
             start.setEnabled(can);
             buttons.addView(start, ui.weight(1f));
+        } else if (NetSession.watching) {
+            // A watching phone has no teams to ready. Between games it simply waits for the host's Start; if a game runs and this phone
+            // is not in it (it stopped watching, or joined while the host's game was starting), it can watch the running game.
+            Button wb = ui.button(playing && !NetSession.inGame ? "Watch the game" : "Watching", true, v -> {
+                RelayClient c = NetSession.client;
+                if (c != null) c.watchAgain();
+            });
+            wb.setEnabled(playing && !NetSession.inGame);
+            buttons.addView(wb, ui.weight(1f));
         } else {
             final boolean[] ready = { st != null && meReady(st) };
             Button rb = ui.button(ready[0] ? "Not ready" : "Ready", true, v -> {
@@ -309,14 +326,15 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
             rb.setEnabled(!playing);
             buttons.addView(rb, ui.weight(1f));
         }
-        buttons.addView(ui.button("My teams again", false, v -> {
+        if (!NetSession.watching) buttons.addView(ui.button("My teams again", false, v -> {
             RelayClient c = NetSession.client;
             if (c != null) c.setTeams(Store.loadSetup(this, Store.data(this)).teams);
         }), ui.margins(Ui.lp(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT), 8, 0, 0, 0));
-        buttons.addView(ui.button(host ? "Stop hosting" : "Leave", false, v -> leaveOrStop()),
+        buttons.addView(ui.button(host ? "Stop hosting" : NetSession.watching ? "Stop watching" : "Leave", false, v -> leaveOrStop()),
                 ui.margins(Ui.lp(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT), 8, 0, 0, 0));
         card.addView(buttons, ui.margins(Ui.lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT), 0, 10, 0, 0));
         card.addView(ui.hint(host ? "Your teams and the map and rules come from the setup screen. Leaving the game screen does not stop hosting."
+                : NetSession.watching ? "You are watching: no teams, no controls. The game starts on this phone when the host presses Start, or at once if one is running."
                 : "Your teams come from the Teams tab. Wait for the host to press Start."));
         content.addView(card, ui.margins(Ui.lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT), 0, 8, 0, 0));
     }
@@ -418,7 +436,7 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
         }, "host-connect").start();
     }
 
-    private void join() {
+    private void join(final boolean watch) {
         saveFields();
         problem = "";
         String a = address.trim();
@@ -442,7 +460,7 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
         connecting = true;
         new Thread(() -> {
             try {
-                NetSession.connect(getApplicationContext(), host, port, nick, false);
+                NetSession.connect(getApplicationContext(), host, port, nick, false, watch);
             } catch (Exception e) {
                 problem = "Could not reach " + host + ":" + port + " (" + e.getMessage() + "). Same Wi-Fi? Is the host hosting?";
             }

@@ -107,6 +107,7 @@ public class MainActivity extends SetupActivity {
     @Override
     protected void onDestroy() {
         if (shown == this) shown = null;
+        ui.handler.removeCallbacks(autoHideProblem);
         super.onDestroy();
     }
 
@@ -843,7 +844,8 @@ public class MainActivity extends SetupActivity {
             showProblemBox();
             return;
         }
-        problemText.setText("The last game stopped with a problem.\n" + Diag.problemSummary(err));
+        problemText.setText(err == null ? Diag.problemSummary(null)
+                : "The last game stopped with a problem.\n" + Diag.problemSummary(err));
         if (!problemWanted) {
             problemWanted = true;
             ui.handler.removeCallbacks(autoHideProblem);
@@ -853,8 +855,9 @@ public class MainActivity extends SetupActivity {
     }
 
     private void dismissProblem() {
+        // the error file stays for the shared report; this problem just is not shown again
         ui.handler.removeCallbacks(autoHideProblem);
-        Diag.clearGameState(this);
+        problemSeen(Diag.problemStamp(this));
         problemWanted = false;
         showProblemBox();
     }

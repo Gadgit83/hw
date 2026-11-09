@@ -17,5 +17,7 @@ void hp_ipc_join(void);
  * is NUL terminated and valid only during the call. Optional; the desktop test leaves it unset. */
 void hp_ipc_set_error_handler(void (*handler)(const char *message));
 
+#ifdef HP_HOST_TEST
 /* Test hook for the host test: send one message to the engine, e.g. "Fteamname". Returns 0 when sent. */
 int hp_ipc_send(const char *payload);
+#endif

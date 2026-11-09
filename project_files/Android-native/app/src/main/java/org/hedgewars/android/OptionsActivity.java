@@ -195,9 +195,9 @@ public class OptionsActivity extends SetupActivity {
         LinearLayout cam = ui.card();
         cam.addView(ui.heading("Camera at the start of a turn"));
         cam.addView(ui.toggle("Centre on the active hedgehog", o.centreTurn, c -> o.centreTurn = c));
-        LinearLayout zoomSlider = ui.slider("Zoom in", 110, 200, o.zoomPct, n -> n + "%", n -> o.zoomPct = n);
+        LinearLayout zoomSlider = ui.slider("Zoom strength", 110, 200, o.zoomPct, n -> n + "%", n -> o.zoomPct = n);
         enableAll(zoomSlider, o.zoomTurn);
-        cam.addView(ui.toggle("Zoom in", o.zoomTurn, c -> {
+        cam.addView(ui.toggle("Zoom in at turn start", o.zoomTurn, c -> {
             o.zoomTurn = c;
             enableAll(zoomSlider, c);
         }));

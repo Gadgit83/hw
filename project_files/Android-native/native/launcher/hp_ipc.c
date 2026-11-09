@@ -174,6 +174,7 @@ static void *server_thread(void *arg)
     return NULL;
 }
 
+#ifdef HP_HOST_TEST
 /* Test hook (host test script action "ipc:<text>"): sends one message to the engine as the frontend would, e.g. "Fteamname"
  * (a team left, the engine runs "teamgone u..."). Returns 0 when sent. */
 int hp_ipc_send(const char *payload)
@@ -189,6 +190,7 @@ int hp_ipc_send(const char *payload)
     pthread_mutex_unlock(&g_fd_lock);
     return rc;
 }
+#endif /* HP_HOST_TEST */
 
 int hp_ipc_start(const char *config_path)
 {

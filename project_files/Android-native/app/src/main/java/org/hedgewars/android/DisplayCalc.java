@@ -115,7 +115,6 @@ public final class DisplayCalc {
                 // bars are hidden in game (immersive); only count them if they are really showing, over every row
                 Insets bars = wi.getInsets(WindowInsets.Type.navigationBars() | WindowInsets.Type.statusBars());
                 l = Math.max(l, bars.left); rt = Math.max(rt, bars.right); b = Math.max(b, bars.bottom);
-                cut = new int[6];
             }
             // A flip by 180 degrees swaps the sides: top and bottom, left and right, and the diagonal corners
             // are treated alike, so the engine's layout stays right after a rotation (see edgeCutouts).

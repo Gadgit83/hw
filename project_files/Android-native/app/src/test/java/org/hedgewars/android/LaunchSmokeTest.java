@@ -192,7 +192,7 @@ public class LaunchSmokeTest {
         x.performClick();
         TestSupport.settle(200);
         assertFalse("hidden after dismissing", TestSupport.shown(box));
-        assertTrue("the stored error is cleared", Diag.lastError(app()) == null);
+        assertTrue("the stored error is kept for the shared report", Diag.lastError(app()) != null);
         ctl.pause().stop().destroy();
         // and it does not come back
         String again = launch(MainActivity.class, null, 800);

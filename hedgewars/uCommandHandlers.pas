@@ -674,6 +674,17 @@ s:= s; // avoid compiler hint
 cNetHost:= true;
 end;
 
+// Network games: the launcher (local IPC 'e' command) lowers the interval of the empty '+' time marks and of the flush of
+// buffered messages. Receivers stall until a message stamped later than their game time arrives, so a shorter interval only
+// lets them advance sooner; every command keeps its own game-time stamp, so nothing any phone computes changes.
+procedure chNetFlush(var s: shortstring);
+var v: LongInt;
+begin
+v:= StrToInt(s);
+if (v >= 10) and (v <= 1000) then
+    cNetFlushMs:= LongWord(v);
+end;
+
 // Network games: the launcher pauses ('1') or resumes ('0') this engine when the relay says the host did. A real pause
 // (game time stops, the Paused banner shows), not the AFK toggle. Game time only moves by ticks, never by the wall
 // clock, so pausing at different moments on each phone cannot change what any phone computes.
@@ -1091,6 +1102,7 @@ begin
     RegisterVariable('mute'    , @chMute         , true );
     RegisterVariable('findhh'  , @chFindhh       , true );
     RegisterVariable('pause'   , @chPause        , true );
+    RegisterVariable('netflush', @chNetFlush     , true );
     RegisterVariable('nethost' , @chNetHost      , true );
     RegisterVariable('netpause', @chNetPause     , true );
     RegisterVariable('netpausereq', @chNetPauseReq, true );

@@ -42,7 +42,6 @@ implementation
 uses uConsole, uConsts, uVariables, uCommands, uUtils, uDebug, uLocale, uSound;
 
 const
-    cSendEmptyPacketTime = 1000;
     cSendBufferSize = 1024;
 
 type PCmd = ^TCmd;
@@ -377,7 +376,7 @@ end;
 procedure FlushMessages(Lag: Longword);
 begin
 inc(flushDelayTicks, Lag);
-if (flushDelayTicks >= cSendEmptyPacketTime) then
+if (flushDelayTicks >= cNetFlushMs) then
     begin
     if sendBuffer.count = 0 then
         SendIPC(_S'+');

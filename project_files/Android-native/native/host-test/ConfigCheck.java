@@ -209,11 +209,11 @@ public class ConfigCheck {
                 if (s.startsWith("ehat ")) check(new File(dataDir, "Graphics/Hats/" + s.substring(5) + ".png").isFile(), "hat file: " + s);
             }
         }
-        // A setup saved with the full data (hats, theme, fort, voice, image map, style that are not installed) is repaired.
+        // A setup that names content which is not installed (after a data change) is repaired.
         SetupModel m = teams(d, new Random(3), 2, 4);
         SetupModel.Team t = m.teams.get(0);
-        t.fort = "Castle"; t.voice = "Pirate"; t.grave = "NoSuchGrave"; t.hogHat[0] = "sth_Sonic";
-        m.theme = "Cake"; m.mapType = SetupModel.MAP_IMAGE; m.imageMap = "Hogville"; m.style = "NoSuchStyle";
+        t.fort = "NoSuchFort"; t.voice = "NoSuchVoice"; t.grave = "NoSuchGrave"; t.hogHat[0] = "NoSuchHat";
+        m.theme = "NoSuchTheme"; m.mapType = SetupModel.MAP_IMAGE; m.imageMap = "NoSuchMap"; m.style = "NoSuchStyle";
         m.repair(d, new Random(4));
         check(d.forts().contains(t.fort) && d.voices().contains(t.voice) && d.graves().contains(t.grave) && t.hogHat[0].equals("NoHat"), "repair replaces missing team content");
         check(m.theme.isEmpty() && m.style.isEmpty(), "repair clears a missing theme and style");

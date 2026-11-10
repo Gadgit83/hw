@@ -240,6 +240,23 @@ public final class Relay {
     }
 
     /**
+     * The value of query parameter {@code name} in an HTTP request line ("GET /?a=1&b=2 HTTP/1.1"), or null when it is absent.
+     * The name must start right after the '?' or an '&', so "xcompat=" is not "compat=". The first occurrence wins.
+     */
+    public static String queryParam(String requestLine, String name) {
+        if (requestLine == null) return null;
+        int qm = requestLine.indexOf('?');
+        if (qm < 0) return null;
+        int end = requestLine.indexOf(' ', qm);
+        String query = requestLine.substring(qm + 1, end < 0 ? requestLine.length() : end);
+        for (String part : query.split("&")) {
+            int eq = part.indexOf('=');
+            if (eq > 0 && part.substring(0, eq).equals(name)) return part.substring(eq + 1);
+        }
+        return null;
+    }
+
+    /**
      * The body of the status GET on the viewer port. Keeps the fields of the e2e-host bridge (state, game, viewers, viewersEver)
      * and adds what the TV page reads: host (this phone's name), players (one object per phone in the lobby: name, teams, host),
      * compatible and reason (false when the TV page named a protocol in the request, ?proto=N, that this relay does not speak),
@@ -248,18 +265,15 @@ public final class Relay {
      */
     String statusJson(String requestLine) {
         String reason = "";
-        int q = requestLine == null ? -1 : requestLine.indexOf("proto=");
-        if (q >= 0) {
-            int e = q + 6;
-            while (e < requestLine.length() && Character.isDigit(requestLine.charAt(e))) e++;
-            String v = requestLine.substring(q + 6, e);
-            if (v.isEmpty() || v.length() > 9 || Integer.parseInt(v) != PROTO) reason = "The TV page speaks protocol " + (v.isEmpty() ? "?" : v) + ", this host speaks " + PROTO + ".";
+        String pv = queryParam(requestLine, "proto");
+        if (pv != null) {
+            boolean digits = !pv.isEmpty() && pv.length() <= 9 && pv.chars().allMatch(Character::isDigit);
+            if (!digits || Integer.parseInt(pv) != PROTO)
+                reason = "The TV page speaks protocol " + (digits ? pv : "?") + ", this host speaks " + PROTO + ".";
         }
-        int cq = requestLine == null ? -1 : requestLine.indexOf("compat=");
-        if (cq >= 0 && reason.isEmpty()) {
-            int e = cq + 7;
-            while (e < requestLine.length() && requestLine.charAt(e) > ' ' && requestLine.charAt(e) != '&') e++;
-            String v = requestLine.substring(cq + 7, Math.min(e, cq + 7 + 64));
+        String cv = queryParam(requestLine, "compat");
+        if (cv != null && reason.isEmpty()) {
+            String v = cv.length() > 64 ? cv.substring(0, 64) : cv;
             if (!v.equals(Compat.VALUE)) reason = "The TV page is \"" + v.replaceAll("[^A-Za-z0-9._-]", "?") + "\", this host is \"" + Compat.VALUE + "\": the games would not agree.";
         }
         synchronized (lock) {

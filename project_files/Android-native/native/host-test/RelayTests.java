@@ -1009,7 +1009,7 @@ public class RelayTests {
         System.out.println("status GET: the JSON shape the TV viewer reads");
         Game g = new Game(20000, 1000);
         // the game is already running here (state playing); players are the two phones
-        for (String path : new String[] { "/", "/?proto=1", "/?proto=7", "/?compat=" + org.hedgewars.android.net.Compat.VALUE, "/?compat=hwnet-60-sim0" }) {
+        for (String path : new String[] { "/", "/?proto=1", "/?proto=7", "/?compat=" + org.hedgewars.android.net.Compat.VALUE, "/?compat=hwnet-60-sim0", "/?xcompat=hwnet-60-sim0", "/?xproto=7", "/?a=1&compat=hwnet-60-sim0", "/?a=1&proto=7&b=2" }) {
             try (Socket c = new Socket("127.0.0.1", g.f.relay.viewerPort())) {
                 c.setSoTimeout(3000);
                 c.getOutputStream().write(("GET " + path + " HTTP/1.1\r\nHost: x\r\n\r\n").getBytes(StandardCharsets.UTF_8));
@@ -1029,11 +1029,12 @@ public class RelayTests {
                 check(p0 instanceof Map && ((Map<?, ?>) p0).get("name") instanceof String && ((Map<?, ?>) p0).get("teams") instanceof Number, "  a player has a name and a team count");
                 check(j.get("compatible") instanceof Boolean && j.get("reason") instanceof String && j.get("engine") instanceof String && !((String) j.get("engine")).isEmpty() , "  compatible, reason and engine have the right types");
                 check("hwnet-60-sim1".equals(j.get("compat")) && j.get("protocol") instanceof Number && ((Number) j.get("protocol")).intValue() == 60, "  compat is hwnet-60-sim1 and protocol 60 (" + j.get("compat") + ")");
-                boolean bad = path.equals("/?proto=7") || path.equals("/?compat=hwnet-60-sim0");
+                boolean bad = path.equals("/?proto=7") || path.equals("/?compat=hwnet-60-sim0") || path.equals("/?a=1&compat=hwnet-60-sim0") || path.equals("/?a=1&proto=7&b=2");
                 check(((Boolean) j.get("compatible")) == !bad && (bad == !((String) j.get("reason")).isEmpty()), "  compatible is " + !bad + (bad ? ", with a reason: " + j.get("reason") : ""));
             }
         }
-        check(g.f.relay.viewersWaiting() == 1, "three polls from one TV count as 1 waiting (" + g.f.relay.viewersWaiting() + ")");
+        check(Relay.queryParam("GET /?xcompat=a HTTP/1.1", "compat") == null && "a".equals(Relay.queryParam("GET /?q=1&compat=a HTTP/1.1", "compat")), "queryParam anchors on ? or &");
+        check(g.f.relay.viewersWaiting() == 1, "polls from one TV count as 1 waiting (" + g.f.relay.viewersWaiting() + ")");
         g.end();
     }
 

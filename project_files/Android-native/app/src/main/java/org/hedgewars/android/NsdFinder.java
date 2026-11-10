@@ -23,7 +23,7 @@ import java.util.Map;
  * NSD cannot run on the build machine: only the parsing and the queue are unit-tested; this class is for the device test.
  */
 final class NsdFinder implements HostDiscovery {
-    static final long SEARCH_MS = 45000;
+    static final long SEARCH_MS = 20000;
     private final Context app;
     private final Handler main = new Handler(Looper.getMainLooper());
     private NsdManager nsd;

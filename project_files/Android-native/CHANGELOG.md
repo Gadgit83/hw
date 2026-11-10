@@ -4,6 +4,14 @@ All notable changes to the native Android app (`project_files/Android-native`), 
 
 Only some builds were put on a phone, so a version below is a build that was made, not necessarily one that was released. Releases are tags on `android-master` with the APK attached; there is none yet.
 
+## 0.3.0-tv11 (115): shorter host search (test build)
+
+`HP_PROFILE=test`, versionName `0.3.0-tv11-test`. From RESULT 10 on the device testing issue.
+
+### Changed
+
+- Hosts on this Wi-Fi: a search with no host now ends after about 20 s (was 45 s, and 53 to 63 s on a phone). A host on the same Wi-Fi normally appears within a few seconds; "Search again" is there for a host that starts later.
+
 ## 0.3.0-tv10 (114): fixes from the two-phone and TV test (test build)
 
 `HP_PROFILE=test`, versionName `0.3.0-tv10-test`. Fixes from RESULT 8 and 9 on the device testing issue (Fairphone 4 host, Fairphone 3 joining, TV watching).

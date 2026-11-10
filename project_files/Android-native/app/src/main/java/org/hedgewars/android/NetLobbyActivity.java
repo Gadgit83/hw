@@ -344,9 +344,9 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
         });
     }
 
-    private static final long BACKSTOP_MS = 50000;
+    private static final long BACKSTOP_MS = 23000;
     private final android.os.Handler searchHandler = new android.os.Handler(android.os.Looper.getMainLooper());
-    /** Ends a search that the finder did not end itself (its own timeout is 45 s), so the screen never says "Searching" for ever. */
+    /** Ends a search that the finder did not end itself (its own timeout is 20 s), so the screen never says "Searching" for ever. */
     private final Runnable searchBackstop = () -> {
         if (destroyed || !searching) return;
         stopDiscovery();

@@ -4,6 +4,17 @@ All notable changes to the native Android app (`project_files/Android-native`), 
 
 Only some builds were put on a phone, so a version below is a build that was made, not necessarily one that was released. Releases are tags on `android-master` with the APK attached; there is none yet.
 
+## 0.3.0-tv10 (114): fixes from the two-phone and TV test (test build)
+
+`HP_PROFILE=test`, versionName `0.3.0-tv10-test`. Fixes from RESULT 8 and 9 on the device testing issue (Fairphone 4 host, Fairphone 3 joining, TV watching).
+
+### Fixed
+
+- A normal game over after a phone had dropped was reported as the host being lost: the TV got close code 4003 and `lastGame` said `host-lost`. The game is now over when every phone still in it saw the game over (4002, `over`).
+- Join: the first join after the host phone sat idle could fail with "No route to host" (the joining phone had not found the host on the Wi-Fi yet). The join now tries again, up to 3 attempts 1.5 s apart, and says so ("Trying again (2 of 3)...").
+- Hosts on this Wi-Fi: the search never ended, so "No host found on this Wi-Fi." and "Search again" did not appear. The search now starts at once and always ends.
+- Stop watching took two steps (the game's question, then a second button in the lobby). It now leaves in one.
+
 ## 0.3.0-tv9 (113): TV sees the close code; no stale own host (test build)
 
 `HP_PROFILE=test`, versionName `0.3.0-tv9-test`. Fixes from the TV test of 0.3.0-tv7b (RESULT 7 on the device testing issue).

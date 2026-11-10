@@ -54,7 +54,7 @@ final class NetSession {
 
     // Game password ---------------------------------------------------------------------------------
 
-    /** The settings key: whether hosting asks for a game password. On unless the host turned it off. */
+    /** The settings key: whether hosting asks for a game password. Off unless the host turned it on. */
     static final String PIN_ON_KEY = "netpin_on";
     /** This hosting session's password (4 digits), or null when the setting is off or nothing is hosted. Never logged. */
     static volatile String hostPin;
@@ -86,7 +86,7 @@ final class NetSession {
     }
 
     static boolean pinSetting(Context c) {
-        return c.getSharedPreferences(Store.PREFS_NAME, Context.MODE_PRIVATE).getBoolean(PIN_ON_KEY, true);
+        return c.getSharedPreferences(Store.PREFS_NAME, Context.MODE_PRIVATE).getBoolean(PIN_ON_KEY, false);
     }
 
     /** Called when hosting starts: the password for this session, or null when the setting is off. */

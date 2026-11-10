@@ -307,8 +307,6 @@ public final class Relay {
 
     // Game password ------------------------------------------------------------------------------
 
-    /** TV close codes for the game password: 4006 missing or wrong, 4007 the address is locked for a while. */
-    public static final int CLOSE_PASSWORD = 4006, CLOSE_PASSWORD_LOCKED = 4007;
     /** The 5th wrong or missing password from one address locks it for {@link #pinLockMs}. */
     public static final int PIN_MAX_WRONG = 5;
     /** Lock length in milliseconds. Not final so the tests can shorten it; the app never changes it. */
@@ -2235,7 +2233,6 @@ public final class Relay {
                 return;
             }
             final Viewer me = new Viewer();
-            int pinResult = PIN_OK;
             synchronized (lock) {
                 if (game == null || state == S_SETUP || game.viewerLines.size() > MAX_SETUP_LINES) {
                     os.write("HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\nContent-Length: 0\r\n\r\n".getBytes(StandardCharsets.ISO_8859_1));
@@ -2243,14 +2240,7 @@ public final class Relay {
                     s.close();
                     return;
                 }
-                // The password is checked before the TV is attached to the game. A pin parameter is ignored when no password is set.
-                if (getPin() != null) {
-                    String given = queryParam(head.substring(0, Math.max(0, head.indexOf('\n'))), "pin");
-                    pinResult = checkPin(addrOf(s), given == null ? "" : given);
-                }
-                if (pinResult != PIN_OK) {
-                    // fall through to the refusal below, outside the lock
-                } else {
+                // The game password never applies to TV viewers (only to phones joining); a pin parameter is ignored.
                 os.write(Ws.handshakeResponse(key));
                 os.flush();
                 me.sock = s;
@@ -2264,9 +2254,7 @@ public final class Relay {
                 viewersEver++;
                 addViewerEvent(game, "TV viewer joined from " + me.from + " (first message " + first.length + " bytes)");
                 log("viewer joined from " + me.from + ", first message " + first.length + " bytes, log " + game.logMsgs + " messages");
-                }
             }
-            if (pinResult != PIN_OK) { refuseViewerPin(s, os, in, key, pinResult); return; }
             v = me;
             s.setSoTimeout(0);
             changed();
@@ -2297,40 +2285,6 @@ public final class Relay {
         }
         if (v != null) viewerLost(v, why);
         else try { s.close(); } catch (IOException ignored) { }
-    }
-
-    /**
-     * A TV without the right game password: the WebSocket upgrade is completed, then the only frame is a close frame (4006 "password",
-     * or 4007 "password-locked" while its address is locked), no game data. Then, as for any close: wait briefly for the TV's close
-     * reply, shut the output side and close.
-     */
-    private void refuseViewerPin(Socket s, OutputStream os, InputStream in, String key, int result) {
-        boolean locked = result == PIN_LOCKED;
-        log("viewer " + s.getRemoteSocketAddress() + " refused: " + (locked ? "password-locked" : "password"));
-        try {
-            byte[] rb = (locked ? "password-locked" : "password").getBytes(StandardCharsets.UTF_8);
-            int code = locked ? CLOSE_PASSWORD_LOCKED : CLOSE_PASSWORD;
-            byte[] payload = new byte[2 + rb.length];
-            payload[0] = (byte) (code >> 8);
-            payload[1] = (byte) code;
-            System.arraycopy(rb, 0, payload, 2, rb.length);
-            os.write(Ws.handshakeResponse(key));
-            os.write(Ws.frame(8, payload));
-            os.flush();
-            s.setSoTimeout(2000);
-            // The TV's close reply, for 2 s at most overall: a client that keeps sending pings must not hold a viewer slot.
-            Thread cut = new Thread(() -> {
-                try { Thread.sleep(2000); } catch (InterruptedException ignored) { }
-                try { s.close(); } catch (IOException ignored) { }
-            }, "relay-pin-refused");
-            cut.setDaemon(true);
-            cut.start();
-            try { Ws.readClient(in, reply -> { }); } catch (IOException ignored) { }
-        } catch (IOException ignored) {
-        } finally {
-            try { s.shutdownOutput(); } catch (IOException ignored) { }
-            try { s.close(); } catch (IOException ignored) { }
-        }
     }
 
     /** The viewer's connection ended (read side, or the writer failed). */

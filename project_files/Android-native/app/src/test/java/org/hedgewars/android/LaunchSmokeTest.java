@@ -5,6 +5,7 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
 import android.app.Activity;
+import android.view.View;
 import android.content.Context;
 import android.content.Intent;
 
@@ -510,6 +511,57 @@ public class LaunchSmokeTest {
         String off = launch(NetLobbyActivity.class, null, 600);
         assertTrue("with the setting off the host lobby says so: " + off, off.contains("Game password: off (anyone on this Wi-Fi can join)"));
         System.out.println("SDK " + android.os.Build.VERSION.SDK_INT + ": host lobby game password ok");
+    }
+
+    @Test
+    public void netLobbyActivity_defaultsToNoPassword_andTurningItOnShowsFourDigits() throws Exception {
+        TestSupport.installData(app());
+        assertTrue("the game password is off by default", !NetSession.pinSetting(app()));
+        assertTrue("no password without the setting", NetSession.beginHostPin(app()) == null);
+        NetSession.setPinOn(app(), true);
+        String pin = NetSession.beginHostPin(app());
+        assertTrue("turned on, a 4-digit PIN is made: " + pin, pin != null && pin.matches("\\d{4}"));
+        NetSession.setPinOn(app(), false);
+        NetSession.hostPin = null;
+        netState(LOBBY.replace("\"canStart\":false", "\"canStart\":true").replace("\"you\":2", "\"you\":1"), true);
+        String off = launch(NetLobbyActivity.class, null, 600);
+        assertTrue("by default the host lobby says anyone can join: " + off, off.contains("Game password: off (anyone on this Wi-Fi can join)"));
+        System.out.println("SDK " + android.os.Build.VERSION.SDK_INT + ": game password off by default ok");
+    }
+
+    private static android.widget.EditText nameField(View v) {
+        if (v instanceof android.widget.EditText && "Player name".contentEquals(((android.widget.EditText) v).getHint())) return (android.widget.EditText) v;
+        if (v instanceof android.view.ViewGroup) {
+            for (int i = 0; i < ((android.view.ViewGroup) v).getChildCount(); i++) {
+                android.widget.EditText r = nameField(((android.view.ViewGroup) v).getChildAt(i));
+                if (r != null) return r;
+            }
+        }
+        return null;
+    }
+
+    @Test
+    public void netLobbyActivity_defaultNameIsRandom_andTheDiceChangesIt() throws Exception {
+        TestSupport.installData(app());
+        java.util.List<String> names = PlayerNames.load(app());
+        assertTrue("the names asset ships with the app: " + names.size(), names.size() > 1);
+        Activity a = Robolectric.buildActivity(NetLobbyActivity.class, null).create().start().postCreate(null).resume().visible().get();
+        android.view.View root = a.getWindow().getDecorView();
+        android.widget.EditText f = nameField(root);
+        assertTrue("the name field exists", f != null);
+        String first = f.getText().toString();
+        assertTrue("the name is not empty and comes from the list: " + first, !first.isEmpty() && names.contains(first));
+        assertTrue("it is remembered", first.equals(app().getSharedPreferences(Store.PREFS_NAME, Context.MODE_PRIVATE).getString("netname", "")));
+        android.view.View dice = TestSupport.find(root, "Pick another name");
+        assertTrue("the dice button exists", dice instanceof android.widget.Button && "\uD83C\uDFB2".contentEquals(((android.widget.Button) dice).getText()));
+        dice.performClick();
+        String second = f.getText().toString();
+        assertTrue("the dice picks a different name from the list: " + first + " -> " + second, !second.equals(first) && names.contains(second));
+        assertTrue("and saves it", second.equals(app().getSharedPreferences(Store.PREFS_NAME, Context.MODE_PRIVATE).getString("netname", "")));
+        a.finish();
+        Activity b = Robolectric.buildActivity(NetLobbyActivity.class, null).create().start().postCreate(null).resume().visible().get();
+        assertTrue("the name stays the same on the next launch", second.equals(nameField(b.getWindow().getDecorView()).getText().toString()));
+        System.out.println("SDK " + android.os.Build.VERSION.SDK_INT + ": default name and dice ok");
     }
 
     private static void numericFields(android.view.View v, java.util.List<android.widget.EditText> out) {

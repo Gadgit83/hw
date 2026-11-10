@@ -217,6 +217,8 @@ process :game (GameActivity)                                process :game
 
 The data from `share/hedgewars/Data` is trimmed by `scripts/stage-assets.sh` and packaged as APK assets. The engine uses PhysFS on real files, so `DataInstaller` copies the assets to `files/Data` on first start (a progress percentage is shown). Trade-off: the data exists twice on the device (about 110 MB extra) and the first start takes a few seconds. Mounting straight from the APK would need a custom PhysFS archiver and was left out for robustness.
 
+**Default player names.** The names offered as the default player name on the Network screen are not in the code: `app/src/main/assets/player-names.txt` (shipped in both profiles) is copied from `shared/player-names.txt` of the hedgewars-party repository by `scripts/sync-player-names.sh [checkout-or-file]` (default `/home/user/hedgewars-party`, `origin/main`), which checks the rules (at most 20 characters, plain ASCII, `#` comments). Re-run it when the list changes and commit the asset.
+
 Trimmed from the data: the 17 MB CJK font, other languages than English, single player missions, preview images, Qt frontend files, and most music (`HP_MUSIC=lite|full|none`, default lite keeps about nine tracks, themes without a track play nothing or the fallback). The mobile-only touch button artwork is taken from the old Android port's assets (`project_files/Android-build`), only for files the desktop data lacks. The setup screen offers what is staged: 34 themes, 299 hats, 41 graves, 17 forts, 15 voice packs, 44 image maps and 21 game styles at the time of writing.
 
 ## Build guide

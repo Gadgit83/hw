@@ -4,6 +4,21 @@ All notable changes to the native Android app (`project_files/Android-native`), 
 
 Only some builds were put on a phone, so a version below is a build that was made, not necessarily one that was released. Releases are tags on `android-master` with the APK attached; there is none yet.
 
+## 0.3.0-tv13 (117): password off by default and never for TVs, default player names (test build)
+
+`HP_PROFILE=test`, versionName `0.3.0-tv13-test`.
+
+### Changed
+
+- The "Game password" setting is now off by default (the host turns it on; the choice is kept). With it off the host lobby says "Game password: off (anyone on this Wi-Fi can join)".
+- The game password never applies to TV viewers. The viewer WebSocket on 8766 needs no PIN, is never sent close 4006 or 4007 (the codes are gone) and its attempts do not count towards the lockout. A `pin` parameter on the viewer request is ignored. It still gates phones joining, to play and to watch ("Join to watch"), with the 5-wrong-attempts lockout for phones. The status GET still has `pin`.
+- The default player name (Network screen, "Your name") is now picked at random from a list of names the first time, saved, and kept until the player edits it or rolls again. If the list is missing or empty it is the phone model as before.
+
+### Added
+
+- A dice button (🎲, "Pick another name") beside the name field picks a different random name and saves it.
+- `app/src/main/assets/player-names.txt`, copied from `shared/player-names.txt` of the hedgewars-party repository by `scripts/sync-player-names.sh` (checks: one name per line, at most 20 characters, plain ASCII, `#` comments and blank lines skipped). Re-run it when the list changes, then commit the asset. It ships in both profiles.
+
 ## 0.3.0-tv12 (116): game password for network games (test build)
 
 `HP_PROFILE=test`, versionName `0.3.0-tv12-test`. A network game can now ask for a 4-digit password. The TV side is built against the same protocol (docs/network.md, Game password).

@@ -66,7 +66,7 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
         ui = new Ui(this);
         Ui.edgeToEdge(this);
         android.content.SharedPreferences p = getSharedPreferences(Store.PREFS_NAME, MODE_PRIVATE);
-        name = p.getString("netname", Build.MODEL);
+        name = PlayerNames.current(this);
         address = p.getString("netaddr", "");
         lastHost = p.getString("lasthost", "");
         root = new LinearLayout(this);
@@ -243,11 +243,22 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
                 + "setup screen first. The host's Map and Rules tabs decide the game."));
         start.addView(ui.heading("Your name"));
         nameField = ui.field(name, "Player name");
-        start.addView(nameField);
+        LinearLayout nameRow = new LinearLayout(this);
+        nameRow.setOrientation(LinearLayout.HORIZONTAL);
+        nameRow.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        nameRow.addView(nameField, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        android.widget.Button dice = ui.button("\uD83C\uDFB2", false, v -> {
+            name = PlayerNames.reroll(this, nameField.getText().toString().trim());
+            nameField.setText(name);
+            nameField.setSelection(name.length());
+        });
+        dice.setContentDescription("Pick another name");
+        nameRow.addView(dice, new LinearLayout.LayoutParams(ui.dp(56), ViewGroup.LayoutParams.WRAP_CONTENT));
+        start.addView(nameRow);
         start.addView(ui.heading("Host"));
         start.addView(ui.toggle("Game password", NetSession.pinSetting(this), on -> NetSession.setPinOn(this, on)));
         start.addView(ui.hint("On: each hosting session gets a random 4-digit password that players need to join or watch. "
-                + "Off: anyone on this Wi-Fi can join."));
+                + "Off (the default): anyone on this Wi-Fi can join. TV viewers never need the password."));
         start.addView(ui.button(connecting ? "Starting..." : "Host network game", true, v -> host()), Ui.lp(ViewGroup.LayoutParams.MATCH_PARENT, ui.dp(52)));
         // The list of hosts is a card of its own: beside the other two cards when the screen is wide, so Join by address stays in view.
         hostsBox = ui.card();
@@ -786,7 +797,7 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
             render();
             return;
         }
-        final String nick = name.isEmpty() ? Build.MODEL : name;
+        final String nick = name.isEmpty() ? PlayerNames.current(this) : name;
         new Thread(() -> {
             long end = System.currentTimeMillis() + 8000;
             while (HostService.relay == null && HostService.error.isEmpty() && System.currentTimeMillis() < end) {
@@ -841,7 +852,7 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
 
     private void connectTo(final String host, final int port, final boolean watch, final String pin) {
         if (connecting) return;                  // one connect at a time (a join must not overtake the host's own connect)
-        final String nick = name.isEmpty() ? Build.MODEL : name;
+        final String nick = name.isEmpty() ? PlayerNames.current(this) : name;
         connecting = true;
         problem = "";
         stopSearch();

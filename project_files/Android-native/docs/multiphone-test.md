@@ -134,7 +134,6 @@ When a game ends, or hosting stops, the relay sends every connected TV a WebSock
 | 4003 | `host-lost` | the host lost its Wi-Fi (`The host lost its Wi-Fi connection`), or every engine is gone |
 | 4004 | `relay-stopped` | hosting stopped (Stop hosting, the app closed from recents) |
 | 4005 | `ended` | any other end the relay decides: a desync it acts on (two phones: the game ends for both), the pause limit, every phone dropped |
-| 4006 | `password` | at connect, not at the end: the TV sent no PIN or a wrong one (0.3.0-tv12, see docs/network.md, Game password) |
-| 4007 | `password-locked` | at connect: too many wrong PINs from the TV's address, locked for 30 s |
+| 4006, 4007 | not used | (0.3.0-tv13) the game password never applies to TV viewers; these codes were sent by 0.3.0-tv12 only |
 
 The status GET on 8766 gains `lastGame`: `{"n": <game number>, "ended": "host"|"over"|"host-lost"|"stopped"|"other", "atMs": <epoch ms>}` for the most recent game that ended (absent before the first); `ended` matches the codes above (`host` = 4001, `over` = 4002, `host-lost` = 4003, `stopped` = 4004, `other` = 4005). A TV that does not know 4005 should treat it as a generic end. `state` is unchanged (`setup` or `playing`). Checked in `RelayTests.testViewerCloseCodes` (each code, the order of the last game frame and the close, `lastGame`), and in the net-test scenarios `viewer3` and `hostpause`, where a small WebSocket probe in the harness (`NetHarness.CloseProbe`; the TV page's own stand-in `viewer-sim.js` lives in hedgewars-party and was not changed) must see `4002 game-over`.

@@ -19,7 +19,7 @@ public final class Compat {
      * changes what a game computes from the same messages: physics, weapons, AI, random number use, map generation, schemes, game
      * rules, Lua scripting behaviour) or the format or meaning of the messages between a phone and a TV (the setup lines, the framing,
      * the whitelisted message types, the e$spectate and backlog handling). Sound, touch, UI, rendering and launcher-only changes do
-     * not need a bump. Start: 1. 2: the game password (lobby hello field pin, viewer query pin, close codes 4006 and 4007).
+     * not need a bump. Start: 1. 2: the game password (lobby hello field pin, viewer query pin, close codes 4006 and 4007; the TV side of it was dropped in 0.3.0-tv13, the SIM number stays).
      */
     public static final int SIM = 2;
 

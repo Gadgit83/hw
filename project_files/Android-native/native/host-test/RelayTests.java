@@ -1519,34 +1519,6 @@ public class RelayTests {
         return Boolean.TRUE.equals(j.get("pin"));
     }
 
-    static void testPinRefusedPinger() throws Exception {
-        System.out.println("Game password: a refused TV that keeps pinging is still cut off");
-        Game g = new Game(20000, 1000);
-        g.f.relay.setPin("7305");
-        try (Socket s = viewerReq(g.f, "pin=0000")) {
-            int[] op = new int[1];
-            byte[] p = readWsFrame(s.getInputStream(), op);
-            check(p != null && op[0] == 8, "the refusal is a close frame");
-            long t0 = System.currentTimeMillis();
-            int got = 0;
-            s.setSoTimeout(500);
-            while (System.currentTimeMillis() - t0 < 8000) {
-                try {
-                    s.getOutputStream().write(maskedFrame(9, new byte[] { 1 }, new byte[] { 5, 6, 7, 8 }));   // a ping, no close reply
-                    s.getOutputStream().flush();
-                } catch (java.io.IOException e) { got = -1; break; }
-                try {
-                    if (readWsFrame(s.getInputStream(), op) == null) { got = -1; break; }
-                } catch (java.net.SocketTimeoutException e) {
-                    // nothing to read: ping again
-                } catch (java.io.IOException e) { got = -1; break; }
-            }
-            long took = System.currentTimeMillis() - t0;
-            check(got == -1 && took < 4000, "the connection ends within about 2 s although the client keeps pinging (" + took + " ms)");
-        }
-        g.end();
-    }
-
     @SuppressWarnings("unchecked")
     static void testGamePassword() throws Exception {
         System.out.println("Game password: status flag, phones, TV viewers, lock");
@@ -1607,57 +1579,31 @@ public class RelayTests {
             for (P q : new P[] { hst, pr, prs, after, still }) if (q.client != null) q.client.close();
             f.stop();
 
-            // TV viewers: a running game.
+            // TV viewers: a running game. The password never applies to them.
             Game g = new Game(20000, 1000);
             g.f.relay.setPin("7305");
             check(pinFlag(g.f), "GET shows pin true while a game runs");
-            int[] n = new int[1];
-            try (Socket s = viewerReq(g.f, "pin=7305")) {
-                String ff = firstFrame(s);
-                check(ff.equals("data") && waitFor(() -> g.f.relay.viewerCount() == 1, 2000), "a TV with the right PIN streams (" + ff + ")");
+            String[] queries = { "", "pin=0000", "pin=73", "pin=7305", "compat=" + org.hedgewars.android.net.Compat.VALUE + "&pin=1" };
+            for (String q : queries) {
+                try (Socket s = viewerReq(g.f, q)) {
+                    String ff = firstFrame(s);
+                    check(ff.equals("data") && waitFor(() -> g.f.relay.viewerCount() == 1, 2000), "a TV streams with a password set, query '" + q + "' (" + ff + ")");
+                }
+                waitFor(() -> g.f.relay.viewerCount() == 0, 3000);
             }
-            waitFor(() -> g.f.relay.viewerCount() == 0, 3000);
-            try (Socket s = viewerReq(g.f, "compat=" + org.hedgewars.android.net.Compat.VALUE + "&pin=7305")) {
-                check(firstFrame(s).equals("data"), "pin after compat, any order: streams");
+            // Eight TV attempts with no or a wrong PIN never count towards the lockout: the next phone's wrong PIN is plain password.
+            for (int i = 0; i < 8; i++) {
+                try (Socket s = viewerReq(g.f, i % 2 == 0 ? "" : "pin=1")) {
+                    check(firstFrame(s).equals("data"), "TV attempt " + (i + 1) + " streams");
+                }
+                waitFor(() -> g.f.relay.viewerCount() == 0, 3000);
             }
-            waitFor(() -> g.f.relay.viewerCount() == 0, 3000);
-            try (Socket s = viewerReq(g.f, "")) {
-                String c = closeOf(s, n);
-                check(c.equals("4006 password") && n[0] == 0, "a TV without a PIN gets close 4006 password and no data frames (" + c + ", " + n[0] + " data)");
-                s.getOutputStream().write(maskedFrame(8, new byte[] { 0x0f, (byte) 0xa6 }, new byte[] { 1, 2, 3, 4 }));
-                s.getOutputStream().flush();
-                int after1;
-                try { after1 = s.getInputStream().read(); } catch (java.io.IOException e) { after1 = -3; }
-                check(after1 == -1, "the relay ends the connection after the TV's close reply (read " + after1 + ")");
-            }
-            check(g.f.relay.viewerCount() == 0, "a refused TV is never attached to the game");
-            try (Socket s = viewerReq(g.f, "pin=0000")) {
-                int[] n2 = new int[1];
-                String c = closeOf(s, n2);
-                check(c.equals("4006 password") && n2[0] == 0, "a TV with a wrong PIN gets 4006 password and no data (" + c + ")");
-            }
-            try (Socket s = viewerReq(g.f, "pin=73")) {
-                check(closeOf(s, new int[1]).equals("4006 password"), "a short PIN is wrong");
-            }
-            // Phones and TVs count together per address: 3 wrong so far here (missing, 0000, 73), then 1 phone, then the 5th from a TV
             P pw2 = phoneJoin(g.f, "Late", "5555", false, false);
-            check("password".equals(pw2.refusedCode), "a phone's wrong PIN counts with the TV's (4th)");
-            long t5 = System.currentTimeMillis();
-            try (Socket s = viewerReq(g.f, "pin=1")) {
-                check(closeOf(s, new int[1]).equals("4006 password"), "the 5th wrong PIN (a TV) is answered 4006");
-            }
-            try (Socket s = viewerReq(g.f, "pin=7305")) {
-                int[] n3 = new int[1];
-                String c = closeOf(s, n3);
-                check(c.equals("4007 password-locked") && n3[0] == 0, "afterwards the address is locked: even the right PIN gets 4007 password-locked (" + c + ")");
-            }
+            check("password".equals(pw2.refusedCode), "TV attempts did not count: a phone's first wrong PIN is plain password, not locked");
             P pw3 = phoneJoin(g.f, "Late2", "7305", false, false);
-            check("password-locked".equals(pw3.refusedCode), "the lock covers phones too");
-            Thread.sleep(Math.max(0, t5 + Relay.pinLockMs + 200 - System.currentTimeMillis()));
-            try (Socket s = viewerReq(g.f, "pin=7305")) {
-                check(firstFrame(s).equals("data"), "after the lock a right PIN streams again");
-            }
-            waitFor(() -> g.f.relay.viewerCount() == 0, 3000);
+            check(pw3.refusedCode.isEmpty() && !pw3.closed.toLowerCase().contains("password"), "the right PIN is not refused for the password after the TV attempts (" + pw3.closed + ")");
+            if (pw3.client != null) pw3.client.close();
+            if (pw2.client != null) pw2.client.close();
             g.f.relay.setPin(null);
             try (Socket s = viewerReq(g.f, "pin=1234")) {
                 check(firstFrame(s).equals("data"), "no password set: a pin parameter is ignored and the TV streams");
@@ -1856,7 +1802,6 @@ public class RelayTests {
         testDataDigest();
         testHostAdvert();
         testGamePassword();
-        testPinRefusedPinger();
         testResolveQueue();
         testLinkLiveness();
         testHostNetworkLoss();

@@ -20,19 +20,19 @@ On the first start the game data is unpacked to the phone's storage (a percentag
 
 ### The setup screen
 
-Three tabs along the top (Teams, Map, Rules), an Options button at the top right, and a bar along the bottom that always shows what will be played ("4 teams, 16 hedgehogs ... Default"), the data state and the Start game button. Everything you change is remembered for the next launch, including which tab you were on.
+One row along the top with the title, three tabs (Teams, Map, Rules) and a small Options button, and a bar along the bottom that always shows what will be played ("4 teams, 16 hedgehogs ... Default"), the data state and the Start game button. Everything you change is remembered for the next launch, including which tab you were on.
 
 **Teams**
 
 | Control | What it does |
 |---|---|
 | Add team, the cross on a team | Two to eight teams |
-| Randomise teams | New random names, hats, fort, grave and voice for every team (keeps colour, player and hedgehog count) |
+| Randomise (beside the Teams heading) | New random names, hats, fort, grave and voice for every team (keeps colour, player and hedgehog count) |
 | Colour square | The engine's nine team colours. Teams with the same colour play on the same side (a clan) and take turns together |
 | Name field | Team name (up to 32 characters; characters that cannot be in a file name are dropped) |
-| Player button | Human, or Computer level 1 (easiest) to 5 (hardest). A computer team plays by itself when its turn comes |
+| Player button | Human, or CPU 1 (easiest) to CPU 5 (hardest); the list has the full names. A computer team plays by itself when its turn comes |
 | Hogs stepper | One to eight hedgehogs per team (tap the number to type one) |
-| Customise | A page for one team: name, player, colour, fort, grave and voice pack, and for each hedgehog a hat (pick from the whole hat list with pictures), a name, and a button for a new random name that suits the hat |
+| Edit | A page for one team: name, player, colour, fort, grave and voice pack, and for each hedgehog a hat (pick from the whole hat list with pictures), a name, and a button for a new random name that suits the hat |
 
 New teams get a random themed name and hats the way the desktop game does it (`Names/types.ini` and the name lists in `Data/Names`). Fort, grave, hat, theme and map lists are read from the unpacked game data, so they show exactly what is installed.
 
@@ -54,7 +54,7 @@ Theme: Random, or pick one with its icon. Seed: leave empty for a new random map
 - Game style: Normal, or one of the Lua game styles from `Data/Scripts/Multiplayer` (Capture the Flag, Highlander, Tunnels, Racer and so on). A style may fix the scheme and the weapons (as in the desktop game); the pickers are then greyed out and say so.
 - Scheme: the 16 built-in schemes of the desktop game (Default, Pro Mode, Shoppa, Clean Slate, Minefield, Barrel Mayhem, Tunnel Hogs, Timeless, Thinking with Portals, King Mode, Mutant, Construction Mode, The Specialists, Space Invasion, HedgeEditor, Racer).
 - Weapon set: the 13 built-in sets (Default, Crazy, Pro Mode, Shoppa, Clean Slate, Minefield, Thinking with Portals, One of Everything, Highlander, Balanced Random Weapon, Construction Mode, Shoppa Pro, HedgeEditor). With "Pick the weapons that share the scheme's name" on (the same default as the desktop game), choosing a scheme also chooses the weapon set of the same name when there is one.
-- Key values (all editable, hold the plus or minus to repeat, tap the number to type one): turn time, starting health, sudden death, water rise, mines, mine timer, crate drops, health crate chance, explosive barrels.
+- Key values (all editable, hold the plus or minus to repeat, tap the number to type one): turn time (up to "Unlimited" at 9999 seconds), starting health, sudden death, water rise, mines, mine timer, crate drops, health crate chance, explosive barrels.
 - More rules (button): damage modifier, health in a crate, health lost in sudden death, rope length, get away time, dud mines, air mines, sentries, world edge, and the 25 rule switches (switch hedgehog, divide teams, indestructible land, border, low gravity, laser sight, invulnerable, reset health, vampirism, karma, artillery, random order, king, place hedgehogs, shared ammo, no girders, no land objects, AI survival, unlimited attacks, reset weapons, ammo per hedgehog, no wind, more wind, tag team, bottom border).
 
 Editing a number or a switch makes the scheme "changed from ..."; picking a scheme again resets all of them.
@@ -68,7 +68,8 @@ The Options button opens three tabs. Changes apply to the next game you start.
 | Sound | Master volume, sound effects, music | Effects and music are a share of the master volume (engine options `--volume`, `--effects-volume`, `--music-volume`) |
 | Sound | Mute, hedgehog voices | Mute passes `--nosound --nomusic`; voices off passes `--no-voices` |
 | Display and controls | Buttons and text on screen; Weapon menu | Automatic (about 8 mm per control from the real screen density, with the value for this screen shown) or a fixed percentage (`--ui-scale`, `--menu-scale`) |
-| Display and controls | Clear space at the edge | Automatic (from the rounded corners) or 0 to 15 mm. The camera cut-out and the navigation bar are avoided whatever you choose (`--inset-*`) |
+| Display and controls | Screen edge | Automatic: every button sits just clear of the rounding of its own corner and of the camera cut-out (`--screen-shape`, `--inset-*`). Switch Automatic off to add 0 to 10 mm of extra space at every edge on top of that |
+| Display and controls | Camera at the start of a turn | Centre on the active hedgehog (`--turn-centre`) and Zoom in (`--turn-zoom`, 110 to 200 % of the normal zoom, default 140 %), both on by default. Applied once when a turn starts or the switcher moves on; pinching or dragging during the turn is left alone, and a view you have pinched closer is not zoomed out |
 | Display and controls | Effects quality | Six levels as on the desktop, best to lowest (`--raw-quality`) |
 | Display and controls | Vibrate, frames per second, name tags | Vibration is a short buzz on big explosions; frames per second is `--showfps`; tags are `--no-teamtag`, `--no-hogtag`, `--no-healthtag` |
 | Advanced | Share log | Builds one report and offers it to mail and messaging apps |
@@ -89,6 +90,7 @@ The engine's own touch interface (`uTouch.pas`) is enabled through the `MOBILE` 
 | Drag on the aim marker (crosshair around the hedgehog) | Aim up and down |
 | Weapon chest (bottom right), or tap your hedgehog | Open the weapon menu; tap a weapon to choose it, tap outside to close |
 | Timer or bounce buttons (above the arrows, when the weapon uses them) | Set the fuse time or bounciness |
+| Switch button (above the arrows, same place as the timer button) | With the scheme rule "Switch hedgehog in a turn" the turn starts with a hedgehog switcher: tap this button to move to the next hedgehog of your team, as Tab does on the desktop. The button goes away when you walk, aim, jump, fire or pick a weapon (the switcher ends then, as on the desktop). Picking Switch in the weapon menu shows it too |
 | One finger drag on empty map | Move the camera (the camera then stops following the hedgehog until the next turn) |
 | Two finger pinch | Zoom |
 | Pause button (top right, yellow II) | Pause. While paused, tap it or anywhere else to resume (the resuming tap is not also a click, and a finger that went down before the pause does not resume on lift); the map can still be dragged |
@@ -110,7 +112,7 @@ Losing focus (home button, notification shade, phone call) pauses the game and g
 
 ## Troubleshooting
 
-**The game stops, shows a black screen or goes back to the setup screen.** A red box appears on the setup screen with the reason the engine gave, if it gave one, and a Share last log button. The same button is in Options, Advanced, Share log. It builds one text report (app and engine versions, device, options, the exact game setup that was sent to the engine, the engine log, the game process log, any native crash record from Android and the system log for the app) and opens the share sheet. Send it by mail or a messaging app.
+**The game stops, shows a black screen or goes back to the setup screen.** A short red box appears on the setup screen (what happened in one line, the details are in the log) with a Share last log button and a x that dismisses it. It also goes away by itself after 30 seconds, while the keyboard is open it is hidden, it is cleared when a new game starts, and an error recorded by an older version is dropped when the app is updated. The log stays in Options, Advanced, Share log, which is where to go after the box has gone. It builds one text report (app and engine versions, device, options, the exact game setup that was sent to the engine, the engine log, the game process log, any native crash record from Android and the system log for the app) and opens the share sheet. Send it by mail or a messaging app.
 
 **"Game data is missing" or sprites and sounds are absent.** Options, Advanced, Reset game data. The data is unpacked again the next time the setup screen is shown.
 
@@ -179,7 +181,7 @@ Three of the options needed engine changes (commits that go with the app): `--ef
 
 ### Size and safe area
 
-`GameActivity.engineDisplayInfo()` (see `DisplayCalc.java`) measures the display and passes it to the engine as options (`--ui-scale`, `--menu-scale` in percent, `--inset-left/top/right/bottom` in pixels, see `hp_main.c`). Automatic scale aims for about 8 mm per control and per weapon cell from the real screen density, and the insets come from the display cut-out and the rounded corners (`WindowInsets.getRoundedCorner`, API 31+; otherwise 3.5 % of the screen height). The options menu can override the scales and the edge margin. The engine lays out and hit tests the HUD in those scaled units, so a screen at 160 dpi or less keeps the desktop layout. The game window itself fills the screen including behind the camera cut-out (`shortEdges`).
+`GameActivity.engineDisplayInfo()` (see `DisplayCalc.java`) measures the display and passes it to the engine as options (`--ui-scale`, `--menu-scale` in percent, `--inset-left/top/right/bottom` in pixels, see `hp_main.c`). Automatic scale aims for about 8 mm per control and per weapon cell from the real screen density, and the screen shape is passed as `--screen-shape tl,tr,bl,br,margin,ly0,ly1,ry0,ry1` (the radius of each rounded corner from `WindowInsets.getRoundedCorner`, API 31+; the extra margin from the options; the rows the left and right camera cut-out covers, from `DisplayCutout.getBoundingRects`) and `--inset-left/top/right/bottom` (the depth of the cut-out or a visible bar on that side only). The engine places each control just clear of the arc of its own corner (`HInset` and `VInset` in `uWorld.pas`: a control at a distance v from the top or bottom edge needs R - sqrt(R^2 - (R - v)^2) from the side edge) and a cut-out only moves the controls that overlap its rows. The 3.5 % of the screen height fallback is used only when the system gives no real values (before Android 12). The activity is sensorLandscape and may flip by 180 degrees while the game runs; the engine is told the shape once at the start of a game, so the Java side makes it symmetric under that flip (the larger of each diagonal pair of corner radii, the cut-out mirrored onto the other side) and never has to hear about a rotation. The options menu can override the scales and add margin. The engine lays out and hit tests the HUD in those scaled units, so a screen at 160 dpi or less keeps the desktop layout. The game window itself fills the screen including behind the camera cut-out (`shortEdges`).
 
 The weapon menu is drawn at its own scale and its touch cursor lives in the same menu units (the menu is laid out in `screen / cMenuScale`). The menu texture is enlarged by the next whole factor with nearest neighbour copies and drawn at the remaining fraction, so the 32 px pixel art icons stay crisp at a fractional scale without making any other HUD texture blocky.
 
@@ -204,7 +206,7 @@ Trimmed from the data: the 17 MB CJK font, other languages than English, single 
 - Network access to github.com, Maven (Google and Central), the Gradle distribution host and crates.io (not needed once the Gradle and cargo caches are filled: `./gradlew --offline` works from a warm cache)
 - For the host tests: `clang`, `libclang-rt-dev` (AddressSanitizer), `xvfb`, `imagemagick`, `libsdl2-dev`, `libsdl2-image-dev`, `libsdl2-mixer-dev`, `libsdl2-ttf-dev`, `libsdl2-net-dev`, `bc`
 
-Gradle itself is fetched by the committed wrapper (8.14.3, Android Gradle Plugin 8.7.3). The app uses only plain Android framework classes (no AndroidX), so there is nothing extra to download for the UI.
+Gradle itself is fetched by the committed wrapper (8.14.3, Android Gradle Plugin 8.7.3). The app uses only plain Android framework classes; AndroidX is switched on in `gradle.properties` only because Robolectric (unit tests) needs it. Nothing extra is packaged into the APK.
 
 ### From a fresh checkout to an APK
 
@@ -221,7 +223,8 @@ It runs these steps, which can also be run on their own (all paths below are rel
 2. `gen-engine.sh` builds pas2c with GHC and transpiles the engine in this checkout to `build/engine-c`.
 3. `build-rust.sh` builds `libhwengine_future.so` with cargo for each ABI (the Rust workspace is synced with `rsync --delete` first, so stale files from an earlier engine revision cannot linger).
 4. `stage-assets.sh` stages the trimmed game data in `build/assets`.
-5. `./gradlew assembleDebug` compiles the native code through CMake and packages the APK. When `build/` is already populated it can be run directly from this directory (`-Pabis=arm64-v8a` limits the ABIs).
+5. `ui-smoke-test.sh` runs the launch smoke test (see [UI smoke test](#ui-smoke-test)); a failure stops the build. `SKIP_UI_SMOKE=1 scripts/build-apk.sh` skips it (for working on the build itself, not for releases).
+6. `./gradlew assembleDebug` compiles the native code through CMake and packages the APK. When `build/` is already populated it can be run directly from this directory (`-Pabis=arm64-v8a` limits the ABIs).
 
 Output: `app/build/outputs/apk/debug/app-debug.apk`.
 
@@ -257,6 +260,14 @@ Deliberate escape hatches, for working on the build itself and not for releases:
 
 The commit of a build is written into `BuildConfig` (as the engine commit and the app source commit, which are the same repository) and shown in Options, Advanced, About ("+local changes" is added when the checkout had uncommitted changes).
 
+### UI smoke test
+
+`scripts/ui-smoke-test.sh` (about a minute, JVM only) opens every screen under Robolectric 4.14.1 on Android 14 and 15 (SDK 34 and 35) with a Fairphone 4 sized landscape display (`w915dp-h422dp-land-409dpi`, camera cut-out on the left) and fails if anything throws. It is `app/src/test/java/org/hedgewars/android/LaunchSmokeTest.java` and covers: the problem box (an error from an older version is dropped and not shown, a current one is short, hidden while the keyboard is open and cleared by the x), Options, Display (the screen edge and camera settings), the setup screen (all three tabs) with the game data installed and a setup saved by an earlier version, and with default preferences; the setup screen on the very first launch with no game data, while it is unpacked; the options screen (all three tabs); and the team page for two teams. It exists because an earlier build crashed on every launch (`Window.getInsetsController()` called from `onCreate` before `setContentView`, a `NullPointerException` on Android 11 and later) and no test had ever opened a screen. `build-apk.sh` runs it before packaging and stops if it fails.
+
+Prerequisites: the staged game data (`stage-assets.sh`, used as the "installed" data with a `.installed` marker that holds the stamp `DataInstaller` compares, as an empty marker never matches) and the Android jars Robolectric runs against. Robolectric normally downloads those itself from repo1.maven.org, which answers HTTP 429 to many networks, so it runs offline here (`robolectric.offline`) from a cache folder, `ROBOLECTRIC_DEPS` (default `~/.cache/hedgewars/robolectric`), that `scripts/fetch-robolectric.sh` fills from Google's copy of Maven Central with repo1 as the fallback (`ROBOLECTRIC_MIRRORS` overrides the list), checking each jar against its published SHA-1. The script is idempotent and `ui-smoke-test.sh` calls it. Robolectric's own library jars come from Maven through Gradle; `HP_MAVEN_MIRROR` (default Google's copy) is tried first for them, and `GRADLE_OFFLINE=1` adds `--offline` once the Gradle cache is warm. `SKIP_UI_SMOKE=1` makes `build-apk.sh` skip the test.
+
+`ScreenshotTest` (pictures of the screens, `./gradlew -Pscreenshots testDebugUnitTest --tests '*ScreenshotTest'`, PNGs in `build/screenshots`) is skipped unless `-Pscreenshots` is given.
+
 ### Host tests
 
 No device is needed for these.
@@ -267,14 +278,15 @@ No device is needed for these.
 
 | Variable | Meaning |
 |---|---|
-| `HP_TEST_SCENARIO` | What game to start (see `native/host-test/GenConfig.java`): `two` (default), `ai` (two computer teams that play alone), `ai:WEAPONSET` (the same with that weapon set, e.g. `ai:Crazy`), `humanvsai`, `mixed8x8` (8 teams of 8 hedgehogs, humans and computers of every level), `scheme:NAME` (e.g. `scheme:Pro Mode`), `map:KIND` (`generated`, `maze`, `perlin`, `forts`, `wfc`, `image:NAME`), `style:NAME` |
+| `HP_TEST_SCENARIO` | What game to start (see `native/host-test/GenConfig.java`): `two` (default), `ai` (two computer teams that play alone), `ai:WEAPONSET` (the same with that weapon set, e.g. `ai:Crazy`), `humanvsai`, `mixed8x8` (8 teams of 8 hedgehogs, humans and computers of every level), `switch` (the scheme rule "Switch hedgehog in a turn" on), `scheme:NAME` (e.g. `scheme:Pro Mode`), `map:KIND` (`generated`, `maze`, `perlin`, `forts`, `wfc`, `image:NAME`), `style:NAME` |
 | `HP_TEST_SEED` | A fixed map seed |
 | `ASAN=ON` | Build with AddressSanitizer (needs `libclang-rt-dev`), which reports the out-of-bounds accesses that the phone's MTE and hardened allocator turn into crashes |
 | `HP_TEST_RESTORE=1,3,6,14` | Post `SDL_WINDOWEVENT_RESTORED` at those seconds; the phone sends it right after start-up and after every pause, and the engine answers with `fullscr`, which reloads the video state, the chat lines and every texture |
-| `HP_TEST_SCRIPT` | Timed input injection (touch, focus lost or gained and so on), see `native/host-test/hp_host_main.c` |
-| `HP_TEST_ARGS` | Extra engine options, e.g. `--ui-scale 240 --inset-left 80 --inset-top 40` |
+| `HP_TEST_SCRIPT` | Timed input injection (touch, focus lost or gained, `ipc:` messages to the engine such as `ipc:eteamgone uTeam name` or `ipc:esetweap` plus the ammo character code, and so on), see `native/host-test/hp_host_main.c` |
+| `HP_TEST_ARGS` | Extra engine options, e.g. `--ui-scale 260 --inset-left 90 --screen-shape 120,120,120,120,0,480,600,480,600` (120 px corners, a 90 px cut-out on the left at rows 480 to 600) or `--turn-centre --turn-zoom 150` |
 | `HP_TEST_SHOTS` | Seconds after the start at which extra screenshots `build/host-test/shot_<n>.png` are taken |
 | `HP_TEST_SIZE` | Window size, e.g. `2340x1080` (default 1280x720) |
+| `HP_TEST_DISPLAY` | Xvfb display number (default 77), so two runs can go side by side |
 | `HP_TEST_SOUND=1` | Run with sound on, using the SDL dummy audio driver, instead of off |
 
 The summary at the end shows whether the engine was still running, the IPC lines and, for computer players, the `engine command` lines that the launcher logs for every attack, jump, weapon choice and turn end the engine reports, plus a count per command letter.
@@ -289,7 +301,7 @@ The summary at the end shows whether the engine was still running, the IPC lines
 - The options reach the engine: a computer-only game under AddressSanitizer with sound on (SDL dummy audio) and `--volume 100 --effects-volume 50 --music-volume 30 --no-voices --raw-quality 3 --showfps --no-teamtag --no-hogtag --no-healthtag` starts, shows the frames per second counter and no name tags, with no sanitizer report. `config-test.sh` also checks that the engine's option table (`ArgParsers.pas`) has an entry and a case for every option the app sends.
 - Vibration: in a computer-only host test with a hand-edited loadout of only Skip, Watermelon and Hellish Handgrenade, the engine calls `hw_device_rumble` for each big explosion (the host test launcher logs `[hosttest] rumble 40 ms`). The Java side of it (`GameActivity.rumble`, the vibrator) is not checked.
 
-Not verified: running on an Android device or emulator (the build machine has no KVM, so no x86_64 emulator could be started). The touch handling, safe area layout, scaled HUD and weapon menu, pause and focus handling were checked on the host with injected SDL touch and window events. The OpenGL ES 1.1 context on real drivers, audio, vibration, the Java display measurement, and the setup, team and options screens (their layout and touch behaviour) are only tested on one phone. The setup screens were not rendered either: there is no Android layout renderer on the build machine.
+Not verified: running on an Android device or emulator (the build machine has no KVM, so no x86_64 emulator could be started). The touch handling, safe area layout, scaled HUD and weapon menu, pause and focus handling were checked on the host with injected SDL touch and window events. The OpenGL ES 1.1 context on real drivers, audio, vibration, the Java display measurement, and the setup, team and options screens (their layout and touch behaviour) are only tested on one phone. The setup screens were not rendered. The launch smoke test opens the setup, options and team screens under Robolectric (Android 14 and 15) and checks that nothing throws (see [UI smoke test](#ui-smoke-test)); that is not a look at the layout. An optional Robolectric screenshot test is in `app/src/test` (`./gradlew -Pscreenshots testDebugUnitTest --tests '*ScreenshotTest'` writes PNGs of the screens at 2340 x 1080 and 409 dpi to `build/screenshots`).
 
 ## Size
 

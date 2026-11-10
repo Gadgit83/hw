@@ -25,7 +25,10 @@ public final class Options {
     public boolean menuAuto = true;
     public int menuPct = 200;          // 100 to 400
     public boolean marginAuto = true;
-    public int marginMm = 4;           // 0 to 15 millimetres of clear space from the screen edge
+    public int marginMm = 2;           // 0 to 10 millimetres of extra clear space at the screen edge (when not automatic)
+    public boolean centreTurn = true;  // centre the camera on the active hedgehog when a turn starts
+    public boolean zoomTurn = true;    // zoom in at turn start
+    public int zoomPct = 140;          // 110 to 200: how much closer than the default zoom the turn start view is
     public int quality = 5;            // 0 (lowest) to 5 (best), as the desktop slider
     public boolean showFps;
     public boolean vibration = true;
@@ -69,6 +72,11 @@ public final class Options {
         }
         a.add("--raw-quality");
         a.add(Integer.toString(qualityFlags(quality)));
+        if (centreTurn) a.add("--turn-centre");
+        if (zoomTurn) {
+            a.add("--turn-zoom");
+            a.add(Integer.toString(Math.max(110, Math.min(200, zoomPct))));
+        }
         if (showFps) a.add("--showfps");
         if (!teamTags) a.add("--no-teamtag");
         if (!hogTags) a.add("--no-hogtag");
@@ -102,6 +110,9 @@ public final class Options {
         p.setProperty("menuPct", Integer.toString(menuPct));
         p.setProperty("marginAuto", marginAuto ? "1" : "0");
         p.setProperty("marginMm", Integer.toString(marginMm));
+        p.setProperty("centreTurn", centreTurn ? "1" : "0");
+        p.setProperty("zoomTurn", zoomTurn ? "1" : "0");
+        p.setProperty("zoomPct", Integer.toString(zoomPct));
         p.setProperty("quality", Integer.toString(quality));
         p.setProperty("showFps", showFps ? "1" : "0");
         p.setProperty("vibration", vibration ? "1" : "0");
@@ -135,7 +146,10 @@ public final class Options {
         o.menuAuto = boolOf(p, "menuAuto", o.menuAuto);
         o.menuPct = intOf(p, "menuPct", o.menuPct, 100, 400);
         o.marginAuto = boolOf(p, "marginAuto", o.marginAuto);
-        o.marginMm = intOf(p, "marginMm", o.marginMm, 0, 15);
+        o.marginMm = intOf(p, "marginMm", o.marginMm, 0, 10);
+        o.centreTurn = boolOf(p, "centreTurn", o.centreTurn);
+        o.zoomTurn = boolOf(p, "zoomTurn", o.zoomTurn);
+        o.zoomPct = intOf(p, "zoomPct", o.zoomPct, 110, 200);
         o.quality = intOf(p, "quality", o.quality, 0, 5);
         o.showFps = boolOf(p, "showFps", o.showFps);
         o.vibration = boolOf(p, "vibration", o.vibration);

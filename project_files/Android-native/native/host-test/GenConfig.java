@@ -18,6 +18,7 @@ import java.util.Random;
  *   mixed8x8         eight teams of eight hedgehogs, humans and computers of every level
  *   scheme:NAME      two teams, the built-in scheme NAME with its weapon set, e.g. scheme:Pro Mode
  *   map:KIND         generated | maze | perlin | forts | wfc | image:NAME
+ *   switch           two human teams, scheme flag "Switch hedgehog in a turn" (gfSwitchHog) on
  *   style:NAME       a game style (Scripts/Multiplayer/NAME.lua)
  */
 public class GenConfig {
@@ -64,6 +65,9 @@ public class GenConfig {
             else if (k.equals("wfc")) { m.mapType = SetupModel.MAP_WFC; m.templateFilter = 1; }
             else if (k.startsWith("image:")) { m.mapType = SetupModel.MAP_IMAGE; m.imageMap = k.substring(6); }
             else throw new IllegalArgumentException(k);
+        } else if (scenario.equals("switch")) {
+            m = base(d, seed, 2, 4);
+            m.rules.flag[1] = true;                  // gfSwitchHog
         } else if (scenario.startsWith("style:")) {
             m = base(d, seed, 2, 4);
             m.style = scenario.substring(6);

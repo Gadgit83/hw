@@ -114,9 +114,10 @@ static void redirect_stdio(void)
 
 /* Asks GameActivity.engineDisplayInfo() (see there) for the HUD scale, the weapon menu scale and the
  * safe area insets. On any failure the defaults stay (scale 100 %, no insets, which is the desktop layout). */
-static void query_display(int out[6])
+static void query_display(int out[15])
 {
-    out[0] = 100; out[1] = 0; out[2] = out[3] = out[4] = out[5] = 0;
+    for (int i = 0; i < 15; i++) out[i] = 0;
+    out[0] = 100;
     JNIEnv *env = (JNIEnv *)SDL_AndroidGetJNIEnv();
     jobject act = (jobject)SDL_AndroidGetActivity();
     if (!env || !act) return;
@@ -124,8 +125,8 @@ static void query_display(int out[6])
     jmethodID mid = cls ? (*env)->GetMethodID(env, cls, "engineDisplayInfo", "()[I") : NULL;
     if (mid) {
         jintArray arr = (jintArray)(*env)->CallObjectMethod(env, act, mid);
-        if (!(*env)->ExceptionCheck(env) && arr && (*env)->GetArrayLength(env, arr) >= 6)
-            (*env)->GetIntArrayRegion(env, arr, 0, 6, out);
+        if (!(*env)->ExceptionCheck(env) && arr && (*env)->GetArrayLength(env, arr) >= 15)
+            (*env)->GetIntArrayRegion(env, arr, 0, 15, out);
         if (arr) (*env)->DeleteLocalRef(env, arr);
     }
     if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
@@ -244,8 +245,8 @@ int SDL_main(int argc, char **argv)
 
     /* In the HWLIBRARY build the engine parses argv from index 0, so slot 0 holds a
      * harmless option instead of a program name. */
-    int di[6];
-    char ui[16], menu[16], il[16], it[16], ir[16], ib[16];
+    int di[15];
+    char ui[16], menu[16], il[16], it[16], ir[16], ib[16], shape[160];
     query_display(di);
     snprintf(ui, sizeof ui, "%d", di[0]);
     snprintf(menu, sizeof menu, "%d", di[1]);
@@ -253,6 +254,9 @@ int SDL_main(int argc, char **argv)
     snprintf(it, sizeof it, "%d", di[3]);
     snprintf(ir, sizeof ir, "%d", di[4]);
     snprintf(ib, sizeof ib, "%d", di[5]);
+    /* corner radii (top left, top right, bottom left, bottom right), extra margin, rows of the left and right cut-out */
+    snprintf(shape, sizeof shape, "%d,%d,%d,%d,%d,%d,%d,%d,%d", di[6], di[7], di[8], di[9], di[10], di[11], di[12],
+             di[13], di[14]);
     char *args[96] = {
         "--no-holiday-silliness", "--internal", "--port", port,
         "--prefix", data, "--user-prefix", user,
@@ -261,6 +265,7 @@ int SDL_main(int argc, char **argv)
         "--locale", "en.txt", "--nodampen", "--nick", "Player",
         "--ui-scale", ui, "--menu-scale", menu,
         "--inset-left", il, "--inset-top", it, "--inset-right", ir, "--inset-bottom", ib,
+        "--screen-shape", shape,
     };
     int n = 0;
     while (args[n]) n++;                           /* the initialiser above fills a prefix, the rest is NULL */
@@ -270,7 +275,7 @@ int SDL_main(int argc, char **argv)
     for (int i = opt0; i < n; i++)
         if (strncmp(args[i], "--", 2) == 0)
             LOGI("option %s %s", args[i], i + 1 < n && strncmp(args[i + 1], "--", 2) ? args[i + 1] : "");
-    LOGI("display: ui scale %s%%, menu scale %s%%, insets l%s t%s r%s b%s px", ui, menu, il, it, ir, ib);
+    LOGI("display: ui scale %s%%, menu scale %s%%, insets l%s t%s r%s b%s px, shape %s", ui, menu, il, it, ir, ib, shape);
     int rc = hwengine_RunEngine(n, args);
     LOGI("engine returned %d", rc);
     hp_ipc_join();

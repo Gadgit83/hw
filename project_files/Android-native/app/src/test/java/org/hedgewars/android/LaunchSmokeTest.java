@@ -283,6 +283,21 @@ public class LaunchSmokeTest {
         System.out.println("SDK " + android.os.Build.VERSION.SDK_INT + ": NetLobbyActivity watch path ok");
     }
 
+    /** "Stop watching" confirmed in the game screen (another process) leaves the relay at once: the lobby shows the chooser, not "Watching". */
+    @Test
+    public void netLobbyActivity_stopWatchingInGame_leavesInOneStep() throws Exception {
+        TestSupport.installData(app());
+        fakeHosts();
+        netState(LOBBY_WATCH, false);
+        NetSession.watching = true;
+        BackConfirm.markLeave(app().getFilesDir());
+        String text = launch(NetLobbyActivity.class, null, 600);
+        assertTrue("back at the chooser: " + text, text.contains("Host network game") && text.contains("Join by address") && !text.contains("Joined as a watcher"));
+        assertTrue("not joined any more", !NetSession.joined && !NetSession.watching);
+        assertTrue("the note is used up", !BackConfirm.takeLeave(app().getFilesDir()));
+        System.out.println("SDK " + android.os.Build.VERSION.SDK_INT + ": stop watching in one step ok");
+    }
+
     /** The spectator's game screen state: role=watch in net.cfg gives the Stop watching question (and nothing else about the player's). */
     @Test
     public void gameBackConfirm_watcher() throws Exception {
@@ -379,7 +394,10 @@ public class LaunchSmokeTest {
         assertTrue("the typed address entry stays", text.contains("Join by address") && play.get(0).isEnabled());
         // one tap on the compatible host connects (nothing listens on 127.0.0.1:1, so the failure message proves the attempt)
         play.get(1).performClick();
-        TestSupport.settle(1500);
+        TestSupport.settle(2100);
+        String trying = TestSupport.texts(a.getWindow().getDecorView());
+        assertTrue("the join says it tries again: " + trying, trying.contains("Trying again (2 of 3)..."));
+        TestSupport.settle(4500);                       // three attempts, 1.5 s apart
         String after = TestSupport.texts(a.getWindow().getDecorView());
         assertTrue("the tap tried to reach the host: " + after, after.contains("Could not reach 127.0.0.1:1"));
         assertTrue("the host picked is remembered",

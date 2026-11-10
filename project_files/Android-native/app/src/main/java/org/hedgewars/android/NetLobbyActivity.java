@@ -91,6 +91,12 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
         NetSession.cancelStartNotification(this);
         if (NetSession.hosting) NetSession.startTicker();
         sendForeground(true);
+        if (BackConfirm.takeLeave(getFilesDir()) && NetSession.joined && NetSession.watching) {
+            // "Stop watching" was confirmed in the game screen: leave the relay now and show the chooser.
+            NetSession.pendingStart = null;
+            NetSession.inGame = false;
+            leaveOrStop();
+        }
         if (!NetSession.joined && !NetSession.hosting) startSearch(false);
         getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         RelayClient.StartInfo s = NetSession.pendingStart;
@@ -189,6 +195,7 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
         nameField = null;
         addressField = null;
         if (!problem.isEmpty()) content.addView(coloured(problem, Ui.DANGER));
+        if (connecting && !NetSession.connectProgress.isEmpty()) content.addView(ui.hint(NetSession.connectProgress));
         String closed = NetSession.closedReason;
         if (!closed.isEmpty() && !NetSession.joined) content.addView(coloured(closed, Ui.DANGER));
         if (!NetSession.inGame) {
@@ -282,36 +289,57 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
         hosts.clear();
         renderHosts();
         final android.content.Context app = getApplicationContext();
-        new Thread(() -> {
-            // The fingerprint of this phone's data is read (or computed once) off the UI thread; the list needs it to judge each host.
-            if (myDigest == null) myDigest = NetSession.dataDigest(app);
-            runOnUiThread(() -> {
-                if (destroyed || !searching) return;
-                stopDiscovery();
-                discovery = NetSession.discoveryFactory.apply(app);
-                discovery.start(new HostDiscovery.Listener() {
-                    @Override public void hosts(List<HostAdvert.Found> all) {
-                        runOnUiThread(() -> {
-                            if (destroyed) return;
-                            hosts.clear();
-                            hosts.addAll(all);
-                            renderHosts();
-                        });
-                    }
-
-                    @Override public void status(String text, boolean finished) {
-                        runOnUiThread(() -> {
-                            if (destroyed) return;
-                            searchStatus = text;
-                            searchDone = finished;
-                            if (finished) searching = false;
-                            renderHosts();
-                        });
-                    }
+        // The search starts at once; the fingerprint of this phone's data (which can take a while the first time) is read
+        // off the UI thread meanwhile, and the list is drawn again when it is known. Waiting for it here used to delay the whole search.
+        if (myDigest == null) {
+            new Thread(() -> {
+                String d = NetSession.dataDigest(app);
+                runOnUiThread(() -> {
+                    myDigest = d;
+                    if (!destroyed) renderHosts();
                 });
-            });
-        }, "host-search").start();
+            }, "host-digest").start();
+        }
+        stopDiscovery();
+        searchHandler.removeCallbacks(searchBackstop);
+        searchHandler.postDelayed(searchBackstop, BACKSTOP_MS);
+        discovery = NetSession.discoveryFactory.apply(app);
+        discovery.start(new HostDiscovery.Listener() {
+            @Override public void hosts(List<HostAdvert.Found> all) {
+                runOnUiThread(() -> {
+                    if (destroyed) return;
+                    hosts.clear();
+                    hosts.addAll(all);
+                    renderHosts();
+                });
+            }
+
+            @Override public void status(String text, boolean finished) {
+                runOnUiThread(() -> {
+                    if (destroyed) return;
+                    searchStatus = text;
+                    searchDone = finished;
+                    if (finished) {
+                        searching = false;
+                        searchHandler.removeCallbacks(searchBackstop);
+                    }
+                    renderHosts();
+                });
+            }
+        });
     }
+
+    private static final long BACKSTOP_MS = 50000;
+    private final android.os.Handler searchHandler = new android.os.Handler(android.os.Looper.getMainLooper());
+    /** Ends a search that the finder did not end itself (its own timeout is 45 s), so the screen never says "Searching" for ever. */
+    private final Runnable searchBackstop = () -> {
+        if (destroyed || !searching) return;
+        stopDiscovery();
+        searching = false;
+        searchDone = true;
+        searchStatus = hosts.isEmpty() ? "No host found on this Wi-Fi." : "Search finished.";
+        renderHosts();
+    };
 
     private void stopDiscovery() {
         HostDiscovery d = discovery;
@@ -321,6 +349,7 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
 
     private void stopSearch() {
         searching = false;
+        searchHandler.removeCallbacks(searchBackstop);
         stopDiscovery();
     }
 
@@ -675,6 +704,7 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
     private void connectTo(final String host, final int port, final boolean watch) {
         final String nick = name.isEmpty() ? Build.MODEL : name;
         connecting = true;
+        problem = "";
         stopSearch();
         new Thread(() -> {
             try {

@@ -1547,6 +1547,44 @@ public class RelayTests {
         }
     }
 
+    static void testConnectRetry() throws Exception {
+        System.out.println("C1: the join connect tries again when the host cannot be reached yet");
+        int port;
+        try (java.net.ServerSocket probe = new java.net.ServerSocket(0)) { port = probe.getLocalPort(); }
+        final int p = port;
+        final java.util.concurrent.atomic.AtomicInteger retries = new java.util.concurrent.atomic.AtomicInteger();
+        final java.net.ServerSocket[] late = new java.net.ServerSocket[1];
+        Thread opener = new Thread(() -> {
+            try {
+                Thread.sleep(1000);
+                late[0] = new java.net.ServerSocket(p);
+                late[0].accept().close();
+            } catch (Exception ignored) { }
+        });
+        opener.setDaemon(true);
+        opener.start();
+        RelayClient c = new RelayClient("127.0.0.1", p, "Retry", "t", false, new java.util.ArrayList<>(), new P());
+        long t0 = System.currentTimeMillis();
+        boolean ok;
+        try {
+            c.connect(3, 700, 15000, (n, of) -> retries.incrementAndGet());
+            ok = true;
+        } catch (java.io.IOException e) {
+            ok = false;
+        }
+        check(ok, "a port that starts listening after about 1 s is reached on a later attempt (" + (System.currentTimeMillis() - t0) + " ms)");
+        check(retries.get() >= 1 && retries.get() <= 2, "the progress callback was told about " + retries.get() + " further attempt(s)");
+        c.close();
+        if (late[0] != null) late[0].close();
+        int dead;
+        try (java.net.ServerSocket probe = new java.net.ServerSocket(0)) { dead = probe.getLocalPort(); }
+        final java.util.concurrent.atomic.AtomicInteger r2 = new java.util.concurrent.atomic.AtomicInteger();
+        RelayClient d = new RelayClient("127.0.0.1", dead, "Retry", "t", false, new java.util.ArrayList<>(), new P());
+        boolean failed = false;
+        try { d.connect(3, 200, 15000, (n, of) -> r2.incrementAndGet()); } catch (java.io.IOException e) { failed = true; }
+        check(failed && r2.get() == 2, "a port nobody listens on fails after 3 attempts (" + r2.get() + " retries)");
+    }
+
     public static void main(String[] a) throws Exception {
         dataDir = a[0];
         data = new GameData(new File(a[0]));
@@ -1572,6 +1610,7 @@ public class RelayTests {
         testViewerBindRetry();
         testQuitWording();
         testClientClose();
+        testConnectRetry();
         testNoSocketWriteOnCallerThread();
         testCompat();
         testDataDigest();

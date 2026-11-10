@@ -45,6 +45,22 @@ final class BackConfirm {
     static final String WATCH_TITLE = "Stop watching?", WATCH_MESSAGE = "The game carries on for the players." + RUNNING,
             WATCH_YES = "Stop watching", WATCH_NO = "Keep watching";
 
+    /** A note in the files folder, written by the game process when a watching phone confirms "Stop watching". */
+    static final String LEAVE_NOTE = "leave-after-game";
+
+    static void markLeave(File filesDir) {
+        try {
+            new File(filesDir, LEAVE_NOTE).createNewFile();
+        } catch (IOException e) {
+            // without the note the Network screen's own Stop watching button still works
+        }
+    }
+
+    /** True once, if the note was there (it is removed). */
+    static boolean takeLeave(File filesDir) {
+        return new File(filesDir, LEAVE_NOTE).delete();
+    }
+
     /** The role written by the Network screen into net.cfg when it started the game; LOCAL when there is no such file. */
     static int role(File filesDir) {
         File f = new File(filesDir, "net.cfg");

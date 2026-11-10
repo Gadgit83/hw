@@ -114,11 +114,12 @@ public final class RelayClient {
         long start = System.currentTimeMillis();
         IOException last = null;
         for (int n = 1; n <= attempts; n++) {
+            if (closed) throw new IOException("The join was cancelled.");     // the phone left (Back, another join) while retrying
             long left = totalMs - (System.currentTimeMillis() - start);
-            if (n > 1 && left <= 0) break;
+            if (n > 1 && left < 1000) break;
             if (n > 1 && progress != null) progress.retrying(n, attempts);
             try {
-                connect((int) Math.max(1000, Math.min(5000, n == 1 ? 5000 : left)));
+                connect((int) Math.min(5000, n == 1 ? 5000 : left));
                 return;
             } catch (IOException e) {
                 last = e;

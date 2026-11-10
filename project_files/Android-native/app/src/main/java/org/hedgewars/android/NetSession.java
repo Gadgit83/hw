@@ -186,6 +186,11 @@ final class NetSession {
         RelayClient rc = new RelayClient(host, port, name, Diag.versionName(c), isHost, teams, HANDLER).watch(watch)
                 .identity(org.hedgewars.android.net.Compat.VALUE, dataDigest(c));
         if (isHost) rc.hostSecret(HostService.hostSecret);
+        final int gen;
+        synchronized (NetSession.class) {
+            gen = ++connectGen;
+            pending = rc;                        // leave() closes it, which ends a join that is still retrying
+        }
         try {
             if (isHost) rc.connect();            // loopback: no reason to retry
             else rc.connect(3, 1500, 15000, (n, of) -> {
@@ -194,6 +199,14 @@ final class NetSession {
             });
         } finally {
             connectProgress = "";
+        }
+        synchronized (NetSession.class) {
+            if (gen != connectGen || pending != rc) {
+                // The phone left, or another join started, while this one connected: it must not take a seat.
+                rc.close();
+                throw new IOException("The join was cancelled.");
+            }
+            pending = null;
         }
         client = rc;
         joined = true;
@@ -205,7 +218,29 @@ final class NetSession {
         ping();
     }
 
+    /** A join still connecting (retries can take up to 15 s), and a counter that makes an overtaken one give up. */
+    private static RelayClient pending;
+    private static int connectGen;
+
+    /** Gives up a join that is still connecting; a session already joined is left alone. */
+    static void cancelPending() {
+        RelayClient p;
+        synchronized (NetSession.class) {
+            p = pending;
+            pending = null;
+            connectGen++;
+        }
+        if (p != null) p.close();
+    }
+
     static void leave() {
+        RelayClient p;
+        synchronized (NetSession.class) {
+            p = pending;
+            pending = null;
+            connectGen++;
+        }
+        if (p != null) p.close();
         RelayClient rc = client;
         client = null;
         joined = false;

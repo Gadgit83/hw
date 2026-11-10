@@ -1599,6 +1599,15 @@ public class RelayTests {
         boolean failed = false;
         try { d.connect(3, 200, 15000, (n, of) -> r2.incrementAndGet()); } catch (java.io.IOException e) { failed = true; }
         check(failed && r2.get() == 2, "a port nobody listens on fails after 3 attempts (" + r2.get() + " retries)");
+        // A join the phone gives up (Back, another join) while it is still retrying stops at once and never connects.
+        RelayClient q = new RelayClient("127.0.0.1", dead, "Cancel", "t", false, new java.util.ArrayList<>(), new P());
+        Thread closer = new Thread(() -> { try { Thread.sleep(300); } catch (InterruptedException ignored) { } q.close(); });
+        closer.start();
+        long tq = System.currentTimeMillis();
+        String why = "";
+        try { q.connect(10, 1000, 15000, (n, of) -> { }); } catch (java.io.IOException e) { why = String.valueOf(e.getMessage()); }
+        long took = System.currentTimeMillis() - tq;
+        check(why.contains("cancelled") && took < 2500, "a join closed while retrying gives up at the next attempt (" + took + " ms: " + why + ")");
     }
 
     public static void main(String[] a) throws Exception {

@@ -47,6 +47,7 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
     private String searchStatus = "";
     private boolean searchDone, searching, permissionAsked, permissionDenied;
     private volatile String myDigest;
+    private boolean digestRunning;
     private String lastHost = "";
 
     @Override
@@ -120,6 +121,7 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
     @Override
     protected void onDestroy() {
         destroyed = true;
+        if (isFinishing()) NetSession.cancelPending();     // backing out of the screen ends a join that is still trying
         if (NetSession.listener == this) NetSession.listener = null;
         super.onDestroy();
     }
@@ -291,11 +293,13 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
         final android.content.Context app = getApplicationContext();
         // The search starts at once; the fingerprint of this phone's data (which can take a while the first time) is read
         // off the UI thread meanwhile, and the list is drawn again when it is known. Waiting for it here used to delay the whole search.
-        if (myDigest == null) {
+        if (myDigest == null && !digestRunning) {
+            digestRunning = true;
             new Thread(() -> {
                 String d = NetSession.dataDigest(app);
                 runOnUiThread(() -> {
                     myDigest = d;
+                    digestRunning = false;
                     if (!destroyed) renderHosts();
                 });
             }, "host-digest").start();
@@ -303,11 +307,12 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
         stopDiscovery();
         searchHandler.removeCallbacks(searchBackstop);
         searchHandler.postDelayed(searchBackstop, BACKSTOP_MS);
-        discovery = NetSession.discoveryFactory.apply(app);
-        discovery.start(new HostDiscovery.Listener() {
+        final HostDiscovery mine = NetSession.discoveryFactory.apply(app);
+        discovery = mine;
+        mine.start(new HostDiscovery.Listener() {
             @Override public void hosts(List<HostAdvert.Found> all) {
                 runOnUiThread(() -> {
-                    if (destroyed) return;
+                    if (destroyed || discovery != mine) return;      // a late call from an earlier search
                     hosts.clear();
                     hosts.addAll(all);
                     renderHosts();
@@ -316,7 +321,7 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
 
             @Override public void status(String text, boolean finished) {
                 runOnUiThread(() -> {
-                    if (destroyed) return;
+                    if (destroyed || discovery != mine) return;
                     searchStatus = text;
                     searchDone = finished;
                     if (finished) {
@@ -382,8 +387,8 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
         List<HostAdvert.Found> l = new java.util.ArrayList<>(hosts);
         final String d = myDigest;
         java.util.Collections.sort(l, (a, b) -> {
-            boolean ba = a.incompatibility(org.hedgewars.android.net.Compat.VALUE, Diag.versionName(this), d) == null;
-            boolean bb = b.incompatibility(org.hedgewars.android.net.Compat.VALUE, Diag.versionName(this), d) == null;
+            boolean ba = a.incompatibility(org.hedgewars.android.net.Compat.VALUE, Diag.versionName(this), d != null ? d : a.data) == null;
+            boolean bb = b.incompatibility(org.hedgewars.android.net.Compat.VALUE, Diag.versionName(this), d != null ? d : b.data) == null;
             if (ba != bb) return ba ? -1 : 1;
             boolean la = a.serviceName.equals(lastHost), lb = b.serviceName.equals(lastHost);
             if (la != lb) return la ? -1 : 1;
@@ -399,8 +404,10 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
         box.addView(ui.heading("Hosts on this Wi-Fi"));
         if (!searchStatus.isEmpty()) box.addView(ui.hint(searchStatus));
         final String digest = myDigest;
+        // Until this phone's own data fingerprint is known, the data check is left out (the host checks it again at the join).
+        if (digest == null && !hosts.isEmpty()) box.addView(ui.hint("Checking this phone's game data..."));
         for (final HostAdvert.Found h : sortedHosts()) {
-            String why = h.incompatibility(org.hedgewars.android.net.Compat.VALUE, Diag.versionName(this), digest);
+            String why = h.incompatibility(org.hedgewars.android.net.Compat.VALUE, Diag.versionName(this), digest != null ? digest : h.data);
             LinearLayout row = ui.card();
             row.setBackground(ui.round(Ui.PANEL_HI, 10));
             row.addView(ui.text(h.name + (h.serviceName.equals(lastHost) ? "   (last used)" : ""), 16, why == null ? Color.WHITE : Ui.DANGER));

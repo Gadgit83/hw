@@ -926,6 +926,16 @@ public class RelayTests {
         String c = closeOf(v, n);
         check(c.equals("4001 host-ended"), "host ended the game: close code 4001 host-ended (" + c + ")");
         check(n[0] >= 1, "the queued game frame was delivered before the close (" + n[0] + " data frames)");
+        // As a browser does: answer the close frame with a close of our own; the relay must then end TCP at once
+        // (an older WebView reports 1006 without the code while the server holds the connection) and send nothing more.
+        v.getOutputStream().write(maskedFrame(8, new byte[] { (byte) 0x0f, (byte) 0xa1 }, new byte[] { 1, 2, 3, 4 }));
+        v.getOutputStream().flush();
+        long t0 = System.currentTimeMillis();
+        int after = -2;
+        try { after = v.getInputStream().read(); } catch (java.io.IOException e) { after = -3; }
+        long took = System.currentTimeMillis() - t0;
+        check(after == -1, "nothing follows the relay's close frame, not even an echo (read " + after + ")");
+        check(took < 1000, "the relay ends TCP straight after the TV's close reply (" + took + " ms)");
         Map<String, Object> st = (Map<String, Object>) Json.parse(statusBody(g.f));
         Map<String, Object> lg = (Map<String, Object>) st.get("lastGame");
         check(lg != null && "host".equals(lg.get("ended")) && ((Number) lg.get("n")).intValue() == 1 && ((Number) lg.get("atMs")).longValue() > System.currentTimeMillis() - 20000, "lastGame {n:1, ended:host, atMs} (" + lg + ")");

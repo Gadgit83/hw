@@ -4,6 +4,15 @@ All notable changes to the native Android app (`project_files/Android-native`), 
 
 Only some builds were put on a phone, so a version below is a build that was made, not necessarily one that was released. Releases are tags on `android-master` with the APK attached; there is none yet.
 
+## 0.3.0-tv9 (113): TV sees the close code; no stale own host (test build)
+
+`HP_PROFILE=test`, versionName `0.3.0-tv9-test`. Fixes from the TV test of 0.3.0-tv7b (RESULT 7 on the device testing issue).
+
+### Fixed
+
+- The TV saw close code 1006 with no reason at the end of every game, although the relay sent 4001 or 4002: after its close frame the relay held the connection open for 2 s, and the TV's WebView then reported the close as abnormal. The relay now ends the connection as soon as the TV answers its close frame (5 s at most if the TV never answers), and sends nothing after the close frame. The relay tests check this the way a browser behaves (it failed at 2001 ms before the fix, 0 ms after).
+- Network, Hosts on this Wi-Fi: this phone's own host no longer shows in the list for a few seconds after Stop hosting (a phone cannot join itself).
+
 ## 0.3.0-tv8b (112): "More below" never hides the last row (test build)
 
 `HP_PROFILE=test`, versionName `0.3.0-tv8b-test`. Layout only.

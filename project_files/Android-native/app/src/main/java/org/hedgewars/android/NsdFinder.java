@@ -33,11 +33,13 @@ final class NsdFinder implements HostDiscovery {
     private final Map<String, HostAdvert.Found> found = new LinkedHashMap<>();
     private final Map<String, NsdServiceInfo> seen = new LinkedHashMap<>();
     private volatile boolean running;
+    /** This phone's own addresses: an advert from one of them is this phone's own, stale after it stopped hosting. */
+    private volatile java.util.Set<String> own = java.util.Collections.emptySet();
     private final Runnable timeout = () -> {
         if (!running) return;
         stop();
         Listener l = listener;
-        if (l != null) l.status(found.isEmpty() ? "No host found on this Wi-Fi." : "Search finished.", true);
+        if (l != null) l.status(visible() == 0 ? "No host found on this Wi-Fi." : "Search finished.", true);
     };
 
     NsdFinder(Context c) {
@@ -109,6 +111,12 @@ final class NsdFinder implements HostDiscovery {
             }
         };
         running = true;
+        Thread ownT = new Thread(() -> {
+            own = new java.util.HashSet<>(NetSession.localAddresses());     // lists interfaces: not on the UI thread
+            synchronized (NsdFinder.this) { if (running) publish(); }
+        }, "nsd-own-addresses");
+        ownT.setDaemon(true);
+        ownT.start();
         try {
             nsd.discoverServices(HostAdvert.SERVICE_TYPE_BARE, NsdManager.PROTOCOL_DNS_SD, discovery);
         } catch (RuntimeException e) {
@@ -120,10 +128,21 @@ final class NsdFinder implements HostDiscovery {
         main.postDelayed(timeout, SEARCH_MS);
     }
 
+    /** Lock held. Hosts shown: every one found except this phone's own. */
+    private int visible() {
+        int n = 0;
+        for (HostAdvert.Found h : found.values()) if (!own.contains(h.host)) n++;
+        return n;
+    }
+
     /** Lock held. */
     private void publish() {
         Listener l = listener;
-        if (l != null) l.hosts(new ArrayList<>(found.values()));
+        if (l == null) return;
+        // A phone cannot join itself; after Stop hosting its own advert can linger in the NSD cache for a few seconds.
+        ArrayList<HostAdvert.Found> list = new ArrayList<>();
+        for (HostAdvert.Found h : found.values()) if (!own.contains(h.host)) list.add(h);
+        l.hosts(list);
     }
 
     private void resolveOne(String key, ResolveQueue.Done done) {

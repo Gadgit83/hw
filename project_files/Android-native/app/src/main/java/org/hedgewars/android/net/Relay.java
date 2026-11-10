@@ -2012,6 +2012,8 @@ public final class Relay {
         long pingsSent, pongs;
         double lastRttMs = -1, sumRttMs, minRttMs = -1, maxRttMs = -1;
         int maxQueue;
+        /** The relay sent its close frame: nothing may follow it, not even an echo of the TV's close reply. */
+        volatile boolean closing;
     }
 
     /** Lock held. */
@@ -2145,9 +2147,15 @@ public final class Relay {
             v = me;
             s.setSoTimeout(0);
             changed();
-            boolean closeFrame = Ws.readClient(in, reply -> me.out.offer(reply), pong -> {
+            boolean closeFrame = Ws.readClient(in, reply -> { if (!me.closing) me.out.offer(reply); }, pong -> {
                 synchronized (lock) { onPong(me, pong); }
             });
+            if (me.closing) {
+                // The relay closed first and the TV has answered (or gone): the closing handshake is complete, so the
+                // server ends the TCP connection now. Holding it open makes older WebViews report 1006 without the code.
+                finishClose(me);
+                return;
+            }
             why = closeFrame ? "the TV closed the connection" : "the TV disconnected (end of stream)";
             // The client closed (and its close frame was echoed): let the echo out before the socket goes.
             me.out.closeWhenDrained();
@@ -2216,14 +2224,32 @@ public final class Relay {
         for (Viewer v : new ArrayList<>(viewers)) {
             retire(v, why);
             v.out.offer(Ws.frame(8, payload));      // behind every game frame already queued: the close code is the last thing the TV reads
+            v.closing = true;
             v.out.closeWhenDrained();
-            final Socket vs = v.sock;
+            final Viewer cv = v;
             Thread t = new Thread(() -> {
-                try { Thread.sleep(2000); vs.close(); } catch (Exception ignored) { }     // the drain: time for the TV to read the frames and echo the close
+                // Fallback only: normally the TV's close reply ends the connection at once (finishClose). This covers a
+                // TV that never answers; it waits longer when many game frames are still queued ahead of the close.
+                try { Thread.sleep(VIEWER_CLOSE_WAIT_MS); } catch (InterruptedException ignored) { }
+                finishClose(cv);
             });
             t.setDaemon(true);
             t.start();
         }
+    }
+
+    /** How long the relay waits for a TV to answer its close frame before ending the connection anyway. */
+    static final long VIEWER_CLOSE_WAIT_MS = 5000;
+
+    /** After the relay's close frame: let it out (bounded wait), then end the TCP connection with a FIN. */
+    private static void finishClose(Viewer v) {
+        long until = System.currentTimeMillis() + 1000;
+        while (!v.out.isClosed() && System.currentTimeMillis() < until) {
+            try { Thread.sleep(10); } catch (InterruptedException e) { break; }
+        }
+        v.out.close();
+        try { v.sock.shutdownOutput(); } catch (IOException ignored) { }
+        try { v.sock.close(); } catch (IOException ignored) { }
     }
 
     // Viewer stream (framing of plan section 4, for the TV that joins later) ------------------

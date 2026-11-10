@@ -155,7 +155,7 @@ public class MainActivity extends SetupActivity {
         optionsBox.addView(network, ui.margins(Ui.lp(ViewGroup.LayoutParams.WRAP_CONTENT, ui.dp(Ui.TOUCH_DP)), 0, 0, 6, 0));
         optionsBox.addView(ui.iconButton(Ui.GLYPH_SLIDERS, "Options",
                 v -> startActivity(new Intent(this, OptionsActivity.class))), Ui.lp(ui.dp(Ui.TOUCH_DP), ui.dp(Ui.TOUCH_DP)));
-        topBar.addView(optionsBox, Ui.lp(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        topBar.addView(optionsBox, ui.margins(Ui.lp(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT), 16, 0, 0, 0));
         root.addView(topBar);
 
         problemBox = new LinearLayout(this);

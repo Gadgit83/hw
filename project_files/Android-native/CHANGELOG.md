@@ -4,6 +4,22 @@ All notable changes to the native Android app (`project_files/Android-native`), 
 
 Only some builds were put on a phone, so a version below is a build that was made, not necessarily one that was released. Releases are tags on `android-master` with the APK attached; there is none yet.
 
+## 0.3.0-tv8 (111): screen layout polish (test build)
+
+`HP_PROFILE=test`, versionName `0.3.0-tv8-test`. Layout and styling only; no behaviour changes. Found by looking at the offline screenshots (`scripts/ui-screenshots.sh`, which now also draws the Network chooser with a host list, the watcher states and the Stop watching question).
+
+### Changed
+
+- Setup: the TEST BUILD badge is no longer clipped by the tab strip on a narrow screen; Randomise and Add team have a gap; two teams share the full width (four make two by two, five and six three columns); a "More below" mark shows when a screen continues below the visible part (six teams on a narrow screen, the rules).
+- Rules: "More rules" is split into two cards of equal length that line up with the two above, instead of one card with an empty half; the weapons toggle has room between its label and the switch.
+- Options, Display: each Automatic switch sits under a heading naming its control (Buttons and text on screen, Weapon menu); the sliders stay visible when switched off.
+- The screens share one left and right margin (12 dp); the Done and Back buttons line up with the cards.
+- Network: the title bar is the same as on the other screens (Back on the left, fixed above the cards). On a wide screen the host list is a card beside Host and Join by address, so Join by address is in view on a narrow phone. The host list's Join to watch button is visible on its row.
+- Network, hosting: the TV addresses are smaller; TVs watching (green) and waiting (amber) are shown as counts of their own; the long explanations moved to the end of the card, so the TV state, the phone address and the phone list come first. The watching TV line is no longer monospace.
+- Disabled buttons have readable text (the disabled Watching button).
+- Dialogs: every dialog, including the Back question in the game (whose full-screen theme gave it the old black style), uses one dark green style. Stop watching on the Network screen says "Stop watching" and "Keep watching".
+- The Problem box dismiss is a drawn cross on a 48 dp button.
+
 ## 0.3.0-tv7b (110): hosting and TV fixes from tv7 testing (test build)
 
 `HP_PROFILE=test`, versionName `0.3.0-tv7b-test`.

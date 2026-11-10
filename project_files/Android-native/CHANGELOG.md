@@ -4,6 +4,19 @@ All notable changes to the native Android app (`project_files/Android-native`), 
 
 Only some builds were put on a phone, so a version below is a build that was made, not necessarily one that was released. Releases are tags on `android-master` with the APK attached; there is none yet.
 
+## 0.3.0-tv7b (110): hosting and TV fixes from tv7 testing (test build)
+
+`HP_PROFILE=test`, versionName `0.3.0-tv7b-test`.
+
+### Changed
+
+- Host Wi-Fi loss: the running game ends after 10 s without a LAN address (was 4 s), so brief drops (roams, DHCP renewals) do not end it.
+- Hotspot and USB tether addresses: `NetSession.isLanInterface` also accepts `softap*`, `rndis*` and `usb*`, so the host screen lists them.
+- The TV close code 4005 `ended` is sent for every other game end (a desync the relay acts on, the pause limit, every phone dropped). Before, these were sent as 4001 `host-ended`. `lastGame.ended` is `other` for them. Table in docs/multiphone-test.md.
+- Hosting asks for the local network permission on Android 16 and later before it announces the phone. If it is refused, hosting goes on and the host screen says other phones may not find it.
+- Host names from the NSD record lose control and bidi-format characters (Cc, Cf).
+- NSD registration: a hosting that stops before NsdManager confirms the registration is unregistered as soon as it is confirmed, and the "Visible..." status is not shown after hosting stopped. The "could not resolve" status is ignored when the search is not running.
+
 ## 0.3.0-tv7 (109): hosting robustness, finding hosts, join check (test build)
 
 `HP_PROFILE=test`, versionName `0.3.0-tv7-test`. Phase 5 of docs/tv-viewer-plan.md.

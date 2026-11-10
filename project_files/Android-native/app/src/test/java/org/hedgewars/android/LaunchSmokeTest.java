@@ -604,6 +604,8 @@ public class LaunchSmokeTest {
         assertTrue(NetSession.endNotice("Desync between A and B", false).startsWith("The game ended: Desync"));
         assertTrue(NetSession.isLanInterface("wlan0") && NetSession.isLanInterface("ap0") && NetSession.isLanInterface("swlan0") && NetSession.isLanInterface("eth0"));
         assertFalse("apn0 is not a hotspot", NetSession.isLanInterface("apn0"));
+        assertTrue("hotspot (softap), USB tether (rndis, usb) are LAN", NetSession.isLanInterface("softap0") && NetSession.isLanInterface("rndis0") && NetSession.isLanInterface("usb0"));
+        assertFalse("cellular, VPN and Wi-Fi Direct stay out", NetSession.isLanInterface("rmnet0") || NetSession.isLanInterface("p2p0"));
         assertFalse(NetSession.isLanInterface("ap") || NetSession.isLanInterface("rmnet_data0") || NetSession.isLanInterface("tun0") || NetSession.isLanInterface("p2p-wlan0-0") || NetSession.isLanInterface(null));
     }
 }

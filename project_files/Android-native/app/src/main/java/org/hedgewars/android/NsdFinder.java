@@ -70,6 +70,7 @@ final class NsdFinder implements HostDiscovery {
 
             @Override public void gaveUp(String key, String why) {
                 android.util.Log.w(Diag.TAG, "nsd: could not resolve " + key + ": " + why);
+                if (!running) return;
                 Listener x = listener;
                 if (x != null) x.status("Found a host called " + key + " but could not read its address (" + why + "). Type its address instead.", false);
             }

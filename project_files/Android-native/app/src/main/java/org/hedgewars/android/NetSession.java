@@ -248,12 +248,14 @@ final class NetSession {
     // Addresses -------------------------------------------------------------------------------
 
     /**
-     * True for Wi-Fi, hotspot and Ethernet interfaces (wlan*, swlan*, eth*, and the hotspot's ap0, ap1, ...); not cellular
-     * (rmnet*), VPN (tun*), Wi-Fi Direct (p2p*) or anything else that merely starts with "ap" (apn0, appp0).
+     * True for Wi-Fi, hotspot, USB tether and Ethernet interfaces (wlan*, swlan*, eth*, the hotspot's ap0, ap1, ..., and the hosts
+     * that share a connection by USB or Wi-Fi hotspot: softap*, rndis*, usb*); not cellular (rmnet*), VPN (tun*), Wi-Fi Direct
+     * (p2p*) or anything else that merely starts with "ap" (apn0, appp0).
      */
     static boolean isLanInterface(String name) {
         if (name == null) return false;
         if (name.startsWith("wlan") || name.startsWith("swlan") || name.startsWith("eth")) return true;
+        if (name.startsWith("softap") || name.startsWith("rndis") || name.startsWith("usb")) return true;
         return name.length() > 2 && name.startsWith("ap") && Character.isDigit(name.charAt(2));
     }
 

@@ -107,7 +107,7 @@ public final class Relay {
          * When it has been false for {@code networkLossMs} the running game is ended for everyone with a clear reason.
          */
         public java.util.function.BooleanSupplier networkUp;
-        public long networkLossMs = 4000;
+        public long networkLossMs = 10000;
         /** Engine identification for the status GET (the app sets the engine commit), free text. */
         public String engine = "";
         public String hostName = "Host";
@@ -1697,8 +1697,10 @@ public final class Relay {
         String endedAs = endedAs(reason);
         noteLastGame(g.no, endedAs);
         closeViewers(reason.equals(HOST_ENDED) ? "the host ended the game" : "the game ended",
-                endedAs.equals("host") ? CLOSE_HOST_ENDED : endedAs.equals("over") ? CLOSE_GAME_OVER : CLOSE_HOST_LOST,
-                endedAs.equals("host") ? "host-ended" : endedAs.equals("over") ? "game-over" : "host-lost");
+                endedAs.equals("host") ? CLOSE_HOST_ENDED : endedAs.equals("over") ? CLOSE_GAME_OVER
+                        : endedAs.equals("host-lost") ? CLOSE_HOST_LOST : CLOSE_OTHER,
+                endedAs.equals("host") ? "host-ended" : endedAs.equals("over") ? "game-over"
+                        : endedAs.equals("host-lost") ? "host-lost" : "ended");
         for (Spectator sp : spectators.values()) retireWatchLink(sp, "the game ended");
         if (g.watcherReportDropped > 0) s.watchers.add("(" + g.watcherReportDropped + " earlier watcher lines not listed; the last " + MAX_VIEWER_LINES + " follow)");
         s.watchers.addAll(g.watcherReport);
@@ -1832,9 +1834,11 @@ public final class Relay {
     private boolean netLossHandled;
     public static final String WIFI_LOST = "The host lost its Wi-Fi connection";
 
-    /** Lock held. The host has had no LAN address for the limit: end the running game for everyone, say why to the lobby. */
-    /** WebSocket close codes the TV viewer is sent when a game ends or hosting stops (docs/multiphone-test.md, "How the TV is told the game ended"). */
-    public static final int CLOSE_HOST_ENDED = 4001, CLOSE_GAME_OVER = 4002, CLOSE_HOST_LOST = 4003, CLOSE_STOPPED = 4004;
+    /**
+     * WebSocket close codes the TV viewer is sent when a game ends or hosting stops (docs/multiphone-test.md, "How the TV is told the
+     * game ended"). 4005 is any other end: a desync, the pause limit, every phone dropped.
+     */
+    public static final int CLOSE_HOST_ENDED = 4001, CLOSE_GAME_OVER = 4002, CLOSE_HOST_LOST = 4003, CLOSE_STOPPED = 4004, CLOSE_OTHER = 4005;
     private int lastGameNo;
     private String lastGameEnded;
     private long lastGameAt;
@@ -1846,13 +1850,18 @@ public final class Relay {
         lastGameAt = System.currentTimeMillis();
     }
 
-    /** "host" (the host or the relay ended it), "over" (a normal game over), "host-lost" (the host's Wi-Fi went, or every engine is gone). */
+    /**
+     * "host" (the host ended it: Back, End the game, the host's engine quit), "over" (a normal game over), "host-lost" (the host's
+     * Wi-Fi went, or every engine is gone), "other" (anything else the relay decides: a desync, the pause limit, every phone dropped).
+     */
     static String endedAs(String reason) {
+        if (reason.equals(HOST_ENDED)) return "host";
         if (reason.equals("every engine finished")) return "over";
         if (reason.equals(WIFI_LOST) || reason.equals("every engine is gone")) return "host-lost";
-        return "host";
+        return "other";
     }
 
+    /** Lock held. The host has had no LAN address for the limit: end the running game for everyone, say why to the lobby. */
     private void hostNetworkLost(long now) {
         netLossHandled = true;
         log("host network down for " + (now - netDownSince) / 1000 + " s");

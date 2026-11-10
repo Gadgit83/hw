@@ -296,6 +296,11 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
 
     @Override
     public void onRequestPermissionsResult(int code, String[] perms, int[] results) {
+        if (code == LocalNetwork.REQUEST && hostWaitsForLocalNetwork) {
+            hostWaitsForLocalNetwork = false;
+            reallyHost();                    // granted or not: hosting goes on, NsdHost says what is limited
+            return;
+        }
         if (code == LocalNetwork.REQUEST) {
             if (LocalNetwork.granted(this) || (results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED)) {
                 LocalNetwork.forceGranted = null;
@@ -310,7 +315,7 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
             return;
         }
         // Hosting works without the notification permission (the notification is just not shown); go on either way.
-        if (code == 7) reallyHost();
+        if (code == 7) hostAfterPermissions();
     }
 
     /** Hosts that cannot be joined come last; the one picked last time comes first. */
@@ -548,11 +553,26 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
 
     // Actions -----------------------------------------------------------------------------------
 
+    /** True while hosting waits for the answer to the local network permission prompt. */
+    private boolean hostWaitsForLocalNetwork;
+
     private void host() {
         saveFields();
         problem = "";
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(new String[] { Manifest.permission.POST_NOTIFICATIONS }, 7);
+            return;
+        }
+        hostAfterPermissions();
+    }
+
+    /**
+     * Android 16 and later: asks for the local network permission before the phone announces itself, so other phones can find it.
+     * A refusal does not stop hosting (the typed address still works); NsdHost says that discovery may be limited.
+     */
+    private void hostAfterPermissions() {
+        if (!LocalNetwork.granted(this) && LocalNetwork.request(this)) {
+            hostWaitsForLocalNetwork = true;
             return;
         }
         reallyHost();

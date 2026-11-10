@@ -977,6 +977,19 @@ public class RelayTests {
         check(c4.equals("4004 relay-stopped"), "hosting stopped: close code 4004 relay-stopped (" + c4 + ")");
         v4.close();
         stopper.join(5000);
+        // a desync the relay acts on is neither host-ended, a game over, host-lost nor relay-stopped: 4005 ended, lastGame "other"
+        Game g5 = new Game(20000, 1000);
+        Socket v5 = viewerOn(g5.f);
+        check(waitFor(() -> g5.f.relay.viewerCount() == 1, 2000), "viewer attached (desync)");
+        g5.ea.send(new byte[] { 'Z', 3 });
+        g5.ea.send("\u0000Edesync at turn 3");           // control frame 'E': the phone reports a desync
+        g5.ea.close();                                   // the engine exits: its link ends, and with two phones the game ends for both
+        String c5 = closeOf(v5, new int[1]);
+        check(c5.equals("4005 ended"), "a desync the relay acts on: close code 4005 ended (" + c5 + ")");
+        Map<String, Object> lg5 = (Map<String, Object>) ((Map<String, Object>) Json.parse(statusBody(g5.f))).get("lastGame");
+        check(lg5 != null && "other".equals(lg5.get("ended")), "lastGame ended other (" + lg5 + ")");
+        v5.close();
+        g5.end();
     }
 
     static void testViewerCount() throws Exception {
@@ -1421,6 +1434,10 @@ public class RelayTests {
         raw.put("proto", new byte[0]);
         check(org.hedgewars.android.net.HostAdvert.parse("s", "h", 1, raw).tvPort == 0, "a garbled number reads as 0");
         check(org.hedgewars.android.net.HostAdvert.txt("v", "c", 60, new String(new char[500]).replace('\0', 'x'), 1, "").get("name").length() <= 100, "long values are cut");
+        raw.put("name", "Pixel\u202E\u0007 7\u200B\n".getBytes(StandardCharsets.UTF_8));
+        check("Pixel 7".equals(org.hedgewars.android.net.HostAdvert.parse("s", "h", 1, raw).name), "control and bidi characters are stripped from the name (Cc, Cf)");
+        raw.put("name", "\u202E\u0001".getBytes(StandardCharsets.UTF_8));
+        check("s".equals(org.hedgewars.android.net.HostAdvert.parse("s", "h", 1, raw).name), "a name of only control characters falls back to the service name");
     }
 
     static void testResolveQueue() throws Exception {

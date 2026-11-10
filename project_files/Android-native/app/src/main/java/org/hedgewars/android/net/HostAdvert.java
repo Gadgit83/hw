@@ -75,7 +75,7 @@ public final class HostAdvert {
         f.version = str(attrs, "v");
         f.compat = str(attrs, "compat");
         f.data = str(attrs, "data");
-        f.name = str(attrs, "name");
+        f.name = printable(str(attrs, "name"));
         f.protocol = num(attrs, "proto");
         f.tvPort = num(attrs, "tv");
         f.lobbyProto = num(attrs, "lp");
@@ -89,6 +89,19 @@ public final class HostAdvert {
         if (b == null) return "";
         String s = new String(b, StandardCharsets.UTF_8);
         return s.length() > 120 ? s.substring(0, 120) : s;
+    }
+
+    /**
+     * The name without control (Cc) and format (Cf) characters, which include the bidi overrides (U+202A to U+202E, U+2066 to U+2069)
+     * a hostile name could use to make the list read differently. A name that is left empty falls back to the service name.
+     */
+    static String printable(String s) {
+        StringBuilder b = new StringBuilder(s.length());
+        s.codePoints().forEach(cp -> {
+            int t = Character.getType(cp);
+            if (t != Character.CONTROL && t != Character.FORMAT) b.appendCodePoint(cp);
+        });
+        return b.toString();
     }
 
     private static int num(Map<String, byte[]> a, String k) {

@@ -87,7 +87,9 @@ public class HostService extends Service {
         final Context app = c.getApplicationContext();
         Thread t = new Thread(() -> {
             try {
+                if (relay != r) return;              // hosting stopped (or restarted) meanwhile
                 nsd.register(app, r.port(), android.os.Build.MODEL, Diag.versionName(app), NetSession.dataDigest(app), r.viewerPort(), r.getPin() != null);
+                if (relay != r) nsd.unregister();    // stopped while registering: take the announcement back
             } catch (RuntimeException e) {
                 android.util.Log.w(Diag.TAG, "could not announce the host again: " + e);
             }

@@ -1520,6 +1520,34 @@ public class RelayTests {
     }
 
     @SuppressWarnings("unchecked")
+    static void testPinRefusedPinger() throws Exception {
+        System.out.println("Game password: a refused TV that keeps pinging is still cut off");
+        Game g = new Game(20000, 1000);
+        g.f.relay.setPin("7305");
+        try (Socket s = viewerReq(g.f, "pin=0000")) {
+            int[] op = new int[1];
+            byte[] p = readWsFrame(s.getInputStream(), op);
+            check(p != null && op[0] == 8, "the refusal is a close frame");
+            long t0 = System.currentTimeMillis();
+            int got = 0;
+            s.setSoTimeout(500);
+            while (System.currentTimeMillis() - t0 < 8000) {
+                try {
+                    s.getOutputStream().write(maskedFrame(9, new byte[] { 1 }, new byte[] { 5, 6, 7, 8 }));   // a ping, no close reply
+                    s.getOutputStream().flush();
+                } catch (java.io.IOException e) { got = -1; break; }
+                try {
+                    if (readWsFrame(s.getInputStream(), op) == null) { got = -1; break; }
+                } catch (java.net.SocketTimeoutException e) {
+                    // nothing to read: ping again
+                } catch (java.io.IOException e) { got = -1; break; }
+            }
+            long took = System.currentTimeMillis() - t0;
+            check(got == -1 && took < 4000, "the connection ends within about 2 s although the client keeps pinging (" + took + " ms)");
+        }
+        g.end();
+    }
+
     static void testGamePassword() throws Exception {
         System.out.println("Game password: status flag, phones, TV viewers, lock");
         long oldLock = Relay.pinLockMs;
@@ -1828,6 +1856,7 @@ public class RelayTests {
         testDataDigest();
         testHostAdvert();
         testGamePassword();
+        testPinRefusedPinger();
         testResolveQueue();
         testLinkLiveness();
         testHostNetworkLoss();

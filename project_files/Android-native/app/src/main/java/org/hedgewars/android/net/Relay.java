@@ -313,6 +313,9 @@ public final class Relay {
     public static final int PIN_MAX_WRONG = 5;
     /** Lock length in milliseconds. Not final so the tests can shorten it; the app never changes it. */
     public static volatile long pinLockMs = 30000;
+    /** A monotonic clock for the password lock, in ms since this relay started (always positive; a changed phone clock does not matter). */
+    private final long pinClock0 = System.nanoTime();
+    private long pinNow() { return (System.nanoTime() - pinClock0) / 1_000_000L + 1; }
     private static final long PIN_FORGET_MS = 5 * 60000L;
     private static final int PIN_MAX_ADDRESSES = 512;
     static final int PIN_OK = 0, PIN_WRONG = 1, PIN_LOCKED = 2;
@@ -350,7 +353,7 @@ public final class Relay {
     int checkPin(String addr, String given) {
         String want = pin;
         if (want == null) return PIN_OK;
-        long now = System.currentTimeMillis();
+        long now = pinNow();
         synchronized (pinGuard) {
             long[] t = pinTries.get(addr);
             if (t != null && t[1] > now) { t[2] = now; return PIN_LOCKED; }
@@ -2315,7 +2318,14 @@ public final class Relay {
             os.write(Ws.frame(8, payload));
             os.flush();
             s.setSoTimeout(2000);
-            try { Ws.readClient(in, reply -> { }); } catch (IOException ignored) { }   // the TV's close reply (or a timeout)
+            // The TV's close reply, for 2 s at most overall: a client that keeps sending pings must not hold a viewer slot.
+            Thread cut = new Thread(() -> {
+                try { Thread.sleep(2000); } catch (InterruptedException ignored) { }
+                try { s.close(); } catch (IOException ignored) { }
+            }, "relay-pin-refused");
+            cut.setDaemon(true);
+            cut.start();
+            try { Ws.readClient(in, reply -> { }); } catch (IOException ignored) { }
         } catch (IOException ignored) {
         } finally {
             try { s.shutdownOutput(); } catch (IOException ignored) { }

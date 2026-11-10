@@ -210,7 +210,7 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
         pinField = null;
         // A join the host refused for its game password: ask for the password and join again. ("password-locked" is just shown, below.)
         if ("password".equals(NetSession.takeRefusal()) && !NetSession.joined) {
-            askPin(NetSession.lastHostName, NetSession.lastPort, NetSession.lastWatch,
+            setPinPrompt(NetSession.lastHostName, NetSession.lastPort, NetSession.lastWatch,
                     NetSession.sentPin.isEmpty() ? "This host asks for a game password." : "Wrong password. Try again.");
         }
         if (NetSession.joined || NetSession.hosting) pinMsg = null;
@@ -476,12 +476,17 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
     // Game password ------------------------------------------------------------------------------
 
     private void askPin(String host, int port, boolean watch, String msg) {
+        setPinPrompt(host, port, watch, msg);
+        if (!destroyed && content != null && !NetSession.joined) render();
+    }
+
+    /** Only the state of the password prompt; render() draws it (render() itself uses this, so it must not draw). */
+    private void setPinPrompt(String host, int port, boolean watch, String msg) {
         pinHost = host;
         pinPort = port;
         pinWatch = watch;
         pinMsg = msg;
         pinText = "";
-        if (!destroyed && content != null && !NetSession.joined) render();
     }
 
     private LinearLayout pinCard() {

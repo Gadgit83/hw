@@ -98,6 +98,7 @@ final class NetSession {
     /** The host turns the game password on (a new random one) or off. Persisted; applies to new connections only. */
     static void setPinOn(Context c, boolean on) {
         c.getSharedPreferences(Store.PREFS_NAME, Context.MODE_PRIVATE).edit().putBoolean(PIN_ON_KEY, on).apply();
+        if (HostService.relay == null) { hostPin = null; ping(); return; }    // not hosting: the setting applies at the next Host
         applyHostPin(c, on ? (hostPin != null ? hostPin : randomPin()) : null);
     }
 

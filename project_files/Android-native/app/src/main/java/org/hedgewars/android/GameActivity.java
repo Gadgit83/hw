@@ -170,6 +170,11 @@ public class GameActivity extends SDLActivity {
     private void quitEngine() {
         if (quitting) return;
         quitting = true;
+        if (BackConfirm.role(getFilesDir()) == BackConfirm.WATCH) {
+            // This process is not the one that holds the relay connection: leave a note for the Network screen, which then
+            // leaves the relay too and shows the chooser, so "Stop watching" is one step and not two.
+            BackConfirm.markLeave(getFilesDir());
+        }
         try {
             nativeUserQuit();
         } catch (Throwable e) {

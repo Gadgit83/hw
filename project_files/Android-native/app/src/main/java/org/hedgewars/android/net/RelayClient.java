@@ -93,10 +93,63 @@ public final class RelayClient {
         return this;
     }
 
+    /** Told before each further attempt of {@link #connect(int, long, long, Progress)}: the number of the attempt (2 and up) and how many there are. */
+    public interface Progress {
+        void retrying(int attempt, int of);
+    }
+
+    /** True for a failure to reach the host at all (worth another try), false for anything else. */
+    static boolean unreachable(IOException e) {
+        return e instanceof java.net.NoRouteToHostException || e instanceof java.net.ConnectException
+                || e instanceof java.net.SocketTimeoutException;
+    }
+
+    /**
+     * Connects like {@link #connect()}, but tries again when the host cannot be reached (no route, refused, timed out): a phone that
+     * has not talked to the host for a while has no address entry for it yet, and the first attempt fails with "No route to host"
+     * although the next works. At most {@code attempts} tries, {@code pauseMs} apart, and none starts after {@code totalMs} since
+     * the first. The relay's own refusals (version, data, full) come after the connection is made and are not retried.
+     */
+    public void connect(int attempts, long pauseMs, long totalMs, Progress progress) throws IOException {
+        long start = System.currentTimeMillis();
+        IOException last = null;
+        for (int n = 1; n <= attempts; n++) {
+            long left = totalMs - (System.currentTimeMillis() - start);
+            if (n > 1 && left <= 0) break;
+            if (n > 1 && progress != null) progress.retrying(n, attempts);
+            try {
+                connect((int) Math.max(1000, Math.min(5000, n == 1 ? 5000 : left)));
+                return;
+            } catch (IOException e) {
+                last = e;
+                closeSocketQuietly();
+                if (!unreachable(e) || n == attempts) break;
+                try {
+                    Thread.sleep(pauseMs);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
+        }
+        throw last;
+    }
+
+    private void closeSocketQuietly() {
+        Socket s = socket;
+        if (s != null) {
+            try { s.close(); } catch (IOException ignored) { }
+        }
+    }
+
     /** Connects (blocking, 5 s limit) and starts the reader thread. */
     public void connect() throws IOException {
+        connect(5000);
+    }
+
+    private void connect(int timeoutMs) throws IOException {
         socket = new Socket();
-        socket.connect(new InetSocketAddress(host, port), 5000);
+        socket.connect(new InetSocketAddress(host, port), timeoutMs);
         socket.setTcpNoDelay(true);
         socket.setKeepAlive(true);
         out = socket.getOutputStream();

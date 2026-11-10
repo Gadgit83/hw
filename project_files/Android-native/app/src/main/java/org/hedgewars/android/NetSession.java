@@ -171,6 +171,9 @@ final class NetSession {
         connect(c, host, port, name, isHost, false);
     }
 
+    /** Shown on the Network screen while a join retries ("Trying again (2 of 3)..."); empty otherwise. */
+    static volatile String connectProgress = "";
+
     static void connect(Context c, String host, int port, String name, boolean isHost, boolean watch) throws IOException {
         leave();
         closedReason = "";
@@ -178,11 +181,20 @@ final class NetSession {
         state = null;
         relaySummary = "";
         NetDiag.clear(c);
+        BackConfirm.takeLeave(c.getFilesDir());       // a note left by an earlier game must not end this session
         List<SetupModel.Team> teams = watch ? new ArrayList<SetupModel.Team>() : Store.loadSetup(c, Store.data(c)).teams;
         RelayClient rc = new RelayClient(host, port, name, Diag.versionName(c), isHost, teams, HANDLER).watch(watch)
                 .identity(org.hedgewars.android.net.Compat.VALUE, dataDigest(c));
         if (isHost) rc.hostSecret(HostService.hostSecret);
-        rc.connect();
+        try {
+            if (isHost) rc.connect();            // loopback: no reason to retry
+            else rc.connect(3, 1500, 15000, (n, of) -> {
+                connectProgress = "Trying again (" + n + " of " + of + ")...";
+                ping();
+            });
+        } finally {
+            connectProgress = "";
+        }
         client = rc;
         joined = true;
         watching = watch;

@@ -406,6 +406,13 @@ static void *down_thread(void *arg)
                 net_lost(m);
             }
             if (len == 2 && (msg[1] == 'P' || msg[1] == 'R')) net_apply_pause(msg[1] == 'P');
+            /* The relay's link ping: answered here, on this thread, so it works while the engine generates a map or is paused. */
+            if (len == 2 && msg[1] == 'K') {
+                unsigned char k[3] = { 2, 0, 'K' };                    /* straight onto the link: no waiting behind the queue, no log line every 5 s */
+                pthread_mutex_lock(&g_relay_wr_lock);
+                write_full(g_relay_fd, k, sizeof k);
+                pthread_mutex_unlock(&g_relay_wr_lock);
+            }
             continue;
         }
         if (!hp_ipc_relay_frame_ok(msg[0])) {
@@ -490,7 +497,10 @@ static int net_connect(void)
         close(fd);
         return -1;
     }
-    tv.tv_sec = 0;                                             /* the downstream thread blocks without a limit */
+    /* The relay pings every 5 s once the game runs; a link that has said nothing for 60 s (the relay waits up to 45 s for the other
+     * phones before it opens the gate, and does not ping until then) is half open: the host is gone without a close. recv then fails
+     * and the down thread reports "The connection to the host was lost." */
+    tv.tv_sec = 60;
     setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
     g_relay_fd = fd;
     g_net_up = 1;

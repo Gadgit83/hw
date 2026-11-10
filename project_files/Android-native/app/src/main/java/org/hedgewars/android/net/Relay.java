@@ -95,6 +95,19 @@ public final class Relay {
         public GameData data;
         public Supplier<SetupModel> hostSetup;
         public String build = "dev";
+        /** The host's simulation-compatibility string ({@link Compat#VALUE}); a joining phone must send exactly this. */
+        public String compat = Compat.VALUE;
+        /** The host's game data fingerprint ({@link DataDigest}); "" skips the data check (host tests without data). */
+        public String dataDigest = "";
+        /** How often the relay pings each engine link, and how long a link may be silent in a running game before its phone is dropped; 0 turns the check off. */
+        public long linkPingMs = 5000;
+        public long linkDeadMs = 20000;
+        /**
+         * Asked about once a second (outside the relay's lock) whether the host still has a LAN address; null turns the check off.
+         * When it has been false for {@code networkLossMs} the running game is ended for everyone with a clear reason.
+         */
+        public java.util.function.BooleanSupplier networkUp;
+        public long networkLossMs = 4000;
         /** Engine identification for the status GET (the app sets the engine commit), free text. */
         public String engine = "";
         public String hostName = "Host";
@@ -386,6 +399,8 @@ public final class Relay {
         boolean linked, linkOpen, dropped, finished, quit;
         String fatal;
         long lastMsg;
+        /** When anything last arrived on the engine link (a game message or a control frame, the pong included). */
+        long lastRx = System.currentTimeMillis();
         // game statistics
         final Fnv toHash = new Fnv();
         long toMsgs, fromRaw, fromKept, fromDropped;
@@ -447,6 +462,7 @@ public final class Relay {
         Socket engineSock;
         Outbox engineOut;
         boolean tokenUsed, linkOpen, finished, quit, sessionOpen;
+        long lastRx = System.currentTimeMillis();
         String fatal;
         long sessionStart;
         Fnv toHash = new Fnv();
@@ -513,6 +529,7 @@ public final class Relay {
 
     private final class Game {
         final int no = ++gameNo;
+        long lastLinkPing;
         final List<TeamRef> teams = new ArrayList<>();
         List<String> canonical;
         List<String> viewerLines;
@@ -670,6 +687,8 @@ public final class Relay {
                         + ". Install the same app version on both phones.");
                 return;
             }
+            String why = joinRefusal(hello);
+            if (why != null) { refuse(s, why); return; }
             boolean isHost = Json.bool(hello, "host", false);
             if (isHost && (!s.getInetAddress().isLoopbackAddress() || hasHost() || !secretOk(Json.str(hello, "secret", "")))) {
                 refuse(s, "Only the hosting phone can be the host.");
@@ -714,6 +733,14 @@ public final class Relay {
             log("lobby " + me.name + ": " + e);
         }
         lobbyLost(me);
+    }
+
+    /** Why a phone with this hello may not join (different game version, app version or game data), or null. Naming both sides. */
+    private String joinRefusal(Map<String, Object> hello) {
+        String why = Compat.refusal(cfg.compat, cfg.build, cfg.dataDigest,
+                Json.str(hello, "compat", ""), Json.str(hello, "build", ""), Json.str(hello, "digest", ""));
+        if (why != null) log("join check failed: " + why);
+        return why;
     }
 
     private boolean secretOk(String given) {
@@ -1020,6 +1047,8 @@ public final class Relay {
                         + ". Install the same app version on both phones.");
                 return;
             }
+            String why = joinRefusal(hello);
+            if (why != null) { refuse(s, why); return; }
             if (Json.bool(hello, "host", false)) {
                 refuse(s, "The hosting phone cannot be a watcher.");
                 return;
@@ -1174,6 +1203,7 @@ public final class Relay {
             if (g == null || !spectators.containsKey(me.id)) { try { s.close(); } catch (IOException ignored) { } return; }
             me.linkOpen = true;
             me.sessionOpen = true;
+            me.lastRx = System.currentTimeMillis();
             me.sessionStart = System.currentTimeMillis();
             me.toHash = new Fnv();
             me.toMsgs = me.ignored = 0;
@@ -1236,8 +1266,11 @@ public final class Relay {
         synchronized (lock) {
             Game g = game;
             if (g == null || !sp.linkOpen || msg.length == 0) return;
+            sp.lastRx = System.currentTimeMillis();
             if (msg[0] == 0) {
-                if (msg.length > 1 && msg[1] == 'E') {
+                if (msg.length == 2 && msg[1] == 'K') {
+                    return;                      // the answer to the relay's link ping
+                } else if (msg.length > 1 && msg[1] == 'E') {
                     sp.fatal = new String(msg, 2, msg.length - 2, StandardCharsets.UTF_8);
                     addWatchEvent(g, "Watcher " + sp.name + " reported an engine error: " + sp.fatal);
                     log("watcher " + sp.name + " engine error: " + sp.fatal);
@@ -1316,6 +1349,7 @@ public final class Relay {
         synchronized (lock) {
             me.linked = me.linkOpen = true;
             me.lastMsg = System.currentTimeMillis();
+            me.lastRx = me.lastMsg;
             me.engineOut.attach(os);
             log("engine link up: " + me.name);
             maybeOpenGate();
@@ -1353,6 +1387,9 @@ public final class Relay {
         state = S_PLAYING;
         game.gateOpenAt = System.currentTimeMillis();
         game.lastKeptAt = game.gateOpenAt;
+        for (Player q : players.values()) q.lastRx = game.gateOpenAt;
+        for (Spectator q : spectators.values()) q.lastRx = game.gateOpenAt;
+        game.lastLinkPing = game.gateOpenAt;
         for (Player q : players.values()) if (q.engineOut != null) q.engineOut.release();
         log("all engine links up; game " + game.no + " running");
         updateArmed(game, game.gateOpenAt);
@@ -1366,10 +1403,13 @@ public final class Relay {
         synchronized (lock) {
             Game g = game;
             if (g == null || p.dropped) return;
+            p.lastRx = System.currentTimeMillis();
             if (msg.length == 0) return;
             if (msg[0] == 0) {
                 // control frame from the phone
-                if (msg.length > 1 && msg[1] == 'E') {
+                if (msg.length == 2 && msg[1] == 'K') {
+                    return;                      // the answer to the relay's link ping: it only shows the phone is alive
+                } else if (msg.length > 1 && msg[1] == 'E') {
                     p.fatal = new String(msg, 2, msg.length - 2, StandardCharsets.UTF_8);
                     g.events.add(p.name + " reported an engine error: " + p.fatal);
                     log(p.name + " engine error: " + p.fatal);
@@ -1758,6 +1798,7 @@ public final class Relay {
                 return;
             }
             long now = System.currentTimeMillis();
+            probeNetwork(now);
             try {
                 lastPing = watchOnce(now, lastPing);
             } catch (Throwable e) {
@@ -1766,8 +1807,36 @@ public final class Relay {
         }
     }
 
+    /** Outside the lock: asks the host's network probe (listing interfaces is not for the relay's lock) at most once a second. */
+    private void probeNetwork(long now) {
+        if (cfg.networkUp == null || now - lastProbe < 1000) return;
+        lastProbe = now;
+        boolean up;
+        try { up = cfg.networkUp.getAsBoolean(); } catch (RuntimeException e) { return; }
+        synchronized (lock) {
+            if (up) { netDownSince = 0; netLossHandled = false; }
+            else if (netDownSince == 0) netDownSince = now;
+        }
+    }
+
+    private long lastProbe, netDownSince;
+    private boolean netLossHandled;
+    public static final String WIFI_LOST = "The host lost its Wi-Fi connection";
+
+    /** Lock held. The host has had no LAN address for the limit: end the running game for everyone, say why to the lobby. */
+    private void hostNetworkLost(long now) {
+        netLossHandled = true;
+        log("host network down for " + (now - netDownSince) / 1000 + " s");
+        if (game != null) {
+            endGame(WIFI_LOST);
+        } else {
+            for (Player q : players.values()) if (!q.host) sendLobby(q, Json.obj("t", "notice", "text", WIFI_LOST + ". Phones may not reach it until it is back."));
+        }
+    }
+
     private long watchOnce(long now, long lastPing) {
             synchronized (lock) {
+                if (netDownSince != 0 && !netLossHandled && now - netDownSince > cfg.networkLossMs) hostNetworkLost(now);
                 if (now - lastPing > 5000) {
                     lastPing = now;
                     for (Player q : players.values()) sendLobby(q, Json.obj("t", "ping"));
@@ -1805,6 +1874,8 @@ public final class Relay {
                 }
                 Game g = game;
                 if (g == null) return lastPing;
+                if (state == S_PLAYING && cfg.linkDeadMs > 0) linkLiveness(g, now);
+                if (g != game) return lastPing;
                 if (state == S_STARTING && now - g.startedAt > cfg.linkWaitMs) {
                     for (Player q : new ArrayList<>(players.values()))
                         if (!q.linked && !q.dropped) dropPlayer(q, "its engine did not connect in " + cfg.linkWaitMs / 1000 + " s");
@@ -1834,6 +1905,32 @@ public final class Relay {
                 if (!g.desyncReporters.isEmpty() && now - g.desyncSince > 5000) g.desyncReporters.clear();
             }
             return lastPing;
+    }
+
+    /**
+     * Lock held. Pings every engine link of the running game and drops a phone whose link has been silent too long. The silence rule
+     * above watches the current player only; this finds a half-open link (Wi-Fi gone without a close) of a phone that is not
+     * playing right now, before its turn comes and stalls everyone. The launcher answers a ping with the same control frame,
+     * on a thread of its own, so a phone that is generating a map or paused still answers.
+     */
+    private void linkLiveness(Game g, long now) {
+        if (now - g.lastLinkPing >= cfg.linkPingMs) {
+            g.lastLinkPing = now;
+            byte[] k = Frames.frame(new byte[] { 0, 'K' });
+            for (Player q : players.values())
+                if (q.linkOpen && !q.dropped && q.engineOut != null) q.engineOut.offer(k);
+            for (Spectator q : spectators.values())
+                if (q.linkOpen && q.engineOut != null) q.engineOut.offer(k);
+        }
+        for (Player q : new ArrayList<>(players.values())) {
+            if (q.linkOpen && !q.dropped && !q.finished && now - q.lastRx > cfg.linkDeadMs) {
+                dropPlayer(q, "its engine link was silent for " + (now - q.lastRx) / 1000 + " s and did not answer the link pings (half-open link)");
+                checkEnd();
+                if (game != g) return;
+            }
+        }
+        for (Spectator q : new ArrayList<>(spectators.values()))
+            if (q.linkOpen && now - q.lastRx > cfg.linkDeadMs) dropSpectator(q, "its engine link was silent for " + (now - q.lastRx) / 1000 + " s");
     }
 
     /**

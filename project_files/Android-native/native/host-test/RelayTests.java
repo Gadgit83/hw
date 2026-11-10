@@ -61,6 +61,13 @@ public class RelayTests {
         /** Set before creating a Fix: a short ping interval for the round-trip tests, a small viewer queue for the slow-viewer test. */
         static long pingMs = 300;
         static int queueItems = 20000;
+        /** The link liveness check is off for the old tests (their fake engines never answer pings); the liveness test switches it on. */
+        static long linkDeadMs = 0, linkPingMs = 5000;
+        /** The host's data fingerprint the relay demands ("" = no data check), and the network probe (netUp) with its loss limit. */
+        static String dataDigest = "";
+        static boolean netProbe;
+        static long netLossMs = 4000;
+        final java.util.concurrent.atomic.AtomicBoolean netUp = new java.util.concurrent.atomic.AtomicBoolean(true);
 
         Fix(long silenceMs, long graceMs) throws Exception {
             Relay.Config cfg = new Relay.Config();
@@ -71,6 +78,11 @@ public class RelayTests {
             cfg.data = data;
             cfg.hostSetup = () -> hostModel;
             cfg.hostSecret = secret;
+            cfg.build = "tests";
+            cfg.linkDeadMs = linkDeadMs;
+            cfg.linkPingMs = linkPingMs;
+            cfg.dataDigest = dataDigest;
+            if (netProbe) { cfg.networkUp = netUp::get; cfg.networkLossMs = netLossMs; }
             cfg.silenceMs = silenceMs;
             cfg.graceMs = graceMs;
             cfg.listener = new Relay.Listener() {
@@ -192,6 +204,8 @@ public class RelayTests {
         volatile boolean eof;
         final List<String> controls = new CopyOnWriteArrayList<>();
         final List<String> received = new CopyOnWriteArrayList<>();
+        /** Answers the relay's link ping (control frame K) like the launcher does; a test switches it off to play a half-open link. */
+        volatile boolean autoPong = true;
 
         Eng(int port, String token) throws Exception {
             s = new Socket("127.0.0.1", port);
@@ -207,7 +221,10 @@ public class RelayTests {
                         byte[] m = Frames.read(in);
                         if (m == null) break;
                         frames.incrementAndGet();
-                        if (m.length > 0 && m[0] == 0) controls.add(new String(m, 1, m.length - 1, StandardCharsets.UTF_8));
+                        if (m.length > 0 && m[0] == 0) {
+                            controls.add(new String(m, 1, m.length - 1, StandardCharsets.UTF_8));
+                            if (autoPong && m.length == 2 && m[1] == 'K') send(new byte[] { 0, 'K' });
+                        }
                         else received.add(new String(m, StandardCharsets.ISO_8859_1));
                     }
                 } catch (Exception ignored) {
@@ -392,7 +409,7 @@ public class RelayTests {
         Socket evil = new Socket("127.0.0.1", f.port());
         String team = "{\"name\":\"X\\nescript Scripts/evil.lua\",\"color\":1,\"level\":0,\"hogs\":2,\"grave\":\"Statue\\nescript evil\",\"fort\":\"Earth\\n\","
                 + "\"voice\":\"Default\\n\",\"flag\":\"hedgewars\\neflag evil\",\"hogNames\":[\"a\\nescript evil2\",\"b\"],\"hogHats\":[\"NoHat\\nehat evil\",\"NoHat\"]}";
-        evil.getOutputStream().write(line("{\"t\":\"hello\",\"role\":\"lobby\",\"proto\":1,\"name\":\"Evil\",\"build\":\"x\",\"teams\":[" + team + "]}"));
+        evil.getOutputStream().write(line("{\"t\":\"hello\",\"role\":\"lobby\",\"proto\":1,\"name\":\"Evil\",\"build\":\"tests\",\"compat\":\"" + org.hedgewars.android.net.Compat.VALUE + "\",\"teams\":[" + team + "]}"));
         evil.getOutputStream().write(line("{\"t\":\"ready\",\"ready\":true}"));
         evil.getOutputStream().flush();
         waitFor(() -> pa.state != null && Json.bool(pa.state, "canStart", false), 3000);
@@ -411,7 +428,7 @@ public class RelayTests {
         P hp = new P();
         RelayClient host = join(f, hp, "PhoneA", true, team("Alpha", 0, 0));
         waitFor(() -> hp.state != null, 3000);
-        String hello = "{\"t\":\"hello\",\"role\":\"lobby\",\"proto\":1,\"name\":\"Joe\",\"build\":\"x\",\"teams\":[]}";
+        String hello = "{\"t\":\"hello\",\"role\":\"lobby\",\"proto\":1,\"name\":\"Joe\",\"build\":\"tests\",\"compat\":\"" + org.hedgewars.android.net.Compat.VALUE + "\",\"teams\":[]}";
         String bomb = "[".repeat(60000);
         check(abuse(f.port(), line(bomb), 800), "60000 '[' as the first line: connection closed");
         sane(f, "after the '[' bomb as hello");
@@ -425,7 +442,7 @@ public class RelayTests {
         check(abuse(f.port(), cat(line(hello), repeat('y', 300000, "\n")), 1500), "a 300000 byte lobby line: connection closed");
         check(abuse(f.port(), cat(new byte[] { (byte) 0xff, (byte) 0xfe, (byte) 0xc0, (byte) 0x80, (byte) 0xed, (byte) 0xa0, (byte) 0x80 }, line("")), 800), "invalid UTF-8 bytes as hello: connection closed");
         byte[] badUtf = cat("{\"t\":\"hello\",\"role\":\"lobby\",\"proto\":1,\"name\":\"".getBytes(StandardCharsets.ISO_8859_1),
-                new byte[] { (byte) 0xff, (byte) 0xfe, (byte) 0xc3 }, "\",\"build\":\"x\",\"teams\":[]}\n".getBytes(StandardCharsets.ISO_8859_1));
+                new byte[] { (byte) 0xff, (byte) 0xfe, (byte) 0xc3 }, ("\",\"build\":\"tests\",\"compat\":\"" + org.hedgewars.android.net.Compat.VALUE + "\",\"teams\":[]}\n").getBytes(StandardCharsets.ISO_8859_1));
         abuse(f.port(), badUtf, 500);
         sane(f, "after invalid UTF-8 inside a name");
         byte[] garbage = new byte[10000];
@@ -467,11 +484,11 @@ public class RelayTests {
         System.out.println("m6: only the app itself can take the host role");
         Fix f = new Fix(20000, 1000);
         P p = new P();
-        RelayClient c = new RelayClient("127.0.0.1", f.port(), "Spoof", "t", true, new ArrayList<>(), p);
+        RelayClient c = new RelayClient("127.0.0.1", f.port(), "Spoof", "tests", true, new ArrayList<>(), p);
         c.connect();
         check(waitFor(() -> p.closed.contains("Only the hosting phone"), 2000), "a loopback client claiming to be host without the secret is refused: " + p.closed);
         P p2 = new P();
-        RelayClient c2 = new RelayClient("127.0.0.1", f.port(), "Spoof2", "t", true, new ArrayList<>(), p2).hostSecret("guess");
+        RelayClient c2 = new RelayClient("127.0.0.1", f.port(), "Spoof2", "tests", true, new ArrayList<>(), p2).hostSecret("guess");
         c2.connect();
         check(waitFor(() -> p2.closed.contains("Only the hosting phone"), 2000), "a wrong secret is refused");
         P p3 = new P();
@@ -1170,7 +1187,232 @@ public class RelayTests {
         f3.stop();
     }
 
+
+    // Phase 5 ------------------------------------------------------------------------------------
+
+    static java.io.File tmpTree(String... filesAndSizes) throws Exception {
+        java.io.File d = java.nio.file.Files.createTempDirectory("hpdata").toFile();
+        for (int i = 0; i < filesAndSizes.length; i += 2) {
+            java.io.File f = new java.io.File(d, filesAndSizes[i]);
+            f.getParentFile().mkdirs();
+            java.nio.file.Files.write(f.toPath(), new byte[Integer.parseInt(filesAndSizes[i + 1])]);
+        }
+        return d;
+    }
+
+    static void testCompat() throws Exception {
+        System.out.println("join check: compat, app version and game data fingerprint (phase 5)");
+        final String HD = "0123456789abcdef0123456789abcdef";
+        Fix.dataDigest = HD;
+        Fix f = new Fix(20000, 1000);
+        try {
+            String C = org.hedgewars.android.net.Compat.VALUE;
+            // match
+            P ok = new P();
+            RelayClient c = new RelayClient("127.0.0.1", f.port(), "Same", "tests", false, Arrays.asList(team("T1", 0, 0)), ok).identity(C, HD);
+            c.connect();
+            check(waitFor(() -> ok.state != null, 3000) && ok.closed.isEmpty(), "same compat, version and data: joins");
+            c.close();
+            // compat mismatch
+            P pc = new P();
+            RelayClient cc = new RelayClient("127.0.0.1", f.port(), "OldSim", "tests", false, new ArrayList<>(), pc).identity("hwnet-60-sim0", HD);
+            cc.connect();
+            check(waitFor(() -> !pc.closed.isEmpty(), 3000) && pc.closed.contains("hwnet-60-sim0") && pc.closed.contains(C), "compat mismatch refused, naming both sides: " + pc.closed);
+            // app version mismatch
+            P pv = new P();
+            RelayClient cv = new RelayClient("127.0.0.1", f.port(), "OldApp", "0.0.1", false, new ArrayList<>(), pv).identity(C, HD);
+            cv.connect();
+            check(waitFor(() -> !pv.closed.isEmpty(), 3000) && pv.closed.contains("0.0.1") && pv.closed.contains("tests"), "app version mismatch refused, naming both sides: " + pv.closed);
+            // data mismatch
+            P pd = new P();
+            RelayClient cd = new RelayClient("127.0.0.1", f.port(), "OtherData", "tests", false, new ArrayList<>(), pd).identity(C, "ffffffffffffffffffffffffffffffff");
+            cd.connect();
+            check(waitFor(() -> !pd.closed.isEmpty(), 3000) && pd.closed.startsWith("Game data differs") && pd.closed.contains("ffffffff") && pd.closed.contains("01234567"), "data digest mismatch refused, naming both sides: " + pd.closed);
+            // no digest at all while the host has one
+            P pn = new P();
+            RelayClient cn = new RelayClient("127.0.0.1", f.port(), "NoData", "tests", false, new ArrayList<>(), pn).identity(C, "");
+            cn.connect();
+            check(waitFor(() -> !pn.closed.isEmpty(), 3000) && pn.closed.contains("could not be read"), "a phone without a fingerprint is refused: " + pn.closed);
+            // an old client that sends no compat at all
+            check(abuse(f.port(), line("{\"t\":\"hello\",\"role\":\"lobby\",\"proto\":1,\"name\":\"Old\",\"build\":\"tests\",\"teams\":[]}"), 1500), "a hello without compat: refused and closed");
+            // a watcher is checked too
+            P pw = new P();
+            RelayClient cw = new RelayClient("127.0.0.1", f.port(), "WatchOld", "tests", false, new ArrayList<>(), pw).watch(true).identity("hwnet-60-sim0", HD);
+            cw.connect();
+            check(waitFor(() -> !pw.closed.isEmpty(), 3000) && pw.closed.contains("hwnet-60-sim0"), "a watching phone with a different compat is refused: " + pw.closed);
+            check(f.relay.status(0) != null && player(f.relay.status(0), "OldSim") == null && player(f.relay.status(0), "OldApp") == null, "refused phones are not in the lobby");
+            check(sane(f, "after refusals"), "relay still serving");
+        } finally {
+            Fix.dataDigest = "";
+            f.stop();
+        }
+        // pure rules
+        String C = org.hedgewars.android.net.Compat.VALUE;
+        check(org.hedgewars.android.net.Compat.refusal(C, "1", "", C, "1", "") == null, "refusal: host without a fingerprint skips the data check");
+        check(org.hedgewars.android.net.Compat.refusal(C, "1", HD2, C, "1", HD2) == null, "refusal: everything equal passes");
+        check(org.hedgewars.android.net.Compat.refusal(C, "1", HD2, C, "2", HD2) != null, "refusal: version differs");
+        check(org.hedgewars.android.net.Compat.refusal("a", "1", HD2, "b", "1", HD2).startsWith("Different game versions"), "refusal: compat is checked first");
+    }
+
+    static final String HD2 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+    static void testDataDigest() throws Exception {
+        System.out.println("data fingerprint: manifest of file names and sizes, cached beside the install marker");
+        java.io.File a = tmpTree("Themes/Nature/t.png", "10", "Hats/h.png", "20", "Fonts/f.ttf", "30", ".installed", "5");
+        java.io.File b = tmpTree("Fonts/f.ttf", "30", "Hats/h.png", "20", "Themes/Nature/t.png", "10", ".installed", "7777");
+        String da = org.hedgewars.android.net.DataDigest.compute(a), db = org.hedgewars.android.net.DataDigest.compute(b);
+        check(da.matches("[0-9a-f]{32}"), "digest is 32 hex digits: " + da);
+        check(da.equals(db), "same files and sizes: same digest whatever the marker text and the creation order");
+        java.io.File full = tmpTree("Themes/Nature/t.png", "10", "Themes/Cheese/t.png", "11", "Hats/h.png", "20", "Hats/h2.png", "21", "Fonts/f.ttf", "30");
+        check(!da.equals(org.hedgewars.android.net.DataDigest.compute(full)), "a reduced (test profile) data set differs from the full one");
+        java.nio.file.Files.write(new java.io.File(b, "Hats/h.png").toPath(), new byte[21]);
+        check(!da.equals(org.hedgewars.android.net.DataDigest.compute(b)), "one file with a different size differs");
+        java.nio.file.Files.write(new java.io.File(b, "Hats/h.png").toPath(), new byte[20]);
+        new java.io.File(b, "Hats/h.png").renameTo(new java.io.File(b, "Hats/other.png"));
+        check(!da.equals(org.hedgewars.android.net.DataDigest.compute(b)), "one file renamed differs");
+        check("".equals(org.hedgewars.android.net.DataDigest.compute(new java.io.File("/nonexistent/x"))), "a missing folder gives an empty digest");
+        // real staged data against itself and against a copy without one theme file
+        java.io.File real = new java.io.File(dataDir);
+        String dr = org.hedgewars.android.net.DataDigest.compute(real);
+        check(dr.matches("[0-9a-f]{32}") && dr.equals(org.hedgewars.android.net.DataDigest.compute(real)), "the staged game data has a stable digest: " + dr);
+        // cache
+        java.nio.file.Files.write(new java.io.File(a, ".installed").toPath(), "5".getBytes(StandardCharsets.UTF_8));
+        java.io.File cache = new java.io.File(a, ".digest");
+        String c1 = org.hedgewars.android.net.DataDigest.cached(a);
+        check(c1.equals(da) && cache.isFile(), "cached() computes once and writes Data/.digest");
+        java.nio.file.Files.write(cache.toPath(), ("5\n" + HD2 + "\n").getBytes(StandardCharsets.UTF_8));
+        check(org.hedgewars.android.net.DataDigest.cached(a).equals(HD2), "cached() trusts the cache while the install marker is unchanged");
+        java.nio.file.Files.write(new java.io.File(a, ".installed").toPath(), "6".getBytes(StandardCharsets.UTF_8));
+        check(org.hedgewars.android.net.DataDigest.cached(a).equals(da), "cached() recomputes after a new install (marker changed)");
+    }
+
+    static String dataDir = "";
+
+    static void testHostAdvert() throws Exception {
+        System.out.println("NSD record: contents and parsing");
+        Map<String, String> t = org.hedgewars.android.net.HostAdvert.txt("0.3.0-tv7", org.hedgewars.android.net.Compat.VALUE, 60, "Fairphone 4", 8766, HD2);
+        check("0.3.0-tv7".equals(t.get("v")) && org.hedgewars.android.net.Compat.VALUE.equals(t.get("compat")) && "60".equals(t.get("proto"))
+                && "Fairphone 4".equals(t.get("name")) && "8766".equals(t.get("tv")) && HD2.equals(t.get("data")) && "1".equals(t.get("lp")), "TXT has version, compat, engine protocol, host name, TV port, data fingerprint and lobby protocol: " + t);
+        int total = 0;
+        for (Map.Entry<String, String> e : t.entrySet()) total += e.getKey().length() + e.getValue().length() + 2;
+        check(total < 400, "the record is small (" + total + " bytes)");
+        check(org.hedgewars.android.net.HostAdvert.SERVICE_TYPE.equals("_hedgeparty._tcp."), "service type _hedgeparty._tcp");
+        Map<String, byte[]> raw = new java.util.HashMap<>();
+        for (Map.Entry<String, String> e : t.entrySet()) raw.put(e.getKey(), e.getValue().getBytes(StandardCharsets.UTF_8));
+        org.hedgewars.android.net.HostAdvert.Found h = org.hedgewars.android.net.HostAdvert.parse("HedgeParty Fairphone", "192.168.1.57", 46633, raw);
+        String C = org.hedgewars.android.net.Compat.VALUE;
+        check(h.parsedOk && h.name.equals("Fairphone 4") && h.port == 46633 && h.tvPort == 8766 && h.protocol == 60 && h.address().equals("192.168.1.57:46633"), "parse reads the record back");
+        check(h.incompatibility(C, "0.3.0-tv7", HD2) == null, "same compat, version, data: compatible");
+        check(h.incompatibility("hwnet-60-sim2", "0.3.0-tv7", HD2).startsWith("Different game versions"), "different compat: incompatible with the reason");
+        check(h.incompatibility(C, "0.3.0-tv6", HD2).contains("0.3.0-tv6") && h.incompatibility(C, "0.3.0-tv6", HD2).contains("0.3.0-tv7"), "different version: reason names both");
+        check(h.incompatibility(C, "0.3.0-tv7", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb").startsWith("Game data differs"), "different data: incompatible with the reason");
+        org.hedgewars.android.net.HostAdvert.Found junk = org.hedgewars.android.net.HostAdvert.parse("x", "10.0.0.1", 46633, new java.util.HashMap<String, byte[]>());
+        check(!junk.parsedOk && junk.incompatibility(C, "v", HD2) != null, "a record without TXT is listed as incompatible, not ignored");
+        raw.put("tv", "12x".getBytes(StandardCharsets.UTF_8));
+        raw.put("proto", new byte[0]);
+        check(org.hedgewars.android.net.HostAdvert.parse("s", "h", 1, raw).tvPort == 0, "a garbled number reads as 0");
+        check(org.hedgewars.android.net.HostAdvert.txt("v", "c", 60, new String(new char[500]).replace('\0', 'x'), 1, "").get("name").length() <= 100, "long values are cut");
+    }
+
+    static void testResolveQueue() throws Exception {
+        System.out.println("NSD resolve queue: one at a time, retries, timeouts");
+        final AtomicInteger inFlight = new AtomicInteger(), maxInFlight = new AtomicInteger();
+        final java.util.concurrent.ConcurrentHashMap<String, AtomicInteger> calls = new java.util.concurrent.ConcurrentHashMap<>();
+        final List<String> got = new CopyOnWriteArrayList<>(), gave = new CopyOnWriteArrayList<>();
+        org.hedgewars.android.net.ResolveQueue q = new org.hedgewars.android.net.ResolveQueue((key, done) -> {
+            int n = calls.computeIfAbsent(key, k -> new AtomicInteger()).incrementAndGet();
+            int now = inFlight.incrementAndGet();
+            maxInFlight.updateAndGet(m -> Math.max(m, now));
+            new Thread(() -> {
+                try { Thread.sleep(40); } catch (InterruptedException ignored) { }
+                inFlight.decrementAndGet();
+                if (key.equals("flaky") && n < 3) done.fail("FAILURE_ALREADY_ACTIVE");
+                else if (key.equals("dead")) done.fail("FAILURE_INTERNAL_ERROR");
+                else if (key.equals("silent")) { /* the callback never comes */ }
+                else done.ok("addr-of-" + key);
+            }).start();
+        }, new org.hedgewars.android.net.ResolveQueue.Sink() {
+            public void resolved(String key, Object r) { got.add(key + "=" + r); }
+            public void gaveUp(String key, String why) { gave.add(key + ":" + why); }
+        }, 300, 30, 3);
+        q.add("a"); q.add("b"); q.add("flaky"); q.add("a"); q.add("c");
+        check(waitFor(() -> got.size() >= 4, 4000), "four services resolved: " + got);
+        check(calls.get("a").get() == 1, "a service announced twice is resolved once");
+        check(calls.get("flaky").get() == 3 && got.contains("flaky=addr-of-flaky"), "a service that fails twice is retried and then resolves (" + calls.get("flaky") + " calls)");
+        check(maxInFlight.get() == 1, "never two resolves at the same time (max " + maxInFlight.get() + ")");
+        q.add("dead");
+        check(waitFor(() -> gave.size() >= 1, 3000) && calls.get("dead").get() == 3 && gave.get(0).startsWith("dead:"), "a service that always fails is given up after 3 attempts: " + gave);
+        q.add("silent");
+        check(waitFor(() -> gave.size() >= 2, 5000) && calls.get("silent").get() == 3 && gave.get(1).contains("no answer"), "a resolve whose callback never comes times out and is retried: " + gave);
+        q.add("dead");
+        check(waitFor(() -> calls.get("dead").get() == 6, 3000), "a given-up service is tried again when it is announced again");
+        q.remove("c");
+        q.stop();
+    }
+
+    static void testLinkLiveness() throws Exception {
+        System.out.println("engine link liveness: a half-open link of a phone that is not playing is found (phase 5)");
+        Fix.linkDeadMs = 2000;
+        Fix.linkPingMs = 300;
+        try {
+            Game g = new Game(60000, 1000);
+            check(waitFor(() -> g.ea.controls.contains("K") && g.eb.controls.contains("K"), 3000), "the relay pings both engine links");
+            g.eb.autoPong = false;                 // phone B stops answering, the socket stays open: a half-open link
+            long t0 = System.currentTimeMillis();
+            check(waitFor(() -> dropped(g.f, "PhoneB"), 8000), "the silent phone B is dropped");
+            long took = System.currentTimeMillis() - t0;
+            check(took < 4500, "within about the limit (" + took + " ms for a 2000 ms limit)");
+            check(g.f.logged("half-open"), "the log says half-open link");
+            check(!dropped(g.f, "PhoneA"), "phone A, which answers, is not dropped");
+            g.end();
+        } finally {
+            Fix.linkDeadMs = 0;
+            Fix.linkPingMs = 5000;
+        }
+        // Everybody answering for longer than the limit: nobody is dropped.
+        Fix.linkDeadMs = 1000;
+        Fix.linkPingMs = 200;
+        try {
+            Game g = new Game(60000, 1000);
+            Thread.sleep(3000);
+            check(!dropped(g.f, "PhoneA") && !dropped(g.f, "PhoneB"), "phones that answer the pings for 3x the limit are never dropped");
+            g.end();
+        } finally {
+            Fix.linkDeadMs = 0;
+            Fix.linkPingMs = 5000;
+        }
+    }
+
+    static void testHostNetworkLoss() throws Exception {
+        System.out.println("host network loss: the game ends with a clear reason (phase 5)");
+        Fix.netProbe = true;
+        Fix.netLossMs = 600;
+        try {
+            Game g = new Game(60000, 1000);
+            g.f.netUp.set(false);
+            check(waitFor(() -> g.f.relay.lastSummary() != null, 6000), "the running game is ended");
+            check(g.f.relay.lastSummary() != null && g.f.relay.lastSummary().endReason.contains("Wi-Fi"), "reason mentions Wi-Fi: " + (g.f.relay.lastSummary() == null ? "-" : g.f.relay.lastSummary().endReason));
+            check(waitFor(() -> g.eb.controls.stream().anyMatch(c -> c.startsWith("X") && c.contains("Wi-Fi")), 3000), "phone B's engine is told why (control X)");
+            g.f.netUp.set(true);
+            Thread.sleep(1500);
+            check(sane(g.f, "after the network came back"), "after the network is back the relay serves phones again");
+            g.end();
+            // a short blip is not a loss
+            Game g2 = new Game(60000, 1000);
+            g2.f.netUp.set(false);
+            Thread.sleep(300);
+            g2.f.netUp.set(true);
+            Thread.sleep(2500);
+            check(g2.f.relay.lastSummary() == null, "a blip shorter than the limit does not end the game");
+            g2.end();
+        } finally {
+            Fix.netProbe = false;
+            Fix.netLossMs = 4000;
+        }
+    }
+
     public static void main(String[] a) throws Exception {
+        dataDir = a[0];
         data = new GameData(new File(a[0]));
         data.warm();
         Thread.setDefaultUncaughtExceptionHandler((t, e) -> { System.out.println("  FAIL uncaught exception reached the default handler in " + t.getName() + ": " + e); failures++; });
@@ -1194,6 +1436,12 @@ public class RelayTests {
         testQuitWording();
         testClientClose();
         testNoSocketWriteOnCallerThread();
+        testCompat();
+        testDataDigest();
+        testHostAdvert();
+        testResolveQueue();
+        testLinkLiveness();
+        testHostNetworkLoss();
         System.out.println("\nrelay tests: " + checks + " checks, " + failures + " failed");
         System.out.println(failures == 0 ? "RESULT: PASS (the relay survived all malformed input)" : "RESULT: FAIL");
         System.exit(failures == 0 ? 0 : 1);

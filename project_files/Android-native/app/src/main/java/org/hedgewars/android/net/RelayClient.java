@@ -55,6 +55,7 @@ public final class RelayClient {
     private final boolean isHost;
     private String hostSecret = "";
     private boolean watch;
+    private String compat = Compat.VALUE, digest = "";
     private final Handler handler;
     private Socket socket;
     private OutputStream out;
@@ -79,6 +80,13 @@ public final class RelayClient {
         return this;
     }
 
+    /** What the relay checks at join: the compat string (default {@link Compat#VALUE}) and the game data fingerprint ({@link DataDigest}). */
+    public RelayClient identity(String compat, String digest) {
+        this.compat = compat == null ? "" : compat;
+        this.digest = digest == null ? "" : digest;
+        return this;
+    }
+
     /** A phone that only watches: no teams, a spectator at the relay. Call before connect(). */
     public RelayClient watch(boolean on) {
         watch = on;
@@ -93,7 +101,7 @@ public final class RelayClient {
         socket.setKeepAlive(true);
         out = socket.getOutputStream();
         send(Json.obj("t", "hello", "role", "lobby", "proto", (long) Relay.PROTO, "name", name, "build", build,
-                "host", isHost, "secret", hostSecret, "watch", watch, "teams", NetTeams.listToJson(watch ? new ArrayList<SetupModel.Team>() : teams)));
+                "compat", compat, "digest", digest, "host", isHost, "secret", hostSecret, "watch", watch, "teams", NetTeams.listToJson(watch ? new ArrayList<SetupModel.Team>() : teams)));
         Thread t = new Thread(this::readLoop, "relay-client");
         t.setDaemon(true);
         t.start();

@@ -276,9 +276,8 @@ public class ScreenshotTest {
             };
             NetLobbyActivity a = lobby();
             shoot(a, "net-chooser-hosts");
-            for (View p = TestSupport.find(a.getWindow().getDecorView(), "Search again"); p != null && p.getParent() instanceof View; p = (View) p.getParent()) {
-                if (p instanceof android.widget.ScrollView) { android.widget.ScrollView s = (android.widget.ScrollView) p; s.setSmoothScrollingEnabled(false); s.scrollTo(0, s.getChildAt(0).getHeight()); break; }
-            }
+            android.widget.ScrollView s = firstScroll(a.getWindow().getDecorView());
+            if (s != null) { s.setSmoothScrollingEnabled(false); s.scrollTo(0, s.getChildAt(0).getHeight()); }
             shoot(a, "net-chooser-hosts-end");
         });
     }
@@ -339,5 +338,16 @@ public class ScreenshotTest {
             }
             new File(dir, "net.cfg").delete();
         });
+    }
+
+    private static android.widget.ScrollView firstScroll(View v) {
+        if (v instanceof android.widget.ScrollView) return (android.widget.ScrollView) v;
+        if (v instanceof android.view.ViewGroup) {
+            for (int i = 0; i < ((android.view.ViewGroup) v).getChildCount(); i++) {
+                android.widget.ScrollView r = firstScroll(((android.view.ViewGroup) v).getChildAt(i));
+                if (r != null) return r;
+            }
+        }
+        return null;
     }
 }

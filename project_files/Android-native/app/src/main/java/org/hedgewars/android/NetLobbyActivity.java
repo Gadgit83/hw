@@ -641,6 +641,7 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
     private boolean hostWaitsForLocalNetwork;
 
     private void host() {
+        if (connecting) return;                  // one connect at a time: a second Host or a Host during a join must not cancel it
         saveFields();
         problem = "";
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
@@ -663,6 +664,7 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
     }
 
     private void reallyHost() {
+        if (connecting) return;
         connecting = true;
         render();
         HostService.begin();                 // clears any earlier failure now, before the service can race with the wait below
@@ -735,9 +737,10 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
                 // given up on purpose (Back, or a newer join): nothing to report
             } catch (Exception e) {
                 if (seq == joinSeq) problem = "Could not reach " + host + ":" + port + " (" + e.getMessage() + "). Same Wi-Fi? Is the host hosting?";
+            } finally {
+                if (seq == joinSeq) connecting = false;
+                changed();
             }
-            if (seq == joinSeq) connecting = false;
-            changed();
         }, "join").start();
     }
 

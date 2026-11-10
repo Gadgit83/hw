@@ -256,6 +256,7 @@ final class NetSession {
         synchronized (NetSession.class) {
             p = pending;
             pending = null;
+            pendingIsHost = false;
             connectGen++;
             rc = client;
             client = null;

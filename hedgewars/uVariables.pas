@@ -199,6 +199,9 @@ var
     cCornerTL, cCornerTR, cCornerBL, cCornerBR: LongInt; // radius in screen pixels of the rounded display corners
     cEdgeMargin: LongInt; // extra screen pixels kept clear at every edge (player's setting)
     cCutLY0, cCutLY1, cCutRY0, cCutRY1: LongInt; // vertical extent (pixels from the top) of the cut-out at the left and right edge, 0,0: the whole height
+    cTurnCentre     : boolean; // touch: centre the camera on the active hedgehog when a turn starts
+    cTurnZoom       : LongInt; // touch: zoom in to this percent of the default zoom when a turn starts, 0: off
+    cTurnCamPending : boolean; // a turn has started and the camera has not been moved for it yet
     cMenuTarget     : GLfloat; // wanted scale of the weapon menu (0: same as the HUD)
     cMenuScale      : GLfloat; // scale the weapon menu is drawn at right now
     cUIScale        : GLfloat; // size of the touch HUD relative to the desktop layout
@@ -2789,6 +2792,9 @@ begin
     cSafeInsetT:= 0;
     cSafeInsetR:= 0;
     cSafeInsetB:= 0;
+    cTurnCentre:= false;
+    cTurnZoom:= 0;
+    cTurnCamPending:= false;
     cCornerTL:= 0;
     cCornerTR:= 0;
     cCornerBL:= 0;

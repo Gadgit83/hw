@@ -502,6 +502,7 @@ procedure NewTurnBeginning;
 begin
 targetted:= false;
 targetting:= false;
+cTurnCamPending:= true;
 SetUtilityWidgetState(amNothing);
 end;
 

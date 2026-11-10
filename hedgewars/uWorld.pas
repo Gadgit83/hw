@@ -1323,6 +1323,65 @@ if WorldDy < lowBound then
     WorldDy:= lowBound;
 end;
 
+// Touch builds: at the start of a turn (and when the turn-start switcher moves to another hedgehog) the camera
+// glides to the active hedgehog and, once, zooms in a little. Only the camera (WorldDx, WorldDy, ZoomValue) is
+// touched, which the simulation never reads, so a remote turn behaves the same and nothing differs between players.
+var turnCamLeft: LongInt = 0;
+    lastCamHog: PHedgehog = nil;
+
+procedure TurnStartCamera(Lag: LongInt);
+{$IFDEF USE_TOUCH_INTERFACE}
+var tz: real;
+    tx, ty: LongInt;
+    f: GLfloat;
+begin
+if (CurrentHedgehog <> lastCamHog) then
+    begin
+    lastCamHog:= CurrentHedgehog;
+    cTurnCamPending:= true;
+    end;
+if (not cTurnCamPending) and (turnCamLeft = 0) then
+    exit;
+if (CurrentHedgehog = nil) or (CurrentHedgehog^.Gear = nil) or CurrentHedgehog^.Unplaced or PlacingHogs or
+   (not autoCameraOn) or (not (cTurnCentre or (cTurnZoom > 0))) then
+    begin
+    cTurnCamPending:= false;
+    turnCamLeft:= 0;
+    exit;
+    end;
+if cTurnCamPending then
+    begin
+    cTurnCamPending:= false;
+    turnCamLeft:= 800;
+    if cTurnZoom > 0 then
+        begin
+        // a bigger zoom value is a closer view (the scale factor), cMinZoomLevel is the closest the engine allows
+        tz:= cDefaultZoomLevel * cTurnZoom / 100;
+        if tz > cMinZoomLevel then
+            tz:= cMinZoomLevel;
+        if ZoomValue < tz then       // a view that is already closer (pinched in) stays
+            ZoomValue:= tz;
+        end;
+    end;
+if cTurnCentre then
+    begin
+    tx:= -hwRound(CurrentHedgehog^.Gear^.X);
+    ty:= cScreenHeight div 2 - hwRound(CurrentHedgehog^.Gear^.Y);
+    f:= Lag / 140;
+    if f > 1 then
+        f:= 1;
+    WorldDx:= WorldDx + round((tx - WorldDx) * f);
+    WorldDy:= WorldDy + round((ty - WorldDy) * f);
+    end;
+dec(turnCamLeft, Lag);
+if turnCamLeft < 0 then
+    turnCamLeft:= 0;
+{$ELSE}
+begin
+Lag:= Lag; // avoid hint
+{$ENDIF}
+end;
+
 procedure DrawWorld(Lag: LongInt);
 begin
     if ZoomValue < zoom then
@@ -1344,7 +1403,11 @@ begin
 {$IFDEF MOBILE}
     // the camera can be dragged while paused
     if (not isAFK) and (GameType <> gmtRecord) then
+        begin
+        if not isPaused then
+            TurnStartCamera(Lag);
         MoveCamera
+        end
 {$ELSE}
     if (not isPaused) and (not isAFK) and (GameType <> gmtRecord) then
         MoveCamera

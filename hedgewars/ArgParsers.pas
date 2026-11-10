@@ -111,6 +111,8 @@ begin
     WriteLn(stdout, '  --translucent-tags: Enable translucent name and health tags');
     WriteLn(stdout, '  --chat-size [default chat size in percent]');
     WriteLn(stdout, '  --ui-scale [touch HUD scale in percent], --inset-left/top/right/bottom [safe area in pixels]');
+    WriteLn(stdout, '  --turn-centre: Centre the camera on the active hedgehog when a turn starts (touch builds)');
+    WriteLn(stdout, '  --turn-zoom [percent]: Zoom in to this percentage of the default zoom when a turn starts (touch builds, 110 to 200)');
     WriteLn(stdout, '  --screen-shape <tl,tr,bl,br,margin,ly0,ly1,ry0,ry1>: corner radii, extra edge margin and the vertical extent of the left and right cut-out, in pixels');
     WriteLn(stdout, '  --showfps: Show frames per second');
     WriteLn(stdout, '');
@@ -284,7 +286,7 @@ begin
 end;
 
 function parseParameter(cmd:string; arg:string; var paramIndex:LongInt): Boolean;
-const reallyAll: array[0..47] of shortstring = (
+const reallyAll: array[0..49] of shortstring = (
                 '--prefix', '--user-prefix', '--locale', '--fullscreen-width', '--fullscreen-height', '--width',
                 '--height', '--maximized', '--frame-interval', '--volume','--nomusic', '--nosound', '--nodampen',
                 '--fullscreen', '--showfps', '--altdmg', '--low-quality', '--raw-quality', '--stereo', '--nick',
@@ -292,7 +294,7 @@ const reallyAll: array[0..47] of shortstring = (
   {internal}    '--internal', '--port', '--recorder', '--landpreview',
   {misc}        '--stats-only', '--gci', '--help','--protocol', '--no-teamtag','--no-hogtag','--no-healthtag','--translucent-tags','--lua-test','--no-holiday-silliness','--chat-size', '--prefix64', '--user-prefix64',
   {android}     '--ui-scale', '--inset-left', '--inset-top', '--inset-right', '--inset-bottom', '--menu-scale',
-                '--effects-volume', '--music-volume', '--no-voices', '--screen-shape');
+                '--effects-volume', '--music-volume', '--no-voices', '--screen-shape', '--turn-centre', '--turn-zoom');
 var cmdIndex: byte;
 begin
     parseParameter:= false;
@@ -353,6 +355,8 @@ begin
         {--music-volume}        45: SetMusicVolume      ( getLongIntParameter(arg, paramIndex, parseParameter) );
         {--no-voices}           46: SetVoices           ( false );
         {--screen-shape}        47: setScreenShape      ( getstringParameter(arg, paramIndex, parseParameter) );
+        {--turn-centre}         48: cTurnCentre        := true;
+        {--turn-zoom}           49: cTurnZoom          := getLongIntParameter(arg, paramIndex, parseParameter);
     else
         begin
         //Assume the first "non parameter" is the demo file, anything else is invalid

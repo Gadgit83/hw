@@ -125,7 +125,7 @@ public class MainActivity extends SetupActivity {
 
         // One row: title, tabs, Options.
         topBar = ui.row();
-        topBar.setPadding(ui.dp(14), ui.dp(2), ui.dp(8), 0);
+        topBar.setPadding(ui.dp(Ui.GUTTER), ui.dp(2), ui.dp(Ui.GUTTER), 0);
         TextView title = ui.text(BuildConfig.APP_NAME, 20, Color.WHITE);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         title.setSingleLine(true);
@@ -135,6 +135,7 @@ public class MainActivity extends SetupActivity {
             titleBox.addView(title);
             titleBox.addView(ui.testBadge(), ui.margins(Ui.lp(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT), 8, 0, 0, 0));
             topBar.addView(titleBox, ui.weight(1f));
+            titleBox.setMinimumWidth(ui.dp(250));
         } else {
             topBar.addView(title, ui.weight(1f));
         }
@@ -154,7 +155,7 @@ public class MainActivity extends SetupActivity {
         optionsBox.addView(network, ui.margins(Ui.lp(ViewGroup.LayoutParams.WRAP_CONTENT, ui.dp(Ui.TOUCH_DP)), 0, 0, 6, 0));
         optionsBox.addView(ui.iconButton(Ui.GLYPH_SLIDERS, "Options",
                 v -> startActivity(new Intent(this, OptionsActivity.class))), Ui.lp(ui.dp(Ui.TOUCH_DP), ui.dp(Ui.TOUCH_DP)));
-        topBar.addView(optionsBox, ui.weight(1f));
+        topBar.addView(optionsBox, Ui.lp(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         root.addView(topBar);
 
         problemBox = new LinearLayout(this);
@@ -168,25 +169,25 @@ public class MainActivity extends SetupActivity {
         problemText.setEllipsize(android.text.TextUtils.TruncateAt.END);
         problemBox.addView(problemText, ui.weight(1f));
         problemBox.addView(ui.button("Share last log", false, v -> shareLog()));
-        Button dismiss = ui.button("\u00d7", false, v -> dismissProblem());
-        dismiss.setContentDescription("Dismiss");
-        problemBox.addView(dismiss, Ui.lp(ui.dp(Ui.TOUCH_DP), ui.dp(Ui.TOUCH_DP)));
+        // a drawn cross on a 48 dp button, like Remove team (a text multiplication sign was tiny)
+        Ui.Glyph dismiss = ui.iconButton(Ui.GLYPH_CROSS, "Dismiss", v -> dismissProblem());
+        problemBox.addView(dismiss, ui.margins(Ui.lp(ui.dp(Ui.TOUCH_DP), ui.dp(Ui.TOUCH_DP)), 4, 0, 0, 0));
         LinearLayout.LayoutParams pp = Ui.lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        pp.setMargins(ui.dp(12), ui.dp(2), ui.dp(12), ui.dp(2));
+        pp.setMargins(ui.dp(Ui.GUTTER), ui.dp(2), ui.dp(Ui.GUTTER), ui.dp(2));
         root.addView(problemBox, pp);
 
         scroll = new ScrollView(this);
         scroll.setClipToPadding(false);
         holder = new LinearLayout(this);
         holder.setOrientation(LinearLayout.VERTICAL);
-        holder.setPadding(ui.dp(12), 0, ui.dp(12), ui.dp(8));
+        holder.setPadding(ui.dp(Ui.GUTTER), 0, ui.dp(Ui.GUTTER), ui.dp(8));
         scroll.addView(holder, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        root.addView(scroll, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+        root.addView(ui.scrollWithHint(scroll), new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
 
         // Always visible: what will be played, the data state, and Start.
         bottomBar = ui.row();
         bottomBar.setBackgroundColor(Color.rgb(28, 42, 32));
-        bottomBar.setPadding(ui.dp(14), ui.dp(1), ui.dp(12), ui.dp(1));
+        bottomBar.setPadding(ui.dp(Ui.GUTTER), ui.dp(1), ui.dp(Ui.GUTTER), ui.dp(1));
         LinearLayout texts = new LinearLayout(this);
         texts.setOrientation(LinearLayout.VERTICAL);
         summary = ui.text("", 13, Color.WHITE);
@@ -423,13 +424,16 @@ public class MainActivity extends SetupActivity {
         });
         dice.setContentDescription("Randomise teams");
         head.addView(dice, Ui.lp(ViewGroup.LayoutParams.WRAP_CONTENT, ui.dp(Ui.TOUCH_DP)));
-        head.addView(add, Ui.lp(ViewGroup.LayoutParams.WRAP_CONTENT, ui.dp(Ui.TOUCH_DP)));
+        head.addView(add, ui.margins(Ui.lp(ViewGroup.LayoutParams.WRAP_CONTENT, ui.dp(Ui.TOUCH_DP)), 10, 0, 0, 0));
         holder.addView(head);
 
         // Three columns on a phone held sideways, so up to six teams are in view at once. The width is what
         // is left after the insets and the list padding, not the whole screen.
         int w = usableWidthDp();
-        int cols = w >= 840 ? 3 : w >= 520 ? 2 : 1;
+        int n = model.teams.size();
+        // few teams fill the width; four make a square of two by two; five or more fill three columns
+        int cols = w >= 840 ? (n <= 2 ? 2 : n == 4 ? 2 : 3) : w >= 520 ? 2 : 1;
+        cols = Math.min(cols, Math.max(1, n));
         LinearLayout grid = null;
         for (int i = 0; i < model.teams.size(); i++) {
             if (i % cols == 0) {
@@ -674,6 +678,7 @@ public class MainActivity extends SetupActivity {
         boolean wide = contentWidthDp() >= 760;
         LinearLayout cols = new LinearLayout(this);
         cols.setOrientation(wide ? LinearLayout.HORIZONTAL : LinearLayout.VERTICAL);
+        cols.setBaselineAligned(false);
 
         // Left: what is played.
         LinearLayout left = ui.card();
@@ -751,8 +756,8 @@ public class MainActivity extends SetupActivity {
         });
         holder.addView(more, ui.margins(Ui.lp(ViewGroup.LayoutParams.WRAP_CONTENT, ui.dp(Ui.TOUCH_DP)), 0, 4, 0, 0));
         if (moreRules) {
-            LinearLayout extra = ui.card();
-            extra.addView(ui.heading("More rules"));
+            // All the rows in one list, then split evenly into two cards that line up with the two above (one card when narrow).
+            List<View> rows = new ArrayList<>();
             LinearLayout vals = new LinearLayout(this);
             vals.setOrientation(LinearLayout.VERTICAL);
             addValue(vals, r, Rules.V_DAMAGE, "Damage modifier", 10, 300, 10, n -> n + "%", editable);
@@ -769,8 +774,11 @@ public class MainActivity extends SetupActivity {
             });
             enableAll(edge, editable);
             vals.addView(edge);
-            LinearLayout flags = new LinearLayout(this);
-            flags.setOrientation(LinearLayout.VERTICAL);
+            while (vals.getChildCount() > 0) {
+                View c = vals.getChildAt(0);
+                vals.removeViewAt(0);
+                rows.add(c);
+            }
             for (int k = 1; k <= 25; k++) {
                 final int kk = k;
                 Switch sw = ui.toggle(Rules.FLAG_LABELS[k], r.flag[k], c -> {
@@ -778,14 +786,20 @@ public class MainActivity extends SetupActivity {
                     updateSchemeInfo();
                 });
                 sw.setEnabled(editable);
-                flags.addView(sw);
+                rows.add(sw);
             }
+            LinearLayout first = ui.card(), second = wide ? ui.card() : first;
+            first.addView(ui.heading("More rules"));
+            if (wide) second.addView(ui.heading("More rules, continued"));
+            int half = (rows.size() + 1) / 2;
+            for (int k = 0; k < rows.size(); k++) (wide && k >= half ? second : first).addView(rows.get(k));
             LinearLayout both = new LinearLayout(this);
             both.setOrientation(wide ? LinearLayout.HORIZONTAL : LinearLayout.VERTICAL);
-            both.addView(vals, wide ? ui.weight(1f) : Ui.lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-            both.addView(flags, wide ? ui.margins(ui.weight(1f), 16, 0, 0, 0) : Ui.lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-            extra.addView(both);
-            holder.addView(extra, ui.margins(Ui.lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT), 0, 10, 0, 0));
+            both.setBaselineAligned(false);
+            both.setGravity(Gravity.TOP);
+            both.addView(first, wide ? ui.weight(1f) : Ui.lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+            if (wide) both.addView(second, ui.margins(ui.weight(1f), 8, 0, 0, 0));
+            holder.addView(both, ui.margins(Ui.lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT), 0, 10, 0, 0));
         }
     }
 
@@ -823,7 +837,7 @@ public class MainActivity extends SetupActivity {
 
     private static void enableAll(View v, boolean on) {
         v.setEnabled(on);
-        v.setAlpha(on ? 1f : 0.5f);
+        v.setAlpha(on ? 1f : 0.75f);
         if (v instanceof ViewGroup) {
             ViewGroup g = (ViewGroup) v;
             for (int i = 0; i < g.getChildCount(); i++) enableAll(g.getChildAt(i), on);

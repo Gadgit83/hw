@@ -42,6 +42,11 @@ import java.util.function.Supplier;
  *     {@code \0P} / {@code \0R} from the host's launcher: pause / resume the game, which the relay answers by sending
  *     {@code \0P} / {@code \0R} to every engine link. Accepted only from the host's link while the game runs; never forwarded
  *     as an engine message, never in the game log or the viewers' stream).</li>
+ * <li>{@code {"t":"hello","role":"lobby","watch":true,...}}: a phone that only watches (no teams). It is a spectator, not a player: it
+ *     has its own cap ({@link #MAX_SPECTATORS}), is never part of the map-digest, silence, dropout or desync rules, and cannot send
+ *     game messages: whatever its engine link sends is ignored and logged (only {@code \0E}, {@code \0Q} and the finished message
+ *     {@code q} about the spectator itself are read). It joins at the start, or at any time during a game: its engine link is answered
+ *     with the whole log so far (its setup lines end with {@code e$spectate 1}, so the engine fast-forwards, as the TV's does), then the live stream.</li>
  * </ul>
  * Threads: an accept thread; one reader thread per connection; one writer thread per recipient (bounded
  * queue, so a slow recipient never blocks anyone: see {@link Outbox}); a watchdog thread (lobby pings, link
@@ -65,6 +70,10 @@ public final class Relay {
     private static final int MAX_VIEWER_LINES = 50;
     public static final String HOST_ENDED = "The host ended the game";
     public static final int MAX_PLAYERS = 8, MAX_CONNECTIONS = 32, MAX_VIEWERS = 16;
+    /** Phones that only watch (they play no team, so they are not players): their own cap, apart from MAX_PLAYERS. */
+    public static final int MAX_SPECTATORS = 8;
+    /** How long a watching phone's engine link stays open after a game that simply finished, so a phone that is still catching up can see the end. */
+    private static final long WATCH_END_LINGER_MS = 120000;
     /** A line of the setup is one engine message: a length byte, so at most 255 bytes; the viewer's first message counts them in one byte. */
     public static final int MAX_SETUP_LINE = 255, MAX_SETUP_LINES = 255;
     /** Longest lobby line a phone may send, and how long the first line of a connection may take. */
@@ -128,6 +137,8 @@ public final class Relay {
     private Thread acceptThread, watchThread;
     private int state = S_SETUP;
     private final Map<Integer, Player> players = new LinkedHashMap<>();
+    /** Phones that only watch. Ids come from the same counter as the players', so the lobby and the report can name either. */
+    private final Map<Integer, Spectator> spectators = new LinkedHashMap<>();
     private int nextId = 1;
     private Game game;
     private GameSummary lastSummary;
@@ -232,7 +243,8 @@ public final class Relay {
      * The body of the status GET on the viewer port. Keeps the fields of the e2e-host bridge (state, game, viewers, viewersEver)
      * and adds what the TV page reads: host (this phone's name), players (one object per phone in the lobby: name, teams, host),
      * compatible and reason (false when the TV page named a protocol in the request, ?proto=N, that this relay does not speak),
-     * engine (the app version and the engine commit).
+     * engine (the app version and the engine commit: informational), compat (string, {@link Compat#VALUE}) and protocol (number, the engine's
+     * network protocol); the TV joins only when its own compat equals this exactly, and ?compat=X that differs makes compatible false.
      */
     String statusJson(String requestLine) {
         String reason = "";
@@ -243,12 +255,20 @@ public final class Relay {
             String v = requestLine.substring(q + 6, e);
             if (v.isEmpty() || v.length() > 9 || Integer.parseInt(v) != PROTO) reason = "The TV page speaks protocol " + (v.isEmpty() ? "?" : v) + ", this host speaks " + PROTO + ".";
         }
+        int cq = requestLine == null ? -1 : requestLine.indexOf("compat=");
+        if (cq >= 0 && reason.isEmpty()) {
+            int e = cq + 7;
+            while (e < requestLine.length() && requestLine.charAt(e) > ' ' && requestLine.charAt(e) != '&') e++;
+            String v = requestLine.substring(cq + 7, Math.min(e, cq + 7 + 64));
+            if (!v.equals(Compat.VALUE)) reason = "The TV page is \"" + v.replaceAll("[^A-Za-z0-9._-]", "?") + "\", this host is \"" + Compat.VALUE + "\": the games would not agree.";
+        }
         synchronized (lock) {
             List<Object> pl = new ArrayList<>();
             for (Player p : players.values()) pl.add(Json.obj("name", p.name, "teams", (long) p.teams.size(), "host", p.host));
             return Json.write(Json.obj("state", state == S_SETUP ? "setup" : "playing", "game", game == null ? 0L : (long) game.no,
-                    "viewers", (long) viewers.size(), "viewersEver", (long) viewersEver,
+                    "viewers", (long) viewers.size(), "viewersEver", (long) viewersEver, "watching", (long) spectators.size(),
                     "host", cfg.hostName, "players", pl, "compatible", reason.isEmpty(), "reason", reason,
+                    "compat", Compat.VALUE, "protocol", (long) Compat.ENGINE_PROTOCOL,
                     "engine", (cfg.build + (cfg.engine.isEmpty() ? "" : ", engine " + cfg.engine)).trim()));
         }
     }
@@ -285,8 +305,15 @@ public final class Relay {
             sendLobby(p, Json.obj("t", "closed", "reason", "The host stopped hosting."));
             p.closeAll(true);
         }
+        List<Spectator> allSp;
+        synchronized (lock) { allSp = new ArrayList<>(spectators.values()); }
+        for (Spectator sp : allSp) {
+            sendLobby(sp, Json.obj("t", "closed", "reason", "The host stopped hosting."));
+            sp.closeAll(true);
+        }
         synchronized (lock) {
             players.clear();
+            spectators.clear();
             game = null;
             state = S_SETUP;
         }
@@ -389,6 +416,76 @@ public final class Relay {
         }
     }
 
+    /**
+     * A phone that only watches. It has a lobby link like a player and an engine link of its own, but no teams: it is not in
+     * {@link #players}, so no rule that looks at players (start, map digest, silence, dropout, desync, game end) can see it.
+     */
+    private final class Spectator {
+        final int id;
+        String name;
+        String token = newToken();
+        String build = "";
+        boolean fg = true;
+        Socket lobbySock;
+        Outbox lobbyOut;
+        long lobbyRx = System.currentTimeMillis();
+        // engine link (one per "start": a phone that stops watching and watches again gets a new token)
+        Socket engineSock;
+        Outbox engineOut;
+        boolean tokenUsed, linkOpen, finished, quit, sessionOpen;
+        String fatal;
+        long sessionStart;
+        Fnv toHash = new Fnv();
+        long toMsgs, ignored;
+        final Map<Character, Integer> ignoredByType = new LinkedHashMap<>();
+
+        Spectator(int id, String name) {
+            this.id = id;
+            this.name = name;
+        }
+
+        /** Closes this phone's engine link at once (the phone is being cut off, or starts again with a new token). */
+        void closeEngineNow() {
+            Outbox o = engineOut;
+            Socket es = engineSock;
+            engineOut = null;
+            engineSock = null;
+            linkOpen = false;
+            if (o != null) o.close();
+            try { if (es != null) es.close(); } catch (IOException ignored2) { }
+        }
+
+        /** After the game: let the last messages out, then close the engine link after {@code lingerMs}. */
+        void closeEngineLater(long lingerMs) {
+            final Socket es = engineSock;
+            if (engineOut != null) engineOut.closeWhenDrained();
+            engineOut = null;
+            engineSock = null;
+            if (es != null) {
+                Thread t = new Thread(() -> {
+                    try { Thread.sleep(lingerMs); es.close(); } catch (Exception ignored2) { }
+                });
+                t.setDaemon(true);
+                t.start();
+            }
+        }
+
+        void closeAll(boolean lobbToo) {
+            closeEngineNow();
+            if (lobbToo) {
+                if (lobbyOut != null) lobbyOut.closeWhenDrained();
+                final Socket ls = lobbySock;
+                if (ls != null) {
+                    Thread t = new Thread(() -> {
+                        try { Thread.sleep(300); ls.close(); } catch (Exception ignored2) { }
+                    });
+                    t.setDaemon(true);
+                    t.start();
+                }
+            }
+        }
+    }
+
     private static final class TeamRef {
         String name;
         int owner, color, level, index;
@@ -433,6 +530,10 @@ public final class Relay {
         int pauseCount;
         /** One line for each TV viewer that has left (or was still watching at the end): round trip, queue depth, why it ended. */
         final List<String> viewerReport = new ArrayList<>();
+        /** One line for each watching phone's engine link that has ended (or was still up at the end); and the events kept, as for the TVs. */
+        final List<String> watcherReport = new ArrayList<>();
+        int watcherReportDropped, watcherEventsKept, watcherEventsDropped;
+        int watcherDesyncs;
     }
 
     /** What happened in a finished game, in one object that the app shows and the tests compare. */
@@ -446,6 +547,9 @@ public final class Relay {
         public final List<String> events = new ArrayList<>();
         public final List<String> perPlayer = new ArrayList<>();
         public final List<String> viewers = new ArrayList<>();
+        /** One line for each engine link of a watching phone (a phone that watched twice has two). */
+        public final List<String> watchers = new ArrayList<>();
+        public int watcherDesyncs;
         public String endReason = "";
         public final Map<Integer, String> toHashByPlayer = new HashMap<>();
         public final Map<Integer, Long> toMsgsByPlayer = new HashMap<>();
@@ -461,7 +565,13 @@ public final class Relay {
             b.append("Map digest M: ").append(mapDigest.isEmpty() ? "(none seen)" : mapDigest).append('\n');
             b.append("Turn checksums (N), ").append(digests.size()).append(":\n");
             for (String d : digests) b.append("  ").append(d).append('\n');
+            b.append("Compatibility: ").append(Compat.VALUE).append('\n');
             for (String s : perPlayer) b.append(s).append('\n');
+            if (watchers.isEmpty()) b.append("Watching phones: none\n");
+            else {
+                b.append("Watching phones (they play no team and send no game messages; each saw the same stream as a player, desync reports from them: ").append(watcherDesyncs).append("):\n");
+                for (String w : watchers) b.append("  ").append(w).append('\n');
+            }
             if (viewers.isEmpty()) b.append("TV viewers: none\n");
             else {
                 b.append("TV viewers (round trip is relay to TV and back, measured with a WebSocket ping every 2 s that waits behind the queued frames; \"behind\" is frames waiting in that TV's outbound queue):\n");
@@ -538,6 +648,7 @@ public final class Relay {
     // Lobby -----------------------------------------------------------------------------------
 
     private void lobbyConnection(Socket s, InputStream in, Map<String, Object> hello) throws IOException {
+        if (Json.bool(hello, "watch", false)) { spectatorLobby(s, in, hello); return; }
         Player p;
         synchronized (lock) {
             if (Json.num(hello, "proto", 0) != PROTO) {
@@ -616,6 +727,7 @@ public final class Relay {
 
     private boolean nameTaken(String n, int exceptId) {
         for (Player q : players.values()) if (q.id != exceptId && q.name.equalsIgnoreCase(n)) return true;
+        for (Spectator q : spectators.values()) if (q.id != exceptId && q.name.equalsIgnoreCase(n)) return true;
         return false;
     }
 
@@ -637,6 +749,11 @@ public final class Relay {
                         q.closeAll(true);
                     }
                     players.clear();
+                    for (Spectator q : new ArrayList<>(spectators.values())) {
+                        sendLobby(q, Json.obj("t", "closed", "reason", "The host left."));
+                        q.closeAll(true);
+                    }
+                    spectators.clear();
                 }
             } else {
                 // In a game the engine link decides who is gone; the lobby link is only for the screens.
@@ -702,17 +819,29 @@ public final class Relay {
         if (o != null) o.offer((Json.write(m) + "\n").getBytes(StandardCharsets.UTF_8));
     }
 
+    private void sendLobby(Spectator p, Map<String, Object> m) {
+        Outbox o = p.lobbyOut;
+        if (o != null) o.offer((Json.write(m) + "\n").getBytes(StandardCharsets.UTF_8));
+    }
+
     /** The state every connected phone sees (what the lobby screen shows). */
     public Map<String, Object> status(int forPlayer) {
         synchronized (lock) {
             List<Object> pl = new ArrayList<>();
             for (Player q : players.values()) {
                 pl.add(Json.obj("id", (long) q.id, "name", q.name, "host", q.host, "ready", q.ready,
-                        "teams", NetTeams.listToJson(q.teams), "build", q.build, "linked", q.linked, "dropped", q.dropped, "fg", q.fg));
+                        "teams", NetTeams.listToJson(q.teams), "build", q.build, "linked", q.linked, "dropped", q.dropped, "fg", q.fg,
+                        "watching", false));
+            }
+            // Watching phones are listed after the players, marked "watching"; they have no teams and are always "ready".
+            for (Spectator q : spectators.values()) {
+                pl.add(Json.obj("id", (long) q.id, "name", q.name, "host", false, "ready", true,
+                        "teams", new ArrayList<Object>(), "build", q.build, "linked", q.linkOpen, "dropped", false, "fg", q.fg,
+                        "watching", true));
             }
             return Json.obj("t", "state", "state", state == S_SETUP ? "setup" : "playing", "host", cfg.hostName,
                     "proto", (long) PROTO, "build", cfg.build, "you", (long) forPlayer, "players", pl,
-                    "canStart", canStart(), "game", game == null ? 0L : (long) game.no);
+                    "canStart", canStart(), "game", game == null ? 0L : (long) game.no, "watching", (long) spectators.size());
         }
     }
 
@@ -727,7 +856,10 @@ public final class Relay {
         synchronized (lock) {
             all = new ArrayList<>(players.values());
         }
+        List<Spectator> allSp;
+        synchronized (lock) { allSp = new ArrayList<>(spectators.values()); }
         for (Player q : all) sendLobby(q, status(q.id));
+        for (Spectator q : allSp) sendLobby(q, status(q.id));
         changed();
     }
 
@@ -809,6 +941,7 @@ public final class Relay {
             sendLobby(q, Json.obj("t", "start", "you", (long) q.id, "token", q.token, "nick", q.name,
                     "game", (long) g.no, "lines", lines));
         }
+        for (Spectator q : new ArrayList<>(spectators.values())) startSpectator(q);
         broadcastStateLocked();
     }
 
@@ -842,6 +975,7 @@ public final class Relay {
 
     private void broadcastStateLocked() {
         for (Player q : players.values()) sendLobby(q, status(q.id));
+        for (Spectator q : spectators.values()) sendLobby(q, status(q.id));
         changed();
     }
 
@@ -850,10 +984,307 @@ public final class Relay {
         return false;
     }
 
+    // Watching phones -------------------------------------------------------------------------
+
+    /** Lock held. Like {@link #addViewerEvent}: a phone that keeps coming and going must not grow the report without bound. */
+    private void addWatchEvent(Game g, String ev) {
+        g.events.add(ev);
+        if (++g.watcherEventsKept > MAX_VIEWER_LINES) {
+            for (int i = 0; i < g.events.size(); i++) {
+                if (g.events.get(i).startsWith("Watcher ")) { g.events.remove(i); break; }
+            }
+            g.watcherEventsKept--;
+            g.watcherEventsDropped++;
+        }
+    }
+
+    private void spectatorLobby(Socket s, InputStream in, Map<String, Object> hello) throws IOException {
+        Spectator sp;
+        synchronized (lock) {
+            if (Json.num(hello, "proto", 0) != PROTO) {
+                refuse(s, "Protocol mismatch: the host speaks " + PROTO + ", this phone " + Json.num(hello, "proto", 0)
+                        + ". Install the same app version on both phones.");
+                return;
+            }
+            if (Json.bool(hello, "host", false)) {
+                refuse(s, "The hosting phone cannot be a watcher.");
+                return;
+            }
+            if (spectators.size() >= MAX_SPECTATORS) {
+                refuse(s, "The host has enough watchers: at most " + MAX_SPECTATORS + " phones can watch.");
+                return;
+            }
+            sp = new Spectator(nextId++, uniqueName(Json.str(hello, "name", "Watcher"), -1));
+            sp.build = Json.str(hello, "build", "");
+            sp.lobbySock = s;
+            spectators.put(sp.id, sp);
+        }
+        s.setSoTimeout(0);
+        final Spectator me = sp;
+        me.lobbyOut = new Outbox("relay-lobby-out-" + me.id, 200, 1 << 20, false, () -> spectatorLobbyLost(me));
+        me.lobbyOut.attach(s.getOutputStream());
+        log("lobby: " + me.name + " joined as a watcher (id " + me.id + ") from " + s.getRemoteSocketAddress() + ", build " + me.build);
+        broadcastState();
+        // A watcher may join while a game runs: it gets the game at once.
+        synchronized (lock) {
+            if (state != S_SETUP && game != null && spectators.containsKey(me.id)) startSpectator(me);
+        }
+        try {
+            for (;;) {
+                String line = Frames.readLine(in, MAX_LOBBY_LINE);
+                if (line == null) break;
+                me.lobbyRx = System.currentTimeMillis();
+                handleSpectatorLobby(me, Json.parseObject(line));
+            }
+        } catch (Throwable e) {
+            log("lobby " + me.name + ": " + e);
+        }
+        spectatorLobbyLost(me);
+    }
+
+    private void spectatorLobbyLost(Spectator sp) {
+        boolean removed = false;
+        synchronized (lock) {
+            if (!spectators.containsKey(sp.id)) return;
+            sp.lobbyOut.close();
+            try { if (sp.lobbySock != null) sp.lobbySock.close(); } catch (IOException ignored) { }
+            sp.lobbySock = null;
+            // While its engine link is up the phone goes on watching; the end of that link (or of the game) removes it.
+            if (!sp.linkOpen) {
+                if (game != null) retireWatchLink(sp, "its lobby link closed");
+                spectators.remove(sp.id);
+                sp.closeEngineNow();
+                removed = true;
+            }
+        }
+        if (removed) {
+            log("lobby: watcher " + sp.name + " left");
+            broadcastState();
+        }
+    }
+
+    private void handleSpectatorLobby(Spectator sp, Map<String, Object> m) {
+        String t = Json.str(m, "t", "");
+        synchronized (lock) {
+            switch (t) {
+                case "fg":
+                    sp.fg = Json.bool(m, "on", true);
+                    break;
+                case "name":
+                    if (state != S_SETUP) return;
+                    sp.name = uniqueName(Json.str(m, "name", sp.name), sp.id);
+                    break;
+                case "watch":
+                    // "Watch again": a phone that stopped watching (or whose engine link ended) gets the running game afresh.
+                    if (state != S_SETUP && game != null && !sp.linkOpen) startSpectator(sp);
+                    return;
+                case "start":
+                    sendLobby(sp, Json.obj("t", "notice", "text", "Only the host can start the game."));
+                    return;
+                case "teams":
+                case "ready":
+                    sendLobby(sp, Json.obj("t", "notice", "text", "A watching phone has no teams to ready. Leave and join with Play to take part."));
+                    return;
+                case "ping":
+                    sendLobby(sp, Json.obj("t", "pong"));
+                    return;
+                default:
+                    return;
+            }
+        }
+        broadcastState();
+    }
+
+    /**
+     * Lock held; a game exists and is not in setup. Sends the watcher the game: the canonical setup lines with every team driven
+     * from outside (the phone owns none), a new single-use token for its engine link.
+     */
+    private void startSpectator(Spectator sp) {
+        Game g = game;
+        if (g == null) return;
+        sp.closeEngineNow();
+        retireWatchLink(sp, "it started again");
+        sp.token = newToken();
+        sp.tokenUsed = sp.linkOpen = sp.finished = sp.quit = false;
+        sp.fatal = null;
+        List<Object> lines = new ArrayList<>(GameConfig.forRecipient(g.canonical, new boolean[g.teams.size()]));
+        // Always asked for, also at the start: whatever has been said by the time its engine link is up is replayed fast, then it plays live.
+        lines.add("e$spectate 1");
+        sendLobby(sp, Json.obj("t", "start", "you", (long) sp.id, "token", sp.token, "nick", sp.name,
+                "game", (long) g.no, "lines", lines, "watch", true));
+        addWatchEvent(g, "Watcher " + sp.name + " was sent the game (" + (g.log.size() > 0 ? "late: it catches up with " + g.logMsgs + " messages" : "from the start") + ")");
+        log("watcher " + sp.name + " sent the game " + g.no + " (" + g.logMsgs + " messages so far)");
+    }
+
+    private static String typeList(Map<Character, Integer> m) {
+        StringBuilder b = new StringBuilder();
+        for (Map.Entry<Character, Integer> e : m.entrySet()) {
+            char c = e.getKey();
+            b.append(b.length() == 0 ? "" : ", ").append(c > 0xff ? "control " + Frames.typeName(c - 0x100) : Frames.typeName(c)).append(" x").append(e.getValue());
+        }
+        return b.toString();
+    }
+
+    /** Lock held. Closes the books on this phone's engine link for the report; nothing if it had none. */
+    private void retireWatchLink(Spectator sp, String why) {
+        Game g = game;
+        if (!sp.sessionOpen) return;
+        sp.sessionOpen = false;
+        if (g == null) return;
+        StringBuilder b = new StringBuilder(sp.name).append(": watched for ").append((System.currentTimeMillis() - sp.sessionStart) / 1000)
+                .append(" s, sent to it ").append(sp.toMsgs).append(" messages (hash ").append(sp.toHash.hex()).append(")");
+        if (sp.ignored > 0) b.append(", it tried to send ").append(sp.ignored).append(" messages, all ignored (").append(typeList(sp.ignoredByType)).append(")");
+        else b.append(", it sent no game messages");
+        if (sp.fatal != null) b.append(", engine error: ").append(sp.fatal);
+        b.append("; ended: ").append(why);
+        g.watcherReport.add(b.toString());
+        if (g.watcherReport.size() > MAX_VIEWER_LINES) { g.watcherReport.remove(0); g.watcherReportDropped++; }
+    }
+
+    private void spectatorEngineConnection(Socket s, InputStream in, Spectator sp) throws IOException {
+        synchronized (lock) {
+            if (game == null || state == S_SETUP || sp.linkOpen || sp.tokenUsed || !spectators.containsKey(sp.id)) {
+                refuse(s, "No game is waiting for this engine.");
+                return;
+            }
+            sp.tokenUsed = true;
+            sp.engineSock = s;
+        }
+        s.setSoTimeout(0);
+        OutputStream os = s.getOutputStream();
+        os.write((Json.write(Json.obj("t", "ok", "game", (long) game.no)) + "\n").getBytes(StandardCharsets.UTF_8));
+        os.flush();
+        final Spectator me = sp;
+        synchronized (lock) {
+            Game g = game;
+            if (g == null || !spectators.containsKey(me.id)) { try { s.close(); } catch (IOException ignored) { } return; }
+            me.linkOpen = true;
+            me.sessionOpen = true;
+            me.sessionStart = System.currentTimeMillis();
+            me.toHash = new Fnv();
+            me.toMsgs = me.ignored = 0;
+            me.ignoredByType.clear();
+            me.fatal = null;
+            me.engineOut = new Outbox("relay-watch-out-" + me.id, cfg.viewerQueueItems, 16 << 20, false, () -> spectatorWriteFailed(me));
+            me.engineOut.attach(os);
+            boolean ok = true;
+            if (g.log.size() > 0) {
+                // Joined late: the whole log so far. The phone's engine was told e$spectate 1 by its setup lines (a local command: the
+                // launcher drops an 'e' frame from the relay), so it fast-forwards until it catches up and then plays on live.
+                // Snapshot and registration happen under this one lock, so nothing is lost or doubled.
+                byte[] all = g.log.toByteArray();
+                for (int off = 0; ok && off < all.length; off += 32768) {
+                    int n = Math.min(32768, all.length - off);
+                    ok = me.engineOut.offer(java.util.Arrays.copyOfRange(all, off, off + n));
+                }
+                me.toHash.add(all);
+                me.toMsgs += g.logMsgs;
+            }
+            if (g.paused) me.engineOut.offer(Frames.frame(new byte[] { 0, 'P' }));
+            log("watcher engine link up: " + me.name + ", backlog " + g.log.size() + " bytes");
+            if (!ok) dropSpectator(me, "the game so far is too large to send it");
+        }
+        broadcastState();
+        try {
+            for (;;) {
+                byte[] msg = Frames.read(in);
+                if (msg == null) break;
+                onSpectatorMessage(me, msg);
+            }
+        } catch (Throwable e) {
+            log("watcher engine link " + me.name + ": " + e);
+        }
+        spectatorEngineClosed(me);
+    }
+
+    private void spectatorWriteFailed(Spectator sp) {
+        synchronized (lock) {
+            if (game == null || !sp.linkOpen) return;
+            log("writing to watcher " + sp.name + " failed");
+            dropSpectator(sp, "the link to it failed");
+        }
+    }
+
+    /** Lock held. Cuts the watcher's engine link only; the game and the other phones never notice. The phone can watch again. */
+    private void dropSpectator(Spectator sp, String why) {
+        Game g = game;
+        if (g == null || !sp.linkOpen) return;
+        retireWatchLink(sp, why);
+        addWatchEvent(g, "Watcher " + sp.name + " dropped (" + why + ")");
+        log("watcher " + sp.name + " dropped (" + why + ")");
+        sp.closeEngineNow();
+        sendLobby(sp, Json.obj("t", "dropped", "reason", "You stopped watching: " + why + "."));
+        broadcastStateLocked();
+    }
+
+    /** What a watching phone's engine link may say: nothing that reaches the game. Only the phone's own state is read. */
+    private void onSpectatorMessage(Spectator sp, byte[] msg) {
+        synchronized (lock) {
+            Game g = game;
+            if (g == null || !sp.linkOpen || msg.length == 0) return;
+            if (msg[0] == 0) {
+                if (msg.length > 1 && msg[1] == 'E') {
+                    sp.fatal = new String(msg, 2, msg.length - 2, StandardCharsets.UTF_8);
+                    addWatchEvent(g, "Watcher " + sp.name + " reported an engine error: " + sp.fatal);
+                    log("watcher " + sp.name + " engine error: " + sp.fatal);
+                    if (sp.fatal.toLowerCase().contains("desync")) g.watcherDesyncs++;
+                } else if (msg.length > 1 && msg[1] == 'Q') {
+                    sp.quit = true;
+                    log("watcher " + sp.name + " stopped watching (control frame)");
+                } else {
+                    String what = msg.length == 2 && msg[1] == 'P' ? "pause" : msg.length == 2 && msg[1] == 'R' ? "resume" : "control frame " + Frames.typeName(msg.length > 1 ? msg[1] : 0);
+                    noteIgnored(g, sp, (char) (0x100 + (msg.length > 1 ? msg[1] & 0xff : 0)),   // control frames count apart from game messages of the same letter
+                             "asked to " + what + ": ignored, a watching phone has no say");
+                }
+                return;
+            }
+            char type = (char) (msg[0] & 0xff);
+            if (type == 'q') { sp.finished = true; return; }            // its own engine saw the game over
+            if (type == 'Q' || type == 'H') { sp.quit = true; return; }  // its own engine's quit: it stops watching
+            noteIgnored(g, sp, type, "sent a '" + Frames.typeName(type) + "' message (" + msg.length + " bytes): ignored, a watching phone cannot send game messages");
+        }
+    }
+
+    /** Lock held. Counts and logs a message from a watcher that is thrown away; the first of each type is also an event in the report. */
+    private void noteIgnored(Game g, Spectator sp, char type, String what) {
+        sp.ignored++;
+        boolean first = sp.ignoredByType.merge(type, 1, Integer::sum) == 1;
+        if (first) {
+            addWatchEvent(g, "Watcher " + sp.name + " " + what);
+            log("watcher " + sp.name + " " + what);
+        } else if (sp.ignored <= 50) {
+            log("watcher " + sp.name + " " + what);
+        }
+    }
+
+    private void spectatorEngineClosed(Spectator sp) {
+        boolean removed = false;
+        synchronized (lock) {
+            if (!sp.linkOpen) return;              // dropped or reset by the relay already
+            sp.linkOpen = false;
+            Game g = game;
+            if (g != null) {
+                String why = sp.finished ? "it saw the game over" : sp.fatal != null ? "engine error: " + sp.fatal : sp.quit ? "it stopped watching" : "its engine link closed";
+                retireWatchLink(sp, why);
+                addWatchEvent(g, "Watcher " + sp.name + " " + (sp.finished ? "finished watching" : sp.quit ? "stopped watching" : "lost its engine link"));
+            }
+            sp.closeEngineNow();
+            if (sp.lobbySock == null && spectators.remove(sp.id) != null) removed = true;
+            else broadcastStateLocked();
+        }
+        if (removed) broadcastState();
+    }
+
     // Engine links ----------------------------------------------------------------------------
 
     private void engineConnection(Socket s, InputStream in, Map<String, Object> hello) throws IOException {
         Player p = null;
+        Spectator watcher = null;
+        synchronized (lock) {
+            String token = Json.str(hello, "token", "");
+            for (Spectator q : spectators.values()) if (q.token.equals(token)) watcher = q;
+        }
+        if (watcher != null) { spectatorEngineConnection(s, in, watcher); return; }
         synchronized (lock) {
             String token = Json.str(hello, "token", "");
             for (Player q : players.values()) if (q.token.equals(token)) p = q;
@@ -921,7 +1352,6 @@ public final class Relay {
         synchronized (lock) {
             Game g = game;
             if (g == null || p.dropped) return;
-            p.lastMsg = System.currentTimeMillis();
             if (msg.length == 0) return;
             if (msg[0] == 0) {
                 // control frame from the phone
@@ -950,6 +1380,7 @@ public final class Relay {
                 return;
             }
             p.fromKept++;
+            p.lastMsg = System.currentTimeMillis();     // only a kept game message counts as the phone being alive for the silence rule
             p.keptByType.merge(type, 1, Integer::sum);
             g.keptByType.merge(type, 1L, Long::sum);
             if (g.armed && p.lastMsg - g.lastKeptAt > g.maxGapMs) g.maxGapMs = p.lastMsg - g.lastKeptAt;
@@ -1021,6 +1452,10 @@ public final class Relay {
             if (q.dropped || q.finished || q.engineOut == null) continue;
             q.engineOut.offer(f);
         }
+        for (Spectator q : spectators.values()) {
+            if (!q.linkOpen || q.engineOut == null) continue;
+            q.engineOut.offer(f);
+        }
     }
 
     /** Lock held. A pause nobody can end (the host is gone) is ended by the relay. */
@@ -1050,6 +1485,18 @@ public final class Relay {
         if (!viewers.isEmpty()) {
             byte[] wf = Ws.frame(2, f);
             for (Viewer v : new ArrayList<>(viewers)) if (!v.out.offer(wf)) dropViewer(v, whyRefused(v));
+        }
+        for (final Spectator sp : spectators.values()) {
+            if (!sp.linkOpen || sp.engineOut == null) continue;
+            sp.toHash.add(f);
+            sp.toMsgs++;
+            if (!sp.engineOut.offer(f)) {
+                after.add(() -> {
+                    synchronized (lock) {
+                        if (game != null) dropSpectator(sp, "too slow: its queue overflowed");
+                    }
+                });
+            }
         }
         for (final Player q : players.values()) {
             if (q == from || q.dropped || q.finished || q.engineOut == null) continue;
@@ -1189,6 +1636,11 @@ public final class Relay {
             s.digests.add("turn " + d.seq + ": " + d.checksum + " tick " + d.tick + " from " + (pl == null ? "?" : pl.name));
         }
         closeViewers(reason.equals(HOST_ENDED) ? "the host ended the game" : "the game ended");
+        for (Spectator sp : spectators.values()) retireWatchLink(sp, "the game ended");
+        if (g.watcherReportDropped > 0) s.watchers.add("(" + g.watcherReportDropped + " earlier watcher lines not listed; the last " + MAX_VIEWER_LINES + " follow)");
+        s.watchers.addAll(g.watcherReport);
+        s.watcherDesyncs = g.watcherDesyncs;
+        if (g.watcherEventsDropped > 0) s.events.add("(" + g.watcherEventsDropped + " earlier watcher events not listed; the last " + MAX_VIEWER_LINES + " are kept)");
         if (g.viewerReportDropped > 0) s.viewers.add("(" + g.viewerReportDropped + " earlier TV viewer lines not listed; the last " + MAX_VIEWER_LINES + " follow)");
         s.viewers.addAll(g.viewerReport);
         if (g.viewerEventsDropped > 0) s.events.add("(" + g.viewerEventsDropped + " earlier TV viewer events not listed; the last " + MAX_VIEWER_LINES + " are kept)");
@@ -1215,6 +1667,20 @@ public final class Relay {
             sendLobby(q, sum);
             q.closeEngineLater();
         }
+        // A watching phone is cut off like a player if the game was ended (the host quit, a desync, every engine gone). When the game simply
+        // finished, its engine link stays open for a while: it may still be catching up and must be able to see the end.
+        boolean finishedNormally = reason.equals("every engine finished");
+        for (Spectator sp : new ArrayList<>(spectators.values())) {
+            Map<String, Object> sum = Json.obj("t", "summary", "game", (long) g.no, "text", s.text(),
+                    "logHash", s.logHash, "logMsgs", s.logMsgs, "toYouHash", sp.toHash.hex(), "toYouMsgs", sp.toMsgs, "reason", reason);
+            s.toHashByPlayer.put(sp.id, sp.toHash.hex());
+            s.toMsgsByPlayer.put(sp.id, sp.toMsgs);
+            if (sp.linkOpen && sp.engineOut != null && !finishedNormally) {
+                sp.engineOut.offer(Frames.frame(("\0X" + reason).getBytes(StandardCharsets.UTF_8)));
+            }
+            sendLobby(sp, sum);
+            if (sp.linkOpen) sp.closeEngineLater(finishedNormally ? WATCH_END_LINGER_MS : 1000);
+        }
         game = null;
         state = S_SETUP;
         // Drop phones whose lobby link is gone; everyone else goes back to the lobby, not ready.
@@ -1224,6 +1690,11 @@ public final class Relay {
             q.lobbyRx = nowMs;                       // a phone whose lobby link sat idle in a game must not look silent
             q.linked = q.linkOpen = q.dropped = q.finished = false;
             if (q.lobbySock == null) players.remove(q.id);
+        }
+        for (Spectator sp : new ArrayList<>(spectators.values())) {
+            sp.lobbyRx = nowMs;
+            sp.linkOpen = false;
+            if (sp.lobbySock == null) spectators.remove(sp.id);
         }
         broadcastStateLocked();
     }
@@ -1257,7 +1728,8 @@ public final class Relay {
         synchronized (lock) {
             if (game == null) return state == S_SETUP ? "Lobby" : "";
             Game g = game;
-            return "Game " + g.no + ": " + g.digests.size() + " turns, log " + g.logMsgs + " messages" + (g.paused ? ", paused by the host" : "");
+            return "Game " + g.no + ": " + g.digests.size() + " turns, log " + g.logMsgs + " messages" + (g.paused ? ", paused by the host" : "")
+                    + (spectators.isEmpty() ? "" : ", " + spectators.size() + " watching");
         }
     }
 
@@ -1285,6 +1757,7 @@ public final class Relay {
                 if (now - lastPing > 5000) {
                     lastPing = now;
                     for (Player q : players.values()) sendLobby(q, Json.obj("t", "ping"));
+                    for (Spectator q : spectators.values()) sendLobby(q, Json.obj("t", "ping"));
                 }
                 pingViewers(now);
                 if (state == S_SETUP) {
@@ -1293,6 +1766,25 @@ public final class Relay {
                             log("lobby: " + q.name + " silent for " + (now - q.lobbyRx) / 1000 + " s, removed");
                             q.closeAll(true);
                             players.remove(q.id);
+                            broadcastStateLocked();
+                        }
+                    }
+                    for (Spectator q : new ArrayList<>(spectators.values())) {
+                        if (now - q.lobbyRx > cfg.lobbySilenceMs) {
+                            log("lobby: watcher " + q.name + " silent for " + (now - q.lobbyRx) / 1000 + " s, removed");
+                            q.closeAll(true);
+                            spectators.remove(q.id);
+                            broadcastStateLocked();
+                        }
+                    }
+                }
+                if (state != S_SETUP) {
+                    // In a game a watcher's engine link carries it; one without an engine link whose lobby went silent is gone.
+                    for (Spectator q : new ArrayList<>(spectators.values())) {
+                        if (!q.linkOpen && now - q.lobbyRx > cfg.lobbySilenceMs) {
+                            log("lobby: watcher " + q.name + " silent for " + (now - q.lobbyRx) / 1000 + " s, removed");
+                            q.closeAll(true);
+                            spectators.remove(q.id);
                             broadcastStateLocked();
                         }
                     }
@@ -1470,6 +1962,7 @@ public final class Relay {
             String key = Ws.header(head, "sec-websocket-key");
             if (key == null) {
                 pollers.put(String.valueOf(s.getInetAddress()), System.currentTimeMillis());
+                viewersWaiting();                       // prunes the entries older than 10 s
                 int nl = head.indexOf('\n');
                 String body = statusJson(nl < 0 ? head : head.substring(0, nl));
                 os.write(("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\nContent-Length: "

@@ -96,6 +96,8 @@ static int g_net;
 static char g_net_host[128], g_net_token[160], g_net_nick[64] = "Player", g_net_diag[1024];
 static int g_net_port;
 static int g_net_is_host;                 /* net.cfg says role=host: this phone's engine may ask for a pause (see net_pause_request) */
+static int g_net_is_watch;                /* net.cfg says role=watch: this phone only watches; nothing from its engine goes to the relay (see net_tap) */
+static unsigned long g_watch_blocked;     /* engine messages a watching phone's launcher did not send */
 static int g_net_pending;                 /* config sent, connect to the relay after the engine's next '?' */
 static int g_relay_fd = -1;
 static volatile int g_net_up, g_net_ending, g_net_lost;
@@ -166,7 +168,7 @@ int hp_ipc_net_config(const char *path)
         else if (!strcmp(line, "token")) snprintf(g_net_token, sizeof g_net_token, "%s", eq);
         else if (!strcmp(line, "nick") && *eq) snprintf(g_net_nick, sizeof g_net_nick, "%s", eq);
         else if (!strcmp(line, "diag")) snprintf(g_net_diag, sizeof g_net_diag, "%s", eq);
-        else if (!strcmp(line, "role")) g_net_is_host = !strcmp(eq, "host");
+        else if (!strcmp(line, "role")) { g_net_is_host = !strcmp(eq, "host"); g_net_is_watch = !strcmp(eq, "watch"); }
     }
     fclose(f);
     if (!g_net_host[0] || g_net_port <= 0 || !g_net_token[0]) return -1;
@@ -271,6 +273,12 @@ static void *send_thread(void *arg)
 static void net_tap(const unsigned char *msg, unsigned len)
 {
     if (!g_net_up || g_net_lost) return;
+    if (g_net_is_watch && !(len == 1 && msg[0] == 'q')) {
+        /* A watching phone has no team: its engine has nothing to say to the game, so nothing is sent (the relay would ignore it
+         * all anyway). The one exception is the engine's own "game over" (q), which only tells the relay this phone has seen the end. */
+        if (++g_watch_blocked <= 5) diag("WATCH not sent to the relay: message '%c' (%u bytes)", msg[0] >= 32 && msg[0] < 127 ? msg[0] : '?', len);
+        return;
+    }
     g_tx_msgs++;
     g_tx_type[msg[0]]++;
     g_tx_bytes += len + 1;
@@ -365,6 +373,18 @@ static void net_pause_request(int pause)
     net_send_control(pause ? 'P' : 'R', "");
 }
 
+/* What the relay may send to this engine, besides its own control frames (first byte 0): the types the relay itself lets through
+ * (Frames.java WHITELIST "M#+LlRrUuDdZzAaSjJ,NpPwtgfhbc12345" and 0x80..0x8A) and F, the relay's "team gone" for a dropped phone.
+ * Anything else, above all 'e' (a local engine command: it would let a hostile or broken host or relay run console commands on this
+ * phone's engine), is dropped before it reaches the engine. Local commands come only from this launcher and the app's own files. */
+int hp_ipc_relay_frame_ok(unsigned char type)
+{
+    static const char allowed[] = "M#+LlRrUuDdZzAaSjJ,NpPwtgfhbc12345F";
+    if (type >= 0x80 && type <= 0x8A) return 1;
+    return type != 0 && type < 0x80 && strchr(allowed, type) != NULL;
+}
+
+static unsigned long g_rx_dropped;
 static void *down_thread(void *arg)
 {
     (void)arg;
@@ -386,6 +406,10 @@ static void *down_thread(void *arg)
                 net_lost(m);
             }
             if (len == 2 && (msg[1] == 'P' || msg[1] == 'R')) net_apply_pause(msg[1] == 'P');
+            continue;
+        }
+        if (!hp_ipc_relay_frame_ok(msg[0])) {
+            if (++g_rx_dropped <= 10) diag("RX DROPPED a relay message of type 0x%02x ('%c', %u bytes): not on the whitelist", msg[0], msg[0] >= 32 && msg[0] < 127 ? msg[0] : '?', (unsigned)len);
             continue;
         }
         unsigned char frame[257];
@@ -508,6 +532,8 @@ static void net_finish(void)
         diag("PLUSGAPS %lu '+' messages, %lu bytes sent in all, gap ms buckets <=25:%lu <=50:%lu <=75:%lu <=100:%lu <=250:%lu <=500:%lu <=1000:%lu >1000:%lu, longest %u ms",
              g_plus_n, g_tx_bytes, g_plus_bucket[0], g_plus_bucket[1], g_plus_bucket[2], g_plus_bucket[3], g_plus_bucket[4],
              g_plus_bucket[5], g_plus_bucket[6], g_plus_bucket[7], g_plus_max_ms);
+        if (g_net_is_watch) diag("WATCH engine messages not sent: %lu", g_watch_blocked);
+        diag("RX DROPPED by the whitelist: %lu", g_rx_dropped);
         diag("SUMMARY tx %lu messages hash %016llx, rx %lu messages hash %016llx, turns %d, by type tx/rx:%s",
              g_tx_msgs, (unsigned long long)g_tx_fnv, g_rx_msgs, (unsigned long long)g_rx_fnv, g_turn_seq, types);
         fclose(g_diag);
@@ -547,6 +573,11 @@ static int send_config(int fd)
         count++;
     }
     fclose(f);
+    if (g_net && g_net_is_watch) {
+        /* Tells the engine this phone only watches: it hides the playing controls (touch widgets, weapon menu). Local IPC, from the app's own net.cfg only. */
+        static const unsigned char watchmsg[] = { 9, 'e', 'n', 'e', 't', 'w', 'a', 't', 'c', 'h' };
+        if (write_full(fd, watchmsg, sizeof watchmsg)) return -1;
+    }
     if (g_net && g_net_is_host) {
         /* Tells the engine this phone is the host (shows the pause button). Written by the launcher from the app's own net.cfg only. */
         static const unsigned char hostmsg[] = { 8, 'e', 'n', 'e', 't', 'h', 'o', 's', 't' };
@@ -692,6 +723,22 @@ int hp_ipc_user_quit(void)
 void hp_ipc_send_control(char kind)
 {
     net_send_control(kind, "");
+}
+
+/* Test hook (host test script action "relay:<text>"): writes one message straight onto the relay link, past the launcher's own filter
+ * (what a hostile or broken launcher on a watching phone would send). The relay must ignore it. Returns 0 when written. */
+int hp_ipc_send_relay(const char *payload)
+{
+    size_t n = strlen(payload);
+    unsigned char buf[256];
+    int rc = -1;
+    if (n == 0 || n > 255 || !g_net_up || g_relay_fd < 0) return -1;
+    buf[0] = (unsigned char)n;
+    memcpy(buf + 1, payload, n);
+    pthread_mutex_lock(&g_relay_wr_lock);
+    rc = write_full(g_relay_fd, buf, n + 1);
+    pthread_mutex_unlock(&g_relay_wr_lock);
+    return rc;
 }
 
 /* Test hook (host test script action "ipc:<text>"): sends one message to the engine as the frontend would, e.g. "Fteamname"

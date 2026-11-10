@@ -725,6 +725,7 @@ public class RelayTests {
         for (String l : g.f.log) if (l.contains(" left: ") && (l.contains("connection lost") || l.contains("disconnected") || l.contains("closed"))) named = true;
         check(named, "and the reason says the connection was lost or closed");
         g.end();
+        waitFor(() -> g.f.relay.lastSummary() != null, 3000);
         Relay.GameSummary gs = g.f.relay.lastSummary();
         int left = 0;
         for (String e : gs.events) if (e.startsWith("TV viewer ") && e.contains(" left (")) left++;
@@ -1008,7 +1009,7 @@ public class RelayTests {
         System.out.println("status GET: the JSON shape the TV viewer reads");
         Game g = new Game(20000, 1000);
         // the game is already running here (state playing); players are the two phones
-        for (String path : new String[] { "/", "/?proto=1", "/?proto=7" }) {
+        for (String path : new String[] { "/", "/?proto=1", "/?proto=7", "/?compat=" + org.hedgewars.android.net.Compat.VALUE, "/?compat=hwnet-60-sim0" }) {
             try (Socket c = new Socket("127.0.0.1", g.f.relay.viewerPort())) {
                 c.setSoTimeout(3000);
                 c.getOutputStream().write(("GET " + path + " HTTP/1.1\r\nHost: x\r\n\r\n").getBytes(StandardCharsets.UTF_8));
@@ -1027,12 +1028,145 @@ public class RelayTests {
                 Object p0 = ((List<?>) j.get("players")).get(0);
                 check(p0 instanceof Map && ((Map<?, ?>) p0).get("name") instanceof String && ((Map<?, ?>) p0).get("teams") instanceof Number, "  a player has a name and a team count");
                 check(j.get("compatible") instanceof Boolean && j.get("reason") instanceof String && j.get("engine") instanceof String && !((String) j.get("engine")).isEmpty() , "  compatible, reason and engine have the right types");
-                boolean bad = path.equals("/?proto=7");
+                check("hwnet-60-sim1".equals(j.get("compat")) && j.get("protocol") instanceof Number && ((Number) j.get("protocol")).intValue() == 60, "  compat is hwnet-60-sim1 and protocol 60 (" + j.get("compat") + ")");
+                boolean bad = path.equals("/?proto=7") || path.equals("/?compat=hwnet-60-sim0");
                 check(((Boolean) j.get("compatible")) == !bad && (bad == !((String) j.get("reason")).isEmpty()), "  compatible is " + !bad + (bad ? ", with a reason: " + j.get("reason") : ""));
             }
         }
         check(g.f.relay.viewersWaiting() == 1, "three polls from one TV count as 1 waiting (" + g.f.relay.viewersWaiting() + ")");
         g.end();
+    }
+
+    static RelayClient watcher(Fix f, P h, String name) throws Exception {
+        RelayClient c = new RelayClient("127.0.0.1", f.port(), name, "tests", false, new ArrayList<SetupModel.Team>(), h).watch(true);
+        c.connect();
+        return c;
+    }
+
+    @SuppressWarnings("unchecked")
+    static boolean listedAsWatching(Map<String, Object> st, String name) {
+        Map<String, Object> p = player(st, name);
+        return p != null && Boolean.TRUE.equals(p.get("watching"));
+    }
+
+    /** Watching phones (spectators): registration, caps, no say in the game, catch-up, pause, end report. */
+    static void testWatchers() throws Exception {
+        System.out.println("watchers: a watching phone is a spectator, not a player");
+        // Registration and caps, in the lobby
+        Fix f0 = new Fix(20000, 1000);
+        P hp = new P();
+        RelayClient host = join(f0, hp, "Host", true, team("H", 0, 0));
+        List<RelayClient> clients = new ArrayList<>();
+        for (int i = 1; i < Relay.MAX_PLAYERS; i++) clients.add(join(f0, new P(), "Pl" + i, false, team("T" + i, i % 8, 0)));
+        P late = new P();
+        RelayClient ninth = join(f0, late, "Ninth", false, team("N9", 1, 0));
+        check(waitFor(() -> !late.closed.isEmpty(), 3000) && late.closed.contains("full"), "the player cap is " + Relay.MAX_PLAYERS + ": a ninth player is refused (" + late.closed + ")");
+        P w1 = new P();
+        RelayClient wc = watcher(f0, w1, "Pl1");                      // same name as a player: renamed
+        check(waitFor(() -> w1.state != null, 3000), "with the players full, a watching phone is still accepted");
+        check(waitFor(() -> listedAsWatching(w1.state, "Pl1 (2)"), 3000), "  it is listed as watching, and renamed because its name was taken");
+        check(Json.num(w1.state, "watching", -1) == 1, "  the state counts 1 watching");
+        check(player(hp.state, "Pl1 (2)") != null && Json.list(player(hp.state, "Pl1 (2)"), "teams").isEmpty(), "  the host sees it with no teams");
+        wc.setReady(true);
+        wc.setTeams(new ArrayList<SetupModel.Team>());
+        wc.start();
+        check(waitFor(() -> w1.notice.contains("Only the host") || w1.notice.contains("no teams"), 2000), "  it cannot ready, set teams or start the game (told so)");
+        check(Json.num(hp.state, "watching", -1) == 1, "  a watcher's ready, teams and start leave the lobby as it was (still 1 watching, no game)");
+        List<RelayClient> ws = new ArrayList<>();
+        List<P> wps = new ArrayList<>();
+        for (int i = 2; i <= Relay.MAX_SPECTATORS; i++) { P x = new P(); wps.add(x); ws.add(watcher(f0, x, "Watch" + i)); }
+        final P last = wps.get(wps.size() - 1);
+        check(waitFor(() -> last.state != null && Json.num(last.state, "watching", -1) == Relay.MAX_SPECTATORS, 4000), Relay.MAX_SPECTATORS + " watchers are accepted");
+        P extra = new P();
+        RelayClient xc = watcher(f0, extra, "TooMany");
+        check(waitFor(() -> !extra.closed.isEmpty(), 3000) && extra.closed.contains("at most " + Relay.MAX_SPECTATORS), "the watcher cap is its own: one more is refused (" + extra.closed + ")");
+        P hostWatch = new P();
+        RelayClient hw = new RelayClient("127.0.0.1", f0.port(), "Fake", "tests", true, new ArrayList<SetupModel.Team>(), hostWatch).watch(true).hostSecret(f0.secret);
+        hw.connect();
+        check(waitFor(() -> !hostWatch.closed.isEmpty(), 3000), "a watcher cannot take the host role (" + hostWatch.closed + ")");
+        for (RelayClient c : clients) c.close();
+        for (RelayClient c : ws) c.close();
+        wc.close(); ninth.close(); xc.close(); hw.close(); host.close();
+        f0.stop();
+
+        // In a game
+        final Game g = new Game(1500, 500);
+        // (the Game fixture has started already: this watcher joins a running game, before any message)
+        P wp = new P();
+        RelayClient wcl = watcher(g.f, wp, "Eye");
+        check(waitFor(() -> wp.start != null, 3000), "a watcher joining a running game is sent the game at once");
+        boolean allRemote = true;
+        int teams = 0, rd = 0;
+        for (String l : wp.start.lines) { if (l.startsWith("eaddteam ")) teams++; if (l.equals("erdriven")) rd++; }
+        check(teams == 2 && rd == 2 && wp.start.lines.contains("TN") && !wp.start.lines.contains("TL"), "  its setup is the game with every team driven from outside (" + teams + " teams, " + rd + " erdriven)");
+        Eng ew = new Eng(g.f.port(), wp.start.token);
+        g.ea.send("Mdigest-one");
+        g.eb.send("Mdigest-one");
+        check(waitFor(() -> ew.received.size() >= 1, 2000), "  its engine link gets the game's messages");
+        // everything it sends is ignored
+        int beforeA = g.ea.received.size(), beforeB = g.eb.received.size();
+        ew.send("Lxx"); ew.send("NABCDEFGH"); ew.send("Mevil"); ew.send("FAlpha"); ew.send("hxx"); ew.send("epause"); ew.send("y1");
+        ew.send(new byte[] { 0, 'P' }); ew.send(new byte[] { 0, 'R' }); ew.send(new byte[] { 0, 'X', 'e' });
+        Thread.sleep(500);
+        check(g.ea.received.size() == beforeA && g.eb.received.size() == beforeB, "a watcher's game messages reach no player");
+        check(g.ea.controls.isEmpty() && g.eb.controls.isEmpty(), "  its pause and resume do nothing (no control frame went out)");
+        check(g.f.logged("Eye sent a 'L' message") && g.f.logged("Eye asked to pause: ignored"), "  they are logged as ignored");
+        check(g.f.relay.turns() == 0, "  no turn checksum was taken from it");
+        // the host's pause reaches it, a late joiner during the pause is told
+        g.ea.send(new byte[] { 0, 'P' });
+        check(waitFor(() -> ew.controls.contains("P"), 2000), "the host's pause is sent to the watcher's engine link too");
+        P w2 = new P();
+        RelayClient w2c = watcher(g.f, w2, "Late");
+        check(waitFor(() -> w2.start != null, 3000), "a second watcher joins during the pause");
+        Eng e2 = new Eng(g.f.port(), w2.start.token);
+        check(waitFor(() -> e2.received.size() >= 2 && e2.controls.contains("P"), 2000), "  it gets the backlog, then is told the game is paused");
+        check(e2.received.get(0).equals("Mdigest-one") && !e2.received.contains("e$spectate 1"), "  the backlog is the log from its start, with no 'e' frame (" + e2.received + ")");
+        check(w2.start.lines.get(w2.start.lines.size() - 1).equals("e$spectate 1") && wp.start.lines.get(wp.start.lines.size() - 1).equals("e$spectate 1"),
+                "  e$spectate 1 is the last of its setup lines (local), also for a watcher from the start");
+        g.ea.send(new byte[] { 0, 'R' });
+        check(waitFor(() -> e2.controls.contains("R") && ew.controls.contains("R"), 2000), "the resume reaches both watchers");
+        // a token works once; the same token twice is refused
+        try { new Eng(g.f.port(), w2.start.token).close(); check(false, "a used watcher token is refused"); }
+        catch (IllegalStateException e) { check(true, "a used watcher token is refused"); }
+        // a watcher that goes away is no dropout, nobody gets a team-gone message, and the silence rule is not involved
+        final int recvA = g.ea.received.size();
+        ew.close();
+        Thread.sleep(600);
+        check(g.ea.received.size() == recvA && !dropped(g.f, "PhoneA") && !dropped(g.f, "PhoneB"), "a watcher's link closing drops nobody and injects no team-gone message");
+        check(waitFor(() -> g.f.logged("watcher Eye"), 1000), "  and the departure is in the relay log");
+        // the same phone can watch again
+        wcl.watchAgain();
+        check(waitFor(() -> wp.start != null && !wp.start.token.isEmpty(), 1000), "a watcher that left its engine link can ask to watch again");
+        // end: summary with the same figures, watcher lines
+        g.ea.send("q");
+        g.eb.send("q");
+        Thread.sleep(200);
+        g.ea.close();
+        g.eb.close();
+        check(waitFor(() -> g.f.relay.lastSummary() != null, 4000), "the game ends when the players finish (watchers do not hold it up)");
+        Relay.GameSummary gs = g.f.relay.lastSummary();
+        check(gs != null && gs.watchers.size() >= 2 && gs.text().contains("Watching phones"), "the report lists the watching phones: " + (gs == null ? "-" : gs.watchers));
+        check(gs != null && gs.mapDigest.startsWith("digest-one (from Phone") && gs.toHashByPlayer.size() >= 3, "  the map digest is a player's (whichever arrived first); the relay keeps a stream hash for the watcher too (" + (gs == null ? "-" : gs.mapDigest + " " + gs.toHashByPlayer.keySet()) + ")");
+        wcl.close(); w2c.close(); e2.close();
+        g.end();
+
+        // a watcher present at Start, whose engine never links, does not hold the gate or the game
+        Fix f3 = new Fix(20000, 1000);
+        P h3 = new P(), b3 = new P(), s3 = new P();
+        RelayClient a3 = join(f3, h3, "PA", true, team("A", 0, 0));
+        RelayClient bb3 = join(f3, b3, "PB", false, team("B", 1, 0));
+        RelayClient sp3 = watcher(f3, s3, "Spec");
+        bb3.setReady(true);
+        check(waitFor(() -> b3.state != null && Json.bool(b3.state, "canStart", false), 3000), "start is decided by the players: a watcher needs no ready");
+        a3.start();
+        check(waitFor(() -> h3.start != null && b3.start != null && s3.start != null, 5000), "a watcher connected before Start gets the game at Start");
+        Eng e3a = new Eng(f3.port(), h3.start.token), e3b = new Eng(f3.port(), b3.start.token);
+        e3a.send("Mdigest-two");
+        e3b.send("Mdigest-two");
+        check(waitFor(() -> f3.logged("every live phone has sent its map digest"), 3000), "the gate opens and the silence rule arms without the watcher's engine");
+        e3a.close(); e3b.close();
+        a3.close(); bb3.close(); sp3.close();
+        f3.stop();
     }
 
     public static void main(String[] a) throws Exception {
@@ -1048,6 +1182,7 @@ public class RelayTests {
         testSilenceRule();
         testPause();
         testStatusGet();
+        testWatchers();
         testViewerCount();
         testViewerAbuse();
         testViewerReconnect();

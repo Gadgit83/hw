@@ -98,7 +98,7 @@ public class GameActivity extends SDLActivity {
         // The native launcher removes this marker when the engine ends cleanly.
         Diag.markGameStarted(this);
         options = Store.loadOptions(this);
-        // A network game cannot pause, and a phone that sleeps stalls everyone's engine on its turn.
+        // Only the host can pause a network game, and a phone that sleeps stalls everyone's engine on its turn.
         if (new java.io.File(getFilesDir(), "net.cfg").exists()) {
             getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         }
@@ -120,8 +120,8 @@ public class GameActivity extends SDLActivity {
      * The engine has no Android back button handling. In a local game the system Back key is forwarded as Escape, which
      * opens the engine's own quit question. In a network game that question is easy to miss and the pause button does
      * nothing useful, so Back asks in the app ({@link BackConfirm}); on "yes" the engine is quit the way a player does
-     * it, Escape then Y, so it sends its quit message and ends cleanly. The game keeps running while the question is up:
-     * a network game cannot pause.
+     * it, Escape then Y, so it sends its quit message and ends cleanly. The game keeps running while the question is up
+     * unless the host has paused it.
      */
     @Override
     public void onBackPressed() {
@@ -136,7 +136,7 @@ public class GameActivity extends SDLActivity {
             backDialog.dismiss();                    // Back again means "keep playing"
             return;
         }
-        backDialog = BackConfirm.show(this, role == BackConfirm.HOST, this::quitEngine);
+        backDialog = BackConfirm.show(this, role, this::quitEngine);
     }
 
     /**

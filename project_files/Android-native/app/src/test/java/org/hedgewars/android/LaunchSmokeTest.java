@@ -260,11 +260,69 @@ public class LaunchSmokeTest {
             + "{\"id\":2,\"name\":\"Fairphone\",\"host\":false,\"ready\":false,\"fg\":false,"
             + "\"teams\":[{\"name\":\"Blue Team\",\"color\":1,\"level\":3}]}],\"canStart\":false,\"game\":0}";
 
+    private static final String LOBBY_WATCH = "{\"t\":\"state\",\"state\":\"setup\",\"host\":\"Pixel\",\"proto\":1,\"build\":\"0.3.0-tv6\",\"you\":3,"
+            + "\"players\":[{\"id\":1,\"name\":\"Pixel\",\"host\":true,\"ready\":true,\"fg\":true,\"watching\":false,"
+            + "\"teams\":[{\"name\":\"Red Team\",\"color\":0,\"level\":0}]},"
+            + "{\"id\":3,\"name\":\"Tablet\",\"host\":false,\"ready\":true,\"fg\":true,\"watching\":true,\"teams\":[]}],"
+            + "\"canStart\":false,\"game\":0,\"watching\":1}";
+
+    /** The Watch path: a watching phone's lobby (label, no Ready, no teams button), and the host's "Watching: N". */
+    @Test
+    public void netLobbyActivity_watchPath() throws Exception {
+        TestSupport.installData(app());
+        netState(LOBBY_WATCH, false);
+        NetSession.watching = true;
+        String text = launch(NetLobbyActivity.class, null, 600);
+        assertTrue("a watching phone is labelled and has no Ready or My teams: " + text,
+                text.contains("Joined as a watcher") && text.contains("Watching") && text.contains("Tablet (you)") && text.contains("watching only")
+                        && !text.contains("Ready") && !text.contains("My teams again") && text.contains("Stop watching"));
+        TestSupport.resetStatics();
+        netState(LOBBY_WATCH.replace("\"you\":3", "\"you\":1"), true);
+        String host = launch(NetLobbyActivity.class, null, 600);
+        assertTrue("the host sees how many watch and who: " + host, host.contains("Watching: 1") && host.contains("Tablet") && host.contains("Start game"));
+        System.out.println("SDK " + android.os.Build.VERSION.SDK_INT + ": NetLobbyActivity watch path ok");
+    }
+
+    /** The spectator's game screen state: role=watch in net.cfg gives the Stop watching question (and nothing else about the player's). */
+    @Test
+    public void gameBackConfirm_watcher() throws Exception {
+        TestSupport.installData(app());
+        Activity a = Robolectric.buildActivity(NetLobbyActivity.class, null).create().start().resume().visible().get();
+        final boolean[] yes = { false };
+        android.app.AlertDialog d = BackConfirm.show(a, BackConfirm.WATCH, () -> yes[0] = true);
+        org.robolectric.shadows.ShadowAlertDialog sd = org.robolectric.Shadows.shadowOf(d);
+        assertTrue(String.valueOf(sd.getTitle()).equals("Stop watching?"));
+        assertTrue(String.valueOf(sd.getMessage()).contains("carries on for the players"));
+        assertTrue(d.getButton(android.content.DialogInterface.BUTTON_POSITIVE).getText().toString().equals("Stop watching"));
+        assertTrue(d.getButton(android.content.DialogInterface.BUTTON_NEGATIVE).getText().toString().equals("Keep watching"));
+        d.getButton(android.content.DialogInterface.BUTTON_POSITIVE).performClick();
+        TestSupport.settle(100);
+        assertTrue(yes[0]);
+        java.io.File dir = app().getFilesDir();
+        org.hedgewars.android.net.RelayClient.StartInfo si = new org.hedgewars.android.net.RelayClient.StartInfo();
+        si.host = "127.0.0.1"; si.port = 46633; si.token = "t"; si.nick = "n"; si.asWatcher = true;
+        org.hedgewars.android.net.RelayClient.writeGameFiles(new java.io.File(dir, "game.ipc"), new java.io.File(dir, "net.cfg"), si, "/x");
+        assertTrue("a watcher's net.cfg says role=watch", BackConfirm.role(dir) == BackConfirm.WATCH);
+        // Back in the spectator's game screen opens the Stop watching question
+        org.robolectric.android.controller.ActivityController<GameActivity> c = Robolectric.buildActivity(GameActivity.class);
+        GameActivity g;
+        try { g = c.create().get(); } catch (Throwable e) { g = c.get(); }
+        g.dispatchKeyEvent(new android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN, android.view.KeyEvent.KEYCODE_BACK));
+        g.dispatchKeyEvent(new android.view.KeyEvent(android.view.KeyEvent.ACTION_UP, android.view.KeyEvent.KEYCODE_BACK));
+        TestSupport.settle(100);
+        android.app.AlertDialog gd = org.robolectric.shadows.ShadowAlertDialog.getLatestAlertDialog();
+        assertTrue("the Stop watching question is up in the spectator's game screen", gd != null && gd.isShowing()
+                && String.valueOf(org.robolectric.Shadows.shadowOf(gd).getTitle()).equals("Stop watching?"));
+        gd.dismiss();
+        new java.io.File(dir, "net.cfg").delete();
+        System.out.println("SDK " + android.os.Build.VERSION.SDK_INT + ": spectator game screen state ok");
+    }
+
     @Test
     public void netLobbyActivity_chooser_neitherHostingNorJoined() throws Exception {
         TestSupport.installData(app());
         String text = launch(NetLobbyActivity.class, null, 600);
-        assertTrue("chooser shows Host and Join: " + text, text.contains("Host network game") && text.contains("Join by address"));
+        assertTrue("chooser shows Host and Join: " + text, text.contains("Host network game") && text.contains("Join by address") && text.contains("Join to play") && text.contains("Join to watch"));
         System.out.println("SDK " + android.os.Build.VERSION.SDK_INT + ": NetLobbyActivity chooser ok");
     }
 

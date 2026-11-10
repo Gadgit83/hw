@@ -28,6 +28,14 @@
 #   hostpausequit  the host pauses, then leaves while paused: everyone gets "The host ended the game"
 #   joinerpause two phones: Phone B's launcher sends pause and resume control frames; the relay ignores them (logged), nobody pauses
 #   pausecap    the host pauses and never resumes: the relay resumes everyone after the cap (NET_PAUSE_MAX_MS, 15 s here; 10 min in the app)
+#   injecte     two phones; the relay link to phone B also carries an 'e' frame (a local engine command) and an unknown 'X' frame: B's
+#               launcher must drop both before the engine (its whitelist), nothing else changes
+#   watch1      one phone with three teams and a watching phone (spectator, joined before Start), played to a normal game over: the
+#               watcher sees the same map digest, compares the turn checksums with 0 desync, exits 0 and sends the relay nothing
+#   watchlate   the same, the watching phone joins after a few turns and catches up from the backlog
+#   watchflap   the watching phone joins, is killed, joins again, leaves cleanly, joins a third time and watches to the end
+#   watchsend   the watching phone's link sends moves, a checksum, a map digest, team-gone and pause/resume: all ignored and logged
+#   watchpause  two phones and a watching phone; the host pauses; the watcher cannot pause or resume, its engine follows the host
 #   malformed   no engines: hostile and malformed input to the relay (JSON bombs, huge lines, bad UTF-8, bad WebSocket
 #               frames, hostile team fields, silence-rule arming, host role, caps); the relay must stay up
 #   all         every scenario above in turn, with a summary at the end
@@ -48,7 +56,7 @@
 SCEN="${1:-basic}"
 if [ "$SCEN" = all ]; then
   rc=0; summary=""
-  for s in malformed basic basic3 dropout dropout3 stall slowstart negcontrol solo viewer1 viewer2 viewer3 viewerflap hostquit joinerquit hostquitchat joinerquitchat hostpause hostpausequit joinerpause pausecap; do
+  for s in malformed basic basic3 dropout dropout3 stall slowstart negcontrol solo viewer1 viewer2 viewer3 viewerflap hostquit joinerquit hostquitchat joinerquitchat injecte watch1 watchlate watchflap watchsend watchpause hostpause hostpausequit joinerpause pausecap; do
     "$0" "$s" > "$BUILD_DIR/host-test-net-$s.log" 2>&1; r=$?
     res="$(grep '^RESULT:' "$BUILD_DIR/host-test-net-$s.log" | tail -1)"
     summary+="$(printf '%-11s exit %d  %s' "$s" "$r" "${res:-(no result line)}")"$'\n'

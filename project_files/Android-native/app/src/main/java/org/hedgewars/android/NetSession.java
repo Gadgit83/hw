@@ -36,6 +36,8 @@ final class NetSession {
     static volatile Listener listener;
     static volatile RelayClient client;
     static volatile boolean hosting, joined;
+    /** This phone joined only to watch (no teams): the lobby offers Watch instead of Ready, and the game screen has no controls. */
+    static volatile boolean watching;
     static volatile String target = "";
     static volatile Map<String, Object> state;
     static volatile String closedReason = "", notice = "";
@@ -93,6 +95,7 @@ final class NetSession {
         @Override public void onClosed(String reason) {
             closedReason = reason;
             joined = false;
+            watching = false;
             inGame = false;
             client = null;
             releaseLocks();
@@ -150,18 +153,23 @@ final class NetSession {
 
     /** Connects this phone's lobby link (blocking; call from a worker thread). */
     static void connect(Context c, String host, int port, String name, boolean isHost) throws IOException {
+        connect(c, host, port, name, isHost, false);
+    }
+
+    static void connect(Context c, String host, int port, String name, boolean isHost, boolean watch) throws IOException {
         leave();
         closedReason = "";
         notice = "";
         state = null;
         relaySummary = "";
         NetDiag.clear(c);
-        List<SetupModel.Team> teams = Store.loadSetup(c, Store.data(c)).teams;
-        RelayClient rc = new RelayClient(host, port, name, Diag.versionName(c), isHost, teams, HANDLER);
+        List<SetupModel.Team> teams = watch ? new ArrayList<SetupModel.Team>() : Store.loadSetup(c, Store.data(c)).teams;
+        RelayClient rc = new RelayClient(host, port, name, Diag.versionName(c), isHost, teams, HANDLER).watch(watch);
         if (isHost) rc.hostSecret(HostService.hostSecret);
         rc.connect();
         client = rc;
         joined = true;
+        watching = watch;
         hosting = isHost;
         target = host + ":" + port;
         acquireLocks(c);
@@ -173,6 +181,7 @@ final class NetSession {
         RelayClient rc = client;
         client = null;
         joined = false;
+        watching = false;
         if (rc != null) rc.close();
         releaseLocks();
     }

@@ -4,6 +4,25 @@ All notable changes to the native Android app (`project_files/Android-native`), 
 
 Only some builds were put on a phone, so a version below is a build that was made, not necessarily one that was released. Releases are tags on `android-master` with the APK attached; there is none yet.
 
+## 0.3.0-tv6 (108): a phone can join to watch (test build)
+
+`HP_PROFILE=test`, versionName `0.3.0-tv6-test`.
+
+### Added
+
+- Watch: the Network screen's Join offers "Join to play" (as before) and "Join to watch". A watching phone sends no teams. The relay registers it as a spectator, not a player: it has its own cap (`Relay.MAX_SPECTATORS`, 8), is outside the map-digest, silence, dropout (no team-gone `F`) and desync rules, and cannot send game messages: everything on its engine link is ignored and logged (only its own `\0E` error, `\0Q` stop and game-over `q` are read; a pause or resume is ignored). It gets the same per-recipient setup as a phone with every team `erdriven`, then, for a game that has already begun, `e$spectate 1` and the whole log so far (its engine fast-forwards, as the TV's does), then the live stream. Joining before Start gives the game at Start; joining mid-game is allowed, and so is leaving and watching again ("Watch the game" in the lobby). The host's pause reaches the watcher's engine.
+- The game screen of a watcher: the engine hides the touch controls, the weapon menu and the pause button and ignores taps on them (pan and zoom stay). This needs a small engine change, own commit "Network games: a watching phone has no controls" (local command `netwatch`, never a network message; every use is guarded by `GameType = gmtNet`). Back asks "Stop watching?".
+- The lobby: the host's screen shows "Watching: N"; a spectator is listed with a "Watching" label and no teams. The relay report on every phone lists the watching phones (stream hash, messages they tried to send and which were ignored, desync reports) next to the players' figures. A watcher's report shows the same map digest and turn checksums.
+- Host tests: scenarios `watch1`, `watchlate`, `watchflap`, `watchsend`, `watchpause`; `RelayTests.testWatchers`; smoke tests for the Watch lobby and the spectator game screen.
+
+- The viewer-port status GET has `compat` (`hwnet-60-sim1`, `net/Compat.java`) and `protocol` (60) for the TV to compare by exact equality; `engine` stays a label; `?compat=X` that differs makes `compatible` false. The report prints it. Rule in docs/multiphone-test.md.
+- The launcher drops anything from the relay that is not on the relay's whitelist (plus `F`), above all `e` (`hp_ipc_relay_frame_ok`); a watching phone therefore gets `e$spectate 1` as its last setup line, not as a frame. Scenario `injecte` proves the drop.
+
+### Changed
+
+- The Back question in a network game no longer says the game keeps running while you decide without qualification: it says "Unless the host has paused".
+- The relay counts a phone as alive for the silence rule only on a kept game message, not on a control frame; the status GET prunes old TV pollers on each request.
+
 ## 0.3.0-tv5b (107): less lag between phones and the TV (test build)
 
 `HP_PROFILE=test`, versionName `0.3.0-tv5b-test`.

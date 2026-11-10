@@ -41,6 +41,16 @@ import java.util.concurrent.TimeUnit;
  *   joinerquit the same on phone B: B's engine exits 0, the relay says B quit (not dropped by force), A is unaffected
  *   negcontrol two phones, the relay deliberately alters one byte of the first turn checksum N sent to phone B: the
  *              desync detection MUST fire (this scenario passes only if it does)
+ *   watch1     one phone with three teams and a watching phone (a spectator: no teams, joined before Start), a short game played to a normal
+ *              game over: the watcher's engine must compare the turn checksums without a desync, see the same map digest, finish with
+ *              exit code 0, and its launcher must send the relay nothing
+ *   watchlate  the same, the watching phone joins after NET_WATCH_AFTER_TURNS (default 3) turns: it gets e$spectate 1 and the backlog and catches up
+ *   watchflap  the watching phone joins, is killed (SIGKILL), joins again, leaves cleanly (what Back > Stop watching does), joins a third time and
+ *              watches to the end; the relay must log the departures, never "too slow", and the last session must agree with the players
+ *   watchsend  the watching phone's link sends moves, a turn checksum, a map digest, a team-gone message and pause/resume past the launcher's own
+ *              filter: the relay must ignore and log all of it, nothing may reach the game, the players and the game log
+ *   watchpause two phones and a watching phone; the host pauses (as in hostpause); the watcher tries to resume during the pause and to pause after
+ *              it: ignored; the watcher's engine pauses and resumes with everyone else
  * Prints a verdict line "RESULT: PASS" or "RESULT: FAIL"; the exit code is 0 only for PASS (for negcontrol: only if the
  * detection fired). Any desync report, unexpected protocol line, engine queue error, non-zero engine exit that is not the
  * victim's, mismatch of the per-turn checksums or of the relay/launcher stream hashes is a FAIL in the positive scenarios.
@@ -63,6 +73,8 @@ public class NetHarness {
         final String hosttest, data;
         int id;
         final Map<String, String> extraEnv = new HashMap<>();
+        /** A watching phone (a spectator at the relay), and whether the harness killed or closed it on purpose before the end. */
+        boolean watch, ended, killed;
 
         Phone(String name, Path dir, boolean host, List<SetupModel.Team> teams, String hosttest, String data, String script) {
             this.name = name; this.dir = dir; this.host = host; this.teams = teams;
@@ -99,9 +111,8 @@ public class NetHarness {
             String last = "";
             for (String l : lines) {
                 if (l.startsWith("eaddteam ")) last = l.substring(l.lastIndexOf(' ') + 1) + "";
-                if (l.startsWith("eaddteam ")) { String[] p = l.split(" ", 4); b.append(p[3]); }
+                if (l.startsWith("eaddteam ")) { String[] p = l.split(" ", 4); b.append(p[3]).append(' '); }
                 if (l.equals("erdriven")) b.append("(remote) ");
-                else if (l.startsWith("eaddteam ")) b.append("(own) ");
             }
             return b.toString().trim();
         }
@@ -137,7 +148,8 @@ public class NetHarness {
         hostModel.rules.value[Rules.V_TURN_TIME] = 10;
         hostModel.rules.value[Rules.V_HEALTH] = 40;
         hostModel.rules.value[Rules.V_SUDDEN] = 1;
-        if (scenario.equals("viewer3") || scenario.equals("viewerflap")) {
+        boolean watchScen = scenario.startsWith("watch");
+        if (scenario.equals("viewer3") || scenario.equals("viewerflap") || (watchScen && !scenario.equals("watchpause"))) {
             // a short game that still reaches a normal game over: little health, short turns
             hostModel.rules.value[Rules.V_HEALTH] = Integer.parseInt(System.getenv().getOrDefault("NET_HEALTH", "15"));
             hostModel.rules.value[Rules.V_TURN_TIME] = 8;
@@ -148,10 +160,10 @@ public class NetHarness {
         aTeams.add(team(d, rnd, "Alpha Bot", 1, 5, aTeams));
         bTeams.add(team(d, rnd, "Bravo One", 0, 0, bTeams));        // same colour as Alpha One on purpose
         bTeams.add(team(d, rnd, "Bravo Bot", 2, 3, bTeams));
-        if (scenario.equals("solo") || scenario.startsWith("viewer1") || scenario.equals("viewer3") || scenario.equals("viewerflap")) { aTeams.add(team(d, rnd, "Alpha Three", 3, 4, aTeams)); bTeams.clear(); }
+        if (scenario.equals("solo") || scenario.startsWith("viewer1") || scenario.equals("viewer3") || scenario.equals("viewerflap") || (watchScen && !scenario.equals("watchpause"))) { aTeams.add(team(d, rnd, "Alpha Three", 3, 4, aTeams)); bTeams.clear(); }
         java.util.Set<String> known = new java.util.HashSet<>(java.util.Arrays.asList("basic", "basic3", "dropout", "dropout3", "stall",
-                "slowstart", "solo", "viewer1", "viewer2", "viewer3", "viewerflap", "hostquit", "joinerquit", "hostquitchat", "joinerquitchat", "negcontrol",
-                "hostpause", "hostpausequit", "joinerpause", "pausecap"));
+                "slowstart", "solo", "viewer1", "viewer2", "viewer3", "viewerflap", "hostquit", "joinerquit", "hostquitchat", "joinerquitchat", "negcontrol", "injecte",
+                "hostpause", "hostpausequit", "joinerpause", "pausecap", "watch1", "watchlate", "watchflap", "watchsend", "watchpause"));
         if (!known.contains(scenario)) {
             System.out.println("[harness] unknown scenario '" + scenario + "'; known: " + new java.util.TreeSet<>(known));
             System.exit(2);
@@ -186,6 +198,23 @@ public class NetHarness {
                 return f;
             };
         }
+        if (scenario.equals("injecte")) {
+            // Fault injection: after the first N sent to phone B the relay link also carries an 'e' frame (a local engine command) and an
+            // unknown type 'X'. B's launcher must drop both before the engine; the game must go on as in basic, hashes equal.
+            cfg.fault = (to, f) -> {
+                if (to == tamperId[0] && f.length >= 6 && f[1] == 'N' && !tampered.getAndSet(true)) {
+                    byte[] e = "\u0009enetwatch".getBytes(java.nio.charset.StandardCharsets.ISO_8859_1);
+                    byte[] x = "\u0002Xy".getBytes(java.nio.charset.StandardCharsets.ISO_8859_1);
+                    byte[] c = new byte[f.length + e.length + x.length];
+                    System.arraycopy(f, 0, c, 0, f.length);
+                    System.arraycopy(e, 0, c, f.length, e.length);
+                    System.arraycopy(x, 0, c, f.length + e.length, x.length);
+                    System.out.println("[harness] === injecte: the relay link to phone B also carries an 'e' frame and an 'X' frame ===");
+                    return c;
+                }
+                return f;
+            };
+        }
         final List<String> relayLog = new java.util.concurrent.CopyOnWriteArrayList<>();
         cfg.listener = new Relay.Listener() {
             public void log(String line) { relayLog.add(line); System.out.println("[relay] " + line); }
@@ -208,12 +237,12 @@ public class NetHarness {
         // file, so the whole path is exercised: touch, engine, launcher, relay, every launcher, every engine. Phone B has scripted
         // touch input of its own, which must be ignored while the game is paused, and a launcher that applies pause and resume 700 ms
         // late, so the engines pause and resume at different wall-clock moments.
-        boolean pauseScenario = scenario.equals("hostpause") || scenario.equals("hostpausequit") || scenario.equals("pausecap");
+        boolean pauseScenario = scenario.equals("hostpause") || scenario.equals("hostpausequit") || scenario.equals("pausecap") || scenario.equals("watchpause");
         String tapPause = "0:down:5:" + PAUSE_X + ":" + PAUSE_Y + ";80:up:5:" + PAUSE_X + ":" + PAUSE_Y + ";";
         String hostScript = script;
         if (pauseScenario) {
             hostScript = "0:waitfile:" + root.resolve("pause1.now") + ";" + tapPause;
-            if (scenario.equals("hostpause")) hostScript += "0:waitfile:" + root.resolve("resume1.now") + ";" + tapPause
+            if (scenario.equals("hostpause") || scenario.equals("watchpause")) hostScript += "0:waitfile:" + root.resolve("resume1.now") + ";" + tapPause
                     + "0:waitfile:" + root.resolve("pause2.now") + ";" + tapPause + "0:waitfile:" + root.resolve("resume2.now") + ";" + tapPause;
             if (scenario.equals("hostpausequit")) hostScript += "0:waitfile:" + quitFlag + ";" + (System.getenv("NET_PAUSEQUIT_KEYS") != null ? "0:key:esc;600:key:y" : "0:userquit");
         }
@@ -224,6 +253,32 @@ public class NetHarness {
         Phone pb = new Phone("Phone B", root.resolve("phoneB"), false, bTeams, hosttest, data, scenario.startsWith("joinerquit") ? quitScript : joinerScript);
         if (pauseScenario) pb.extraEnv.put("HP_NET_PAUSE_JITTER_MS", "700");
         Phone pc = new Phone("Phone C", root.resolve("phoneC"), false, cTeams, hosttest, data, script);
+        // Watching phones (scenarios watch*): every session is its own Phone (own directory, engine and lobby link). The watcher's script
+        // is only ever used by watchsend (raw messages past the launcher's filter, once the harness lets it) and watchpause (pause and resume attempts).
+        final List<Phone> watchers = new ArrayList<>();
+        final int[] watchSession = { 0 };
+        final String wScript;
+        if (scenario.equals("watchsend")) {
+            wScript = "0:waitfile:" + root.resolve("ws.now") + ";0:relay:Lleft;150:relay:Rright;150:relay:NABCDEFGH;150:relay:Mfakedigest;150:relay:FAlpha One;150:relay:hxx;150:relay:Zspoof;"
+                    + "150:relay:A1;150:relay:Ssw;150:relay:+12;150:ctl:P;600:ctl:R;600:ctl:P;600:ctl:R;150:relay:Lagain";
+        } else if (scenario.equals("watchpause")) {
+            wScript = "0:waitfile:" + root.resolve("wr.now") + ";0:ctl:R;1000:ctl:P;0:waitfile:" + root.resolve("wp.now") + ";0:ctl:P;1000:ctl:R";
+        } else if (scenario.equals("watchflap")) {
+            wScript = null;        // per session, below
+        } else {
+            wScript = null;
+        }
+        final java.util.function.Supplier<Phone> newWatcher = () -> {
+            int n = ++watchSession[0];
+            String sc = wScript;
+            // watchflap, session 2: stops watching the way the app's Back dialog does (explicit quit to the relay, then the engine quits)
+            if (scenario.equals("watchflap") && n == 2) sc = "0:waitfile:" + root.resolve("w2quit.now") + ";0:userquit";
+            Phone w = new Phone("Phone W" + (scenario.equals("watchflap") ? Integer.toString(n) : ""), root.resolve(scenario.equals("watchflap") ? "phoneW" + n : "phoneW"), false, new ArrayList<>(), hosttest, data, sc);
+            w.watch = true;
+            w.client = new RelayClient("127.0.0.1", relay.port(), "Phone W", "harness", false, new ArrayList<>(), w).watch(true);
+            watchers.add(w);
+            return w;
+        };
         pa.client = new RelayClient("127.0.0.1", relay.port(), "Phone A", "harness", true, aTeams, pa).hostSecret(cfg.hostSecret);
         if (scenario.equals("slowstart")) pb.extraEnv.put("HP_NET_TX_DELAY_MS", System.getenv().getOrDefault("NET_DELAY_MS", "30000"));
         pa.client.connect();
@@ -242,11 +297,19 @@ public class NetHarness {
             pc.client.setReady(true);
             list.add(pc);
         }
-        Phone[] phones = list.toArray(new Phone[0]);
+        Phone[] players = list.toArray(new Phone[0]);
         Phone victim = cTeams.isEmpty() ? pb : pc;
+        final boolean watchFromStart = scenario.equals("watch1") || scenario.equals("watchsend") || scenario.equals("watchpause");
+        if (watchFromStart) {
+            Phone w = newWatcher.get();
+            w.client.connect();
+            Thread.sleep(300);
+            System.out.println("[harness] === Phone W joins as a watcher before the start ===");
+        }
         Thread.sleep(800);
         pa.client.start();
-        for (Phone p : phones) if (!p.gotStart.await(20, TimeUnit.SECONDS)) throw new IllegalStateException(p.name + " got no start");
+        for (Phone p : players) if (!p.gotStart.await(20, TimeUnit.SECONDS)) throw new IllegalStateException(p.name + " got no start");
+        for (Phone p : watchers) if (!p.gotStart.await(20, TimeUnit.SECONDS)) throw new IllegalStateException(p.name + " got no start");
         tamperId[0] = pb.id;
 
         long t0 = System.currentTimeMillis();
@@ -262,7 +325,8 @@ public class NetHarness {
         final String specPort = System.getenv().getOrDefault("NET_SPEC_PORT", "18770");
         final List<ViewerRun> runs = new ArrayList<>();
         ViewerRun cur = null;
-        long reconnectAt = 0;
+        long reconnectAt = 0, flapQuitAt = 0;
+        final int watchAfter = Integer.parseInt(System.getenv().getOrDefault("NET_WATCH_AFTER_TURNS", scenario.equals("watchflap") ? "1" : "3"));
         while (System.currentTimeMillis() - t0 < timeout * 1000) {
             if (pa.gotSummary.await(1, TimeUnit.SECONDS)) break;
             if (wantViewer && relay.viewerPort() > 0) {
@@ -282,6 +346,45 @@ public class NetHarness {
                     reconnectAt = System.currentTimeMillis() + 1500;
                 }
             }
+            if (watchScen) {
+                int turns = relay.turns();
+                if (scenario.equals("watchlate") && watchers.isEmpty() && turns >= watchAfter) {
+                    Phone w = newWatcher.get();
+                    w.client.connect();
+                    System.out.println("[harness] === Phone W joins as a watcher after " + turns + " turn checksums (late join: backlog and fast-forward) ===");
+                }
+                if (scenario.equals("watchsend") && turns >= 2 && !Files.exists(root.resolve("ws.now"))) {
+                    flag(root, "ws.now");
+                    System.out.println("[harness] === watchsend: the watching phone's link sends moves, a checksum, a map digest, pause and resume after " + turns + " turns ===");
+                }
+                if (scenario.equals("watchflap")) {
+                    int n = watchSession[0];
+                    Phone cw = n == 0 ? null : watchers.get(n - 1);
+                    boolean idle = cw == null || cw.ended;
+                    int[] joinAt = { watchAfter, watchAfter + 2, watchAfter + 4 };
+                    if (idle && n < 3 && turns >= joinAt[n] && System.currentTimeMillis() >= reconnectAt) {
+                        Phone w = newWatcher.get();
+                        w.client.connect();
+                        System.out.println("[harness] === watch session " + (n + 1) + ": Phone W joins as a watcher after " + turns + " turn checksums ===");
+                    } else if (cw != null && !cw.ended && n == 1 && turns >= joinAt[0] + 1) {
+                        System.out.println("[harness] === watch session 1 killed (SIGKILL of the engine, lobby link dropped) after " + turns + " turn checksums ===");
+                        cw.proc.destroyForcibly();
+                        cw.client.close();
+                        cw.killed = cw.ended = true;
+                        reconnectAt = System.currentTimeMillis() + 1500;
+                    } else if (cw != null && !cw.ended && n == 2 && turns >= joinAt[1] + 1) {
+                        if (!Files.exists(root.resolve("w2quit.now"))) {
+                            System.out.println("[harness] === watch session 2 stops watching (Back > Stop watching: explicit quit, engine quits) after " + turns + " turn checksums ===");
+                            flag(root, "w2quit.now");
+                            flapQuitAt = System.currentTimeMillis();
+                        } else if (!cw.proc.isAlive() || System.currentTimeMillis() - flapQuitAt > 12000) {
+                            cw.client.close();
+                            cw.ended = true;
+                            reconnectAt = System.currentTimeMillis() + 1500;
+                        }
+                    }
+                }
+            }
             if (pauseScenario || scenario.equals("joinerpause")) pauseDriver(scenario, relay, root, ps);
             if (quitScenario && !scenario.equals("hostpausequit") && !Files.exists(quitFlag) && relay.turns() >= killAfterTurns) {
                 System.out.println("[harness] === " + scenario + ": " + (scenario.startsWith("hostquit") ? "the host" : "phone B") + " confirms 'leave the game' (" + (chatQuit ? "chat open with typed text, then the launcher quit" : "Escape then Y") + ") after " + relay.turns() + " turn checksums ===");
@@ -296,6 +399,9 @@ public class NetHarness {
             }
         }
         boolean over = pa.gotSummary.getCount() == 0;
+        List<Phone> everyone = new ArrayList<>(java.util.Arrays.asList(players));
+        everyone.addAll(watchers);
+        final Phone[] phones = everyone.toArray(new Phone[0]);
         final List<String> fails = new ArrayList<>();
         final Map<String, Integer> exits = new HashMap<>();
         int desyncTotal = 0;
@@ -350,11 +456,17 @@ public class NetHarness {
                 String relayHash = gs.toHashByPlayer.get(p.id);
                 long relayMsgs = gs.toMsgsByPlayer.getOrDefault(p.id, -1L);
                 boolean same = mm.group(2).equals(relayHash) && Long.parseLong(mm.group(1)) == relayMsgs;
+                if (p.watch && relayHash == null) {
+                    // a watching phone that left before the end: the relay has no totals for it, only the report line
+                    System.out.println("stream check " + p.name + ": left before the end, launcher received " + mm.group(1) + " messages hash " + mm.group(2) + " (no totals at the relay to compare)");
+                    streamOk.put(p.name, true);
+                    continue;
+                }
                 System.out.println("stream check " + p.name + ": relay sent " + relayMsgs + " messages hash " + relayHash + ", launcher received " + mm.group(1) + " hash " + mm.group(2) + (same ? "  (equal)" : "  (DIFFERENT)"));
                 streamOk.put(p.name, same);
             } else {
-                System.out.println("stream check " + p.name + ": no launcher SUMMARY line");
-                streamOk.put(p.name, false);
+                System.out.println("stream check " + p.name + ": no launcher SUMMARY line" + (p.killed ? " (killed on purpose)" : ""));
+                streamOk.put(p.name, p.killed);
             }
         }
         System.out.println("\n================ PER-TURN DIGESTS, side by side (turn checksum tick direction) ================");
@@ -407,10 +519,20 @@ public class NetHarness {
             Integer ex = exits.get(p.name);
             boolean isVictim = droppedScenario && p == victim;
             if (ex == null) { fails.add(p.name + ": its engine never started"); continue; }
+            if (p.killed) continue;                                            // a watching phone the harness killed on purpose
             boolean cutByHost = hostQuit && p != pa;                           // the other phone's engine is cut off by the host's quit
             if (quitScenario && p == (hostQuit ? pa : pb) && ex != 0) fails.add(p.name + ": quit by Escape then Y but the engine exit code is " + ex + " (a clean quit is 0)");
             if (!isVictim && !cutByHost && ex != 0) fails.add(p.name + ": engine exit code " + ex + " (expected 0)");
             if (!isVictim && !cutByHost && !Boolean.TRUE.equals(streamOk.get(p.name))) fails.add(p.name + ": the relay's stream and the launcher's received stream differ");
+        }
+        if (scenario.equals("injecte")) {
+            String bl = Files.exists(pb.dir.resolve("netgame.txt")) ? new String(Files.readAllBytes(pb.dir.resolve("netgame.txt"))) : "";
+            System.out.println("injecte check: " + grep(bl, "RX DROPPED"));
+            if (!bl.contains("RX DROPPED a relay message of type 0x65 ('e'")) fails.add("Phone B's launcher did not report dropping the injected 'e' frame");
+            if (!bl.contains("RX DROPPED a relay message of type 0x58 ('X'")) fails.add("Phone B's launcher did not report dropping the injected 'X' frame");
+            if (!bl.contains("RX DROPPED by the whitelist: 2")) fails.add("Phone B's launcher dropped other than the two injected frames (see its diagnostics)");
+            String al = Files.exists(pa.dir.resolve("netgame.txt")) ? new String(Files.readAllBytes(pa.dir.resolve("netgame.txt"))) : "";
+            if (!al.contains("RX DROPPED by the whitelist: 0")) fails.add("Phone A's launcher dropped relay messages in a normal game");
         }
         if (quitScenario) {
             Phone q = hostQuit ? pa : pb;
@@ -467,6 +589,7 @@ public class NetHarness {
             if (!gs.endReason.contains("every engine finished")) fails.add("the game did not end by every engine finishing: " + gs.endReason);
         }
         if (pauseScenario || scenario.equals("joinerpause")) pauseChecks(scenario, gs, relayLog, phones, ps, fails);
+        if (watchScen) watchChecks(scenario, gs, relayLog, pa, watchers, fails);
         System.out.println("\nchecks: desync lines " + desyncLines + ", checksum mismatches " + mismatches + ", turns " + gs.digests.size() + ", engine exits " + exits);
         System.out.println(fails.isEmpty() ? "RESULT: PASS (0 Desync detected, " + gs.digests.size() + " turn checksums identical on all " + phones.length + " phones)"
                 : "RESULT: FAIL " + fails);
@@ -502,7 +625,13 @@ public class NetHarness {
                 else if (ps.stage == 1 && now - ps.at > 20000) { ps.stage = 2; ps.turnsAtResume = turns;
                     System.out.println("[harness] === joinerpause: 20 s later " + turns + " turns (was " + ps.turnsAtPause + "), the game must have gone on ==="); }
                 break;
+            case "watchpause":
             case "hostpause":
+                if (sc.equals("watchpause")) {
+                    // the watcher tries to resume during the first pause (5 s in) and to pause once the game runs again (stage 4)
+                    if (ps.stage == 2 && now - ps.at > 5000 && !Files.exists(root.resolve("wr.now"))) flag(root, "wr.now");
+                    if (ps.stage == 4 && !Files.exists(root.resolve("wp.now"))) flag(root, "wp.now");
+                }
                 if (ps.stage == 0 && turns >= 2) { ps.stage = 1; ps.at = now; }                                   // let the turn get going first
                 else if (ps.stage == 1 && now - ps.at > 4000) { ps.stage = 2; ps.at = now; ps.turnsAtPause = turns; flag(root, "pause1.now");
                     System.out.println("[harness] === hostpause: the host taps pause mid-turn, " + turns + " turns so far; held for " + pauseLen / 1000 + " s ==="); }
@@ -553,6 +682,9 @@ public class NetHarness {
                 + ", cap resumes " + cap + "; launcher PAUSE on/off per phone: " + java.util.Arrays.toString(diagOn) + " / " + java.util.Arrays.toString(diagOff));
         for (String n : ps.notes) System.out.println("pause check: " + n);
         switch (sc) {
+            case "watchpause":
+                if (ignored < 2) fails.add("expected the relay to log the watcher's pause and resume attempts as ignored, saw " + ignored);
+                // fall through: the host's pauses and everything else are checked as in hostpause
             case "hostpause":
                 if (paused != 2 || resumed != 2) fails.add("expected 2 pauses and 2 resumes by the host, saw " + paused + " / " + resumed);
                 long want = ps.firstPauseMs / 1000 - 2;
@@ -579,6 +711,101 @@ public class NetHarness {
                 break;
             default:
         }
+    }
+
+    /** Checks for the watch* scenarios: what the watching phones saw and what the relay did with them. */
+    static void watchChecks(String sc, Relay.GameSummary gs, List<String> relayLog, Phone pa, List<Phone> watchers, List<String> fails) throws Exception {
+        if (watchers.isEmpty()) { fails.add("no watching phone ever joined (the game was too short?)"); return; }
+        if (sc.equals("watchflap") && watchers.size() < 3) fails.add("only " + watchers.size() + " of the 3 watch sessions started (the game ended too early)");
+        int sent = 0, late = 0, fromStart = 0, finished = 0, stopped = 0, lostLink = 0, tooSlow = 0;
+        for (String e : gs.events) {
+            if (e.startsWith("Watcher ") && e.contains("was sent the game")) { sent++; if (e.contains("(late:")) late++; else fromStart++; }
+            if (e.startsWith("Watcher ") && e.endsWith("finished watching")) finished++;
+            if (e.startsWith("Watcher ") && e.endsWith("stopped watching")) stopped++;
+            if (e.startsWith("Watcher ") && e.endsWith("lost its engine link")) lostLink++;
+            if (e.startsWith("Watcher ") && e.contains("dropped")) fails.add("a watching phone was dropped: " + e);
+        }
+        for (String l : relayLog) if (l.contains("too slow") && l.toLowerCase().contains("watcher")) tooSlow++;
+        System.out.println("watch check: relay events: " + sent + " game starts sent to watchers (" + fromStart + " from the start, " + late + " late), "
+                + finished + " finished watching, " + stopped + " stopped watching, " + lostLink + " lost their engine link; 'too slow' log lines " + tooSlow
+                + "; watcher desync reports at the relay: " + gs.watcherDesyncs);
+        for (String w : gs.watchers) System.out.println("watch check: relay report line: " + w);
+        if (tooSlow > 0) fails.add("a watcher was reported too slow");
+        if (gs.watcherDesyncs > 0) fails.add("the relay saw " + gs.watcherDesyncs + " desync reports from watching phones");
+        if (gs.mapDigest.contains("(from Phone W")) fails.add("the map digest came from a watcher: " + gs.mapDigest);
+        for (String d : gs.digests) if (d.contains("from Phone W")) fails.add("a turn checksum came from a watcher: " + d);
+        for (String e : gs.events) if (e.startsWith("injected F")) fails.add("a team was removed: " + e);
+        Phone last = watchers.get(watchers.size() - 1);
+        for (Phone w : watchers) {
+            Path g = w.dir.resolve("netgame.txt");
+            String d = Files.exists(g) ? new String(Files.readAllBytes(g)) : "";
+            java.util.regex.Matcher m = java.util.regex.Pattern.compile("M rx map digest (\\S+)").matcher(d);
+            String md = m.find() ? m.group(1) : "-";
+            int nrx = count(d, " N rx turn "), ntx = count(d, " N tx ");
+            java.util.regex.Matcher tx = java.util.regex.Pattern.compile("tx (\\d+) messages").matcher(d);
+            long txMsgs = tx.find() ? Long.parseLong(tx.group(1)) : 0;
+            boolean full = !w.ended;
+            System.out.println("watch check: " + w.name + (w.killed ? " (killed)" : w.ended ? " (stopped early)" : "") + ": map digest seen " + md + ", turn checksums received " + nrx
+                    + " (relay " + gs.digests.size() + "), turn checksums it sent " + ntx + ", messages its launcher sent the relay " + txMsgs
+                    + ", launcher watch lines: " + count(d, "WATCH"));
+            if (!w.killed && !md.equals("-") && !gs.mapDigest.startsWith(md)) fails.add(w.name + ": its map digest " + md + " differs from the relay's " + gs.mapDigest);
+            if (full && md.equals("-")) fails.add(w.name + ": it never saw the map digest");
+            if (full && nrx != gs.digests.size()) fails.add(w.name + ": it received " + nrx + " turn checksums, the relay saw " + gs.digests.size());
+            if (ntx != 0) fails.add(w.name + ": it sent " + ntx + " turn checksums to the relay");
+            if (txMsgs > 1 && !sc.equals("watchsend")) fails.add(w.name + ": its launcher sent the relay " + txMsgs + " messages (a watcher sends nothing but its own game over)");
+            // e$spectate 1 reaches a watching engine through its setup lines (local), never as a frame from the relay: its launcher drops 'e'.
+            String ipcText = Files.exists(w.dir.resolve("game.ipc")) ? new String(Files.readAllBytes(w.dir.resolve("game.ipc"))) : "";
+            if (!ipcText.trim().endsWith("e$spectate 1")) fails.add(w.name + ": its setup lines do not end with e$spectate 1");
+            if (jsonLikeTypes(d).matches(".*\\be:.*") ) fails.add(w.name + ": an 'e' frame reached its engine from the relay: " + jsonLikeTypes(d));
+            String el = Files.exists(w.dir.resolve("engine.log")) ? new String(Files.readAllBytes(w.dir.resolve("engine.log"))) : "";
+            if (!w.killed && !el.contains("netwatch") && false) fails.add("unreachable");
+            if (sc.equals("watchsend")) {
+                int raw = count(el, "raw message to the relay -> 0");
+                System.out.println("watch check: " + w.name + " wrote " + raw + " raw messages onto its relay link");
+                if (raw < 10) fails.add(w.name + ": only " + raw + " of the raw messages were written to the relay link");
+            }
+        }
+        // A watching engine has no team of its own and so never sends the game-over message q: it has seen the end when its engine exits
+        // by itself with code 0 after the whole stream arrived (checked above: exit code, stream hash, all turn checksums).
+        switch (sc) {
+            case "watch1":
+            case "watchsend":
+            case "watchpause":
+                if (fromStart != 1 || late != 0) fails.add("expected one watcher sent the game from the start, saw " + fromStart + " / " + late + " late");
+                break;
+            case "watchlate":
+                if (late != 1) fails.add("expected one late join, saw " + late);
+                break;
+            case "watchflap":
+                if (sent != 3) fails.add("expected 3 game starts sent to the watcher, saw " + sent);
+                if (lostLink != 1) fails.add("expected 1 departure as a lost engine link (the kill), saw " + lostLink);
+                if (stopped != 1) fails.add("expected 1 clean stop, saw " + stopped);
+                break;
+            default:
+        }
+        if (sc.equals("watchsend")) {
+            String[] want = { "sent a 'L' message", "sent a 'R' message", "sent a 'N' message", "sent a 'M' message", "sent a 'F' message", "sent a 'h' message",
+                    "sent a 'Z' message", "sent a 'A' message", "sent a 'S' message", "sent a '+' message", "asked to pause: ignored", "asked to resume: ignored" };
+            for (String x : want) {
+                boolean ok = false;
+                for (String e : gs.events) if (e.startsWith("Watcher ") && e.contains(x)) ok = true;
+                if (!ok) fails.add("the relay did not log the watcher's attempt: " + x);
+            }
+            boolean allIgnored = false;
+            for (String w : gs.watchers) if (w.contains("all ignored")) allIgnored = true;
+            if (!allIgnored) fails.add("the relay's report does not say the watcher's messages were all ignored");
+            for (String e : gs.events) if (e.contains("(the host) paused") || e.contains("(the host) resumed")) fails.add("a pause got through: " + e);
+            long toA = gs.toMsgsByPlayer.getOrDefault(pa.id, -1L);
+            System.out.println("watch check: messages the relay sent to the player: " + toA + " (a lone player must get none)");
+            if (toA != 0) fails.add("the player was sent " + toA + " messages: something from the watcher reached the game");
+            long toW = gs.toMsgsByPlayer.getOrDefault(last.id, -1L);
+            if (toW != gs.logMsgs) fails.add("the watcher was sent " + toW + " messages but the game log has " + gs.logMsgs);
+        }
+    }
+
+    static String jsonLikeTypes(String diag) {
+        int i = diag.indexOf("by type tx/rx:");
+        return i < 0 ? "" : diag.substring(i, diag.indexOf('\n', i) < 0 ? diag.length() : diag.indexOf('\n', i));
     }
 
     /** One TV viewer session: viewer-sim.js (the TV page's stand-in) feeding a spectator engine, both from hedgewars-party's e2e-host. */

@@ -195,7 +195,10 @@ var
     cMuteToggle     : boolean; // Mute toggle requested
     cHasFocus       : boolean;
     cPausedByFocus  : boolean; // mobile: the pause was caused by losing focus, so regaining it resumes
-    cSafeInsetL, cSafeInsetT, cSafeInsetR, cSafeInsetB: LongInt; // screen pixels kept clear of rounded corners and cut-outs
+    cSafeInsetL, cSafeInsetT, cSafeInsetR, cSafeInsetB: LongInt; // screen pixels kept clear of cut-outs and bars (the depth of the cut-out on that side)
+    cCornerTL, cCornerTR, cCornerBL, cCornerBR: LongInt; // radius in screen pixels of the rounded display corners
+    cEdgeMargin: LongInt; // extra screen pixels kept clear at every edge (player's setting)
+    cCutLY0, cCutLY1, cCutRY0, cCutRY1: LongInt; // vertical extent (pixels from the top) of the cut-out at the left and right edge, 0,0: the whole height
     cMenuTarget     : GLfloat; // wanted scale of the weapon menu (0: same as the HUD)
     cMenuScale      : GLfloat; // scale the weapon menu is drawn at right now
     cUIScale        : GLfloat; // size of the touch HUD relative to the desktop layout
@@ -2786,6 +2789,15 @@ begin
     cSafeInsetT:= 0;
     cSafeInsetR:= 0;
     cSafeInsetB:= 0;
+    cCornerTL:= 0;
+    cCornerTR:= 0;
+    cCornerBL:= 0;
+    cCornerBR:= 0;
+    cEdgeMargin:= 0;
+    cCutLY0:= 0;
+    cCutLY1:= 0;
+    cCutRY0:= 0;
+    cCutRY1:= 0;
 
     cTagsMask:= htTeamName or htName or htHealth;
     cPrevTagsMask:= cTagsMask;

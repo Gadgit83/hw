@@ -1519,7 +1519,6 @@ public class RelayTests {
         return Boolean.TRUE.equals(j.get("pin"));
     }
 
-    @SuppressWarnings("unchecked")
     static void testPinRefusedPinger() throws Exception {
         System.out.println("Game password: a refused TV that keeps pinging is still cut off");
         Game g = new Game(20000, 1000);
@@ -1548,6 +1547,7 @@ public class RelayTests {
         g.end();
     }
 
+    @SuppressWarnings("unchecked")
     static void testGamePassword() throws Exception {
         System.out.println("Game password: status flag, phones, TV viewers, lock");
         long oldLock = Relay.pinLockMs;

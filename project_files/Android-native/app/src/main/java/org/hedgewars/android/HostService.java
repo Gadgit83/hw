@@ -87,9 +87,13 @@ public class HostService extends Service {
         final Context app = c.getApplicationContext();
         Thread t = new Thread(() -> {
             try {
-                if (relay != r) return;              // hosting stopped (or restarted) meanwhile
-                nsd.register(app, r.port(), android.os.Build.MODEL, Diag.versionName(app), NetSession.dataDigest(app), r.viewerPort(), r.getPin() != null);
-                if (relay != r) nsd.unregister();    // stopped while registering: take the announcement back
+                String digest = NetSession.dataDigest(app);
+                // One lock for "is this still the running host" and the announcement, shared with start and stop, so a
+                // stale thread can never replace or remove a newer session's announcement.
+                synchronized (HostService.class) {
+                    if (relay != r) return;
+                    nsd.register(app, r.port(), android.os.Build.MODEL, Diag.versionName(app), digest, r.viewerPort(), r.getPin() != null);
+                }
             } catch (RuntimeException e) {
                 android.util.Log.w(Diag.TAG, "could not announce the host again: " + e);
             }
@@ -153,8 +157,16 @@ public class HostService extends Service {
                 stopSelf();
                 return;
             }
+            // The password setting may have been switched while the ports were opening: the running relay follows it.
+            boolean wantPin = NetSession.pinSetting(app);
+            if (wantPin && r.getPin() == null) r.setPin(NetSession.randomPin());
+            else if (!wantPin && r.getPin() != null) r.setPin(null);
+            NetSession.hostPin = r.getPin();
+            NetSession.ping();
             NetSession.acquireLocks(app);
-            nsd.register(app, r.port(), cfg.hostName, cfg.build, cfg.dataDigest, r.viewerPort(), cfg.pin != null);
+            synchronized (HostService.class) {
+                if (relay == r) nsd.register(app, r.port(), cfg.hostName, cfg.build, cfg.dataDigest, r.viewerPort(), r.getPin() != null);
+            }
             List<String> addr = NetSession.localAddresses();
             String where = addr.isEmpty() ? "no Wi-Fi address found" : addr.get(0) + ":" + Relay.PHONE_PORT;
             goForeground("Hosting at " + where);
@@ -216,9 +228,9 @@ public class HostService extends Service {
             r = relay;
             relay = null;
             hostSecret = "";
+            nsd.unregister();                        // in the same lock as relay = null (see refreshAdvert)
         }
         NetSession.hostPin = null;
-        nsd.unregister();
         NetSession.setNsdStatus("");
         NetSession.leave();
         NetSession.hosting = false;

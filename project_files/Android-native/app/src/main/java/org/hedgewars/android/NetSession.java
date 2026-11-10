@@ -98,13 +98,18 @@ final class NetSession {
     /** The host turns the game password on (a new random one) or off. Persisted; applies to new connections only. */
     static void setPinOn(Context c, boolean on) {
         c.getSharedPreferences(Store.PREFS_NAME, Context.MODE_PRIVATE).edit().putBoolean(PIN_ON_KEY, on).apply();
-        if (HostService.relay == null) { hostPin = null; ping(); return; }    // not hosting: the setting applies at the next Host
-        applyHostPin(c, on ? (hostPin != null ? hostPin : randomPin()) : null);
+        synchronized (HostService.class) {      // the same lock as the start of hosting, which reads the setting
+            if (HostService.relay == null) { hostPin = null; ping(); return; }    // not hosting: the setting applies when the relay runs
+            applyHostPin(c, on ? (hostPin != null ? hostPin : randomPin()) : null);
+        }
     }
 
     /** The host sets the password by hand (exactly 4 digits) or, with null, a new random one. */
     static void changePin(Context c, String pin) {
-        applyHostPin(c, pin == null ? randomPin() : pin);
+        synchronized (HostService.class) {
+            if (HostService.relay == null) return;   // only while hosting
+            applyHostPin(c, pin == null ? randomPin() : pin);
+        }
     }
 
     private static void applyHostPin(Context c, String pin) {

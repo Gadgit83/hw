@@ -158,15 +158,17 @@ public class HostService extends Service {
                 return;
             }
             // The password setting may have been switched while the ports were opening: the running relay follows it.
-            boolean wantPin = NetSession.pinSetting(app);
-            if (wantPin && r.getPin() == null) r.setPin(NetSession.randomPin());
-            else if (!wantPin && r.getPin() != null) r.setPin(null);
-            NetSession.hostPin = r.getPin();
+            // Same lock as NetSession.applyHostPin and stopHosting, so a switch or a stop in between cannot be lost.
+            synchronized (HostService.class) {
+                if (relay != r) return;              // stopped meanwhile: stopHosting has cleaned up
+                boolean wantPin = NetSession.pinSetting(app);
+                if (wantPin && r.getPin() == null) r.setPin(NetSession.randomPin());
+                else if (!wantPin && r.getPin() != null) r.setPin(null);
+                NetSession.hostPin = r.getPin();
+                nsd.register(app, r.port(), cfg.hostName, cfg.build, cfg.dataDigest, r.viewerPort(), r.getPin() != null);
+            }
             NetSession.ping();
             NetSession.acquireLocks(app);
-            synchronized (HostService.class) {
-                if (relay == r) nsd.register(app, r.port(), cfg.hostName, cfg.build, cfg.dataDigest, r.viewerPort(), r.getPin() != null);
-            }
             List<String> addr = NetSession.localAddresses();
             String where = addr.isEmpty() ? "no Wi-Fi address found" : addr.get(0) + ":" + Relay.PHONE_PORT;
             goForeground("Hosting at " + where);

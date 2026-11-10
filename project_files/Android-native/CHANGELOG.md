@@ -4,6 +4,22 @@ All notable changes to the native Android app (`project_files/Android-native`), 
 
 Only some builds were put on a phone, so a version below is a build that was made, not necessarily one that was released. Releases are tags on `android-master` with the APK attached; there is none yet.
 
+## 0.3.0-tv12 (116): game password for network games (test build)
+
+`HP_PROFILE=test`, versionName `0.3.0-tv12-test`. A network game can now ask for a 4-digit password. The TV side is built against the same protocol (docs/network.md, Game password).
+
+### Added
+
+- Host: a "Game password" setting, on by default (the choice is kept). While on, each hosting session gets a random 4-digit password, shown large in the host lobby and before Start, with Change (type exactly 4 digits, or make a new random one) and an on/off switch. Off: "Game password: off (anyone on this Wi-Fi can join)". A change applies to new connections only.
+- Joining a game: a host that asks for a password is marked in the Hosts list and the phone asks for the 4 digits (numeric keyboard) before it joins, to play or to watch. A join by typed address that is refused for the password asks and tries again. The last accepted password per host is remembered until the app is closed.
+- The relay refuses a phone with no or a wrong password (`code` `password`, "Wrong password.") and a TV with close code 4006 `password`. The 5th wrong or missing password from one address (phones and TV together) locks that address for 30 s (`password-locked`, TV close code 4007); a right password clears the count. The host's own phone never needs it.
+- The status GET on the viewer port has `pin` (true when a password is set); the NSD record has `pin=1` or `pin=0`.
+
+### Changed
+
+- `Compat.VALUE` is `hwnet-60-sim2` (was `hwnet-60-sim1`; `protocol` stays 60): phone and TV must both have the password fields. A phone or TV of 0.3.0-tv11 or earlier no longer matches.
+- The password is never written to logs or reports ("game password set").
+
 ## 0.3.0-tv11 (115): shorter host search (test build)
 
 `HP_PROFILE=test`, versionName `0.3.0-tv11-test`. From RESULT 10 on the device testing issue.

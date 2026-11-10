@@ -52,6 +52,70 @@ final class NetSession {
     /** What the host's announcement on the Wi-Fi did ("" before it was tried); shown on the host screen. */
     static volatile String nsdStatus = "";
 
+    // Game password ---------------------------------------------------------------------------------
+
+    /** The settings key: whether hosting asks for a game password. On unless the host turned it off. */
+    static final String PIN_ON_KEY = "netpin_on";
+    /** This hosting session's password (4 digits), or null when the setting is off or nothing is hosted. Never logged. */
+    static volatile String hostPin;
+    /** The password the last join sent, and the host it was for (host:port); the password is remembered once the host lets us in. */
+    static volatile String sentPin = "", sentPinKey;
+    /** Last password per host:port that was accepted, in memory only (gone when the app process ends). */
+    static final Map<String, String> knownPins = new java.util.concurrent.ConcurrentHashMap<>();
+    /** "password" or "password-locked" when the last join was refused for the password; the Network screen takes it ({@link #takeRefusal}). */
+    static volatile String refusedCode = "";
+    /** What the last join was for, so the screen can ask for the password and join again. */
+    static volatile String lastHostName = "";
+    static volatile int lastPort;
+    static volatile boolean lastWatch;
+
+    static String takeRefusal() {
+        String c = refusedCode;
+        refusedCode = "";
+        return c;
+    }
+
+    /** True for exactly 4 digits. */
+    static boolean validPin(String p) {
+        return Relay.isPin(p);
+    }
+
+    /** A random password, 0000 to 9999, always 4 digits. */
+    static String randomPin() {
+        return String.format(java.util.Locale.ROOT, "%04d", new java.security.SecureRandom().nextInt(10000));
+    }
+
+    static boolean pinSetting(Context c) {
+        return c.getSharedPreferences(Store.PREFS_NAME, Context.MODE_PRIVATE).getBoolean(PIN_ON_KEY, true);
+    }
+
+    /** Called when hosting starts: the password for this session, or null when the setting is off. */
+    static String beginHostPin(Context c) {
+        hostPin = pinSetting(c) ? randomPin() : null;
+        return hostPin;
+    }
+
+    /** The host turns the game password on (a new random one) or off. Persisted; applies to new connections only. */
+    static void setPinOn(Context c, boolean on) {
+        c.getSharedPreferences(Store.PREFS_NAME, Context.MODE_PRIVATE).edit().putBoolean(PIN_ON_KEY, on).apply();
+        applyHostPin(c, on ? (hostPin != null ? hostPin : randomPin()) : null);
+    }
+
+    /** The host sets the password by hand (exactly 4 digits) or, with null, a new random one. */
+    static void changePin(Context c, String pin) {
+        applyHostPin(c, pin == null ? randomPin() : pin);
+    }
+
+    private static void applyHostPin(Context c, String pin) {
+        if (pin != null && !validPin(pin)) return;
+        boolean was = hostPin != null;
+        hostPin = pin;
+        Relay r = HostService.relay;
+        if (r != null) r.setPin(pin);
+        if ((pin != null) != was) HostService.refreshAdvert(c);       // the announcement on the Wi-Fi says whether a password is asked
+        ping();
+    }
+
     static void setNsdStatus(String s) {
         nsdStatus = s;
         ping();
@@ -70,6 +134,9 @@ final class NetSession {
     private static final RelayClient.Handler HANDLER = new RelayClient.Handler() {
         @Override public void onState(Map<String, Object> s) {
             state = s;
+            // The host let us in, so the password we sent (if any) is right: keep it for this app session.
+            String k = sentPinKey, pn = sentPin;
+            if (k != null && !pn.isEmpty()) knownPins.put(k, pn);
             ping();
         }
 
@@ -105,6 +172,14 @@ final class NetSession {
         @Override public void onNotice(String t) {
             notice = t;
             ping();
+        }
+
+        @Override public void onRefused(String code, String reason) {
+            if (code.startsWith("password")) {
+                String k = sentPinKey;
+                if (k != null && code.equals("password")) knownPins.remove(k);      // that one was wrong
+                refusedCode = code;
+            }
         }
 
         @Override public void onClosed(String reason) {
@@ -175,7 +250,19 @@ final class NetSession {
     static volatile String connectProgress = "";
 
     static void connect(Context c, String host, int port, String name, boolean isHost, boolean watch) throws IOException {
+        String known = isHost ? null : knownPins.get(host + ":" + port);
+        connect(c, host, port, name, isHost, watch, known == null ? "" : known);
+    }
+
+    /** As above, sending {@code pin} (4 digits, or "" for none) as the game password. */
+    static void connect(Context c, String host, int port, String name, boolean isHost, boolean watch, String pin) throws IOException {
         leave();
+        refusedCode = "";
+        lastHostName = host;
+        lastPort = port;
+        lastWatch = watch;
+        sentPin = isHost || pin == null ? "" : pin;
+        sentPinKey = isHost ? null : host + ":" + port;
         final int gen;
         synchronized (NetSession.class) { gen = ++connectGen; pendingIsHost = isHost; }
         closedReason = "";
@@ -186,7 +273,7 @@ final class NetSession {
         BackConfirm.takeLeave(c.getFilesDir());       // a note left by an earlier game must not end this session
         List<SetupModel.Team> teams = watch ? new ArrayList<SetupModel.Team>() : Store.loadSetup(c, Store.data(c)).teams;
         RelayClient rc = new RelayClient(host, port, name, Diag.versionName(c), isHost, teams, HANDLER).watch(watch)
-                .identity(org.hedgewars.android.net.Compat.VALUE, dataDigest(c));
+                .identity(org.hedgewars.android.net.Compat.VALUE, dataDigest(c)).pin(sentPin);
         if (isHost) rc.hostSecret(HostService.hostSecret);
         synchronized (NetSession.class) {
             // The phone left, or another join started, while this one was being set up: give up before connecting.

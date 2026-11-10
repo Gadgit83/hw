@@ -11,7 +11,7 @@ import java.util.Map;
  * <p>TXT keys (each value at most 255 bytes, the whole record far below the 1300 bytes that mDNS allows):
  * {@code v} app version, {@code compat} {@link Compat#VALUE}, {@code proto} the engine's network protocol, {@code name} the host's
  * display name (the device model for now: the player name is an open owner decision), {@code tv} the TV WebSocket port,
- * {@code data} the game data fingerprint ({@link DataDigest}), {@code lp} the lobby protocol number ({@link Relay#PROTO}).
+ * {@code data} the game data fingerprint ({@link DataDigest}), {@code lp} the lobby protocol number ({@link Relay#PROTO}), {@code pin} 1 when the host asks for a game password, else 0.
  * The players and the state (setup or playing) are not in the record: Android cannot update a registered record in place, so
  * the list would show stale values; the relay refuses a join while a game runs, with its own message.
  */
@@ -23,6 +23,11 @@ public final class HostAdvert {
     public static final String SERVICE_TYPE_BARE = "_hedgeparty._tcp";
 
     public static Map<String, String> txt(String version, String compat, int protocol, String hostName, int tvPort, String dataDigest) {
+        return txt(version, compat, protocol, hostName, tvPort, dataDigest, false);
+    }
+
+    public static Map<String, String> txt(String version, String compat, int protocol, String hostName, int tvPort, String dataDigest,
+                                          boolean pinRequired) {
         Map<String, String> m = new LinkedHashMap<>();
         m.put("v", cut(version));
         m.put("compat", cut(compat));
@@ -31,6 +36,7 @@ public final class HostAdvert {
         m.put("tv", Integer.toString(tvPort));
         m.put("data", cut(dataDigest));
         m.put("lp", Integer.toString(Relay.PROTO));
+        m.put("pin", pinRequired ? "1" : "0");
         return m;
     }
 
@@ -46,6 +52,8 @@ public final class HostAdvert {
         public String serviceName = "", host = "", name = "", version = "", compat = "", data = "";
         public int port, protocol, tvPort, lobbyProto;
         public boolean parsedOk;
+        /** The host asks for a game password (TXT pin=1). A record without the key (an older host) means no. */
+        public boolean pinRequired;
 
         /** Why this phone cannot join, or null. */
         public String incompatibility(String myCompat, String myVersion, String myData) {
@@ -79,6 +87,7 @@ public final class HostAdvert {
         f.protocol = num(attrs, "proto");
         f.tvPort = num(attrs, "tv");
         f.lobbyProto = num(attrs, "lp");
+        f.pinRequired = "1".equals(str(attrs, "pin").trim());
         if (f.name.isEmpty()) f.name = f.serviceName;
         f.parsedOk = !f.compat.isEmpty() && f.lobbyProto > 0;
         return f;

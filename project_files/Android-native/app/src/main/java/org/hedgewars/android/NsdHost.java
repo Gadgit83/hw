@@ -62,7 +62,7 @@ final class NsdHost {
     static final String LIMITED = "The local network permission was not given, so other phones may not find this host: "
             + "they must type the address.";
 
-    synchronized void register(Context c, int port, String hostName, String version, String dataDigest, int tvPort) {
+    synchronized void register(Context c, int port, String hostName, String version, String dataDigest, int tvPort, boolean pinRequired) {
         unregister();
         try {
             NsdManager nsd = (NsdManager) c.getApplicationContext().getSystemService(Context.NSD_SERVICE);
@@ -71,7 +71,7 @@ final class NsdHost {
             info.setServiceName(("HedgeParty " + hostName).replaceAll("[^A-Za-z0-9 ._-]", "").trim());
             info.setServiceType(HostAdvert.SERVICE_TYPE_BARE);
             info.setPort(port);
-            for (Map.Entry<String, String> e : HostAdvert.txt(version, Compat.VALUE, Compat.ENGINE_PROTOCOL, hostName, tvPort, dataDigest).entrySet())
+            for (Map.Entry<String, String> e : HostAdvert.txt(version, Compat.VALUE, Compat.ENGINE_PROTOCOL, hostName, tvPort, dataDigest, pinRequired).entrySet())
                 info.setAttribute(e.getKey(), e.getValue());
             Reg r = new Reg(nsd, !LocalNetwork.granted(c));
             current = r;

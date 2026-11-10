@@ -497,6 +497,59 @@ public class LaunchSmokeTest {
         System.out.println("SDK " + android.os.Build.VERSION.SDK_INT + ": NetLobbyActivity host state ok");
     }
 
+    @Test
+    public void netLobbyActivity_hostShowsGamePassword() throws Exception {
+        TestSupport.installData(app());
+        NetSession.hostPin = NetSession.randomPin();
+        assertTrue("a random PIN is always 4 digits: " + NetSession.hostPin, NetSession.hostPin.matches("\\d{4}"));
+        NetSession.hostPin = "0427";
+        netState(LOBBY.replace("\"canStart\":false", "\"canStart\":true").replace("\"you\":2", "\"you\":1"), true);
+        String text = launch(NetLobbyActivity.class, null, 600);
+        assertTrue("the host lobby shows the 4-digit password, leading zero kept: " + text, text.contains("Game password: 0427") && text.contains("Change"));
+        NetSession.hostPin = null;
+        String off = launch(NetLobbyActivity.class, null, 600);
+        assertTrue("with the setting off the host lobby says so: " + off, off.contains("Game password: off (anyone on this Wi-Fi can join)"));
+        System.out.println("SDK " + android.os.Build.VERSION.SDK_INT + ": host lobby game password ok");
+    }
+
+    private static void numericFields(android.view.View v, java.util.List<android.widget.EditText> out) {
+        if (v instanceof android.widget.EditText && (((android.widget.EditText) v).getInputType() & android.text.InputType.TYPE_MASK_CLASS) == android.text.InputType.TYPE_CLASS_NUMBER)
+            out.add((android.widget.EditText) v);
+        if (v instanceof android.view.ViewGroup) {
+            for (int i = 0; i < ((android.view.ViewGroup) v).getChildCount(); i++) numericFields(((android.view.ViewGroup) v).getChildAt(i), out);
+        }
+    }
+
+    @Test
+    public void netLobbyActivity_hostWithPassword_asksForTheFourDigits() throws Exception {
+        TestSupport.installData(app());
+        String digest = NetSession.dataDigest(app());
+        String ver = Diag.versionName(app());
+        java.util.Map<String, String> t = org.hedgewars.android.net.HostAdvert.txt(ver, org.hedgewars.android.net.Compat.VALUE, 60, "Locked", 8766, digest, true);
+        java.util.Map<String, byte[]> raw = new java.util.HashMap<>();
+        for (java.util.Map.Entry<String, String> e : t.entrySet()) raw.put(e.getKey(), e.getValue().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        org.hedgewars.android.net.HostAdvert.Found h = org.hedgewars.android.net.HostAdvert.parse("Locked", "127.0.0.1", 1, raw);
+        assertTrue("the advert says a password is asked", h.pinRequired);
+        fakeHosts(h);
+        Activity a = Robolectric.buildActivity(NetLobbyActivity.class, null).create().start().postCreate(null).resume().visible().get();
+        TestSupport.settle(800);
+        TestSupport.layout(a);
+        android.view.View root = a.getWindow().getDecorView();
+        assertTrue("the list marks the host: " + TestSupport.texts(root), TestSupport.texts(root).contains("Asks for a game password"));
+        java.util.List<android.widget.Button> play = new java.util.ArrayList<>();
+        buttons(root, "Join to play", play);
+        play.get(1).performClick();                     // the host row (the typed-address button comes first)
+        TestSupport.settle(300);
+        TestSupport.layout(a);
+        root = a.getWindow().getDecorView();
+        java.util.List<android.widget.EditText> nums = new java.util.ArrayList<>();
+        numericFields(root, nums);
+        assertTrue("a numeric 4-digit entry appears instead of connecting: " + TestSupport.texts(root), nums.size() == 1
+                && TestSupport.texts(root).contains("This host asks for a game password."));
+        assertTrue("it takes at most 4 characters", nums.get(0).getFilters().length > 0);
+        System.out.println("SDK " + android.os.Build.VERSION.SDK_INT + ": join asks for the game password ok");
+    }
+
     /** Back asks before it leaves a lobby, and leaves at once when there is nothing to leave. */
     @Test
     public void netLobbyActivity_backPressed() throws Exception {

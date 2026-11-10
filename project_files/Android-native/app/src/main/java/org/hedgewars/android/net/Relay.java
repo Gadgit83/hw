@@ -122,6 +122,8 @@ public final class Relay {
          * the host role is given only to a connection from this device that presents it. Null: any loopback connection.
          */
         public String hostSecret;
+        /** The game password (exactly 4 digits) or null for none. The host can change it while hosting ({@link Relay#setPin}). */
+        public String pin;
         /** Extra time before the first turn ends, on top of the silence limit (the first turn can start late on a slow phone). */
         public long graceMs = 40000;
         /** How long after the start gate a phone may take to send its map digest before it is dropped. */
@@ -162,6 +164,7 @@ public final class Relay {
 
     public Relay(Config cfg) {
         this.cfg = cfg;
+        this.pin = isPin(cfg.pin) ? cfg.pin : null;
     }
 
     // Lifecycle -------------------------------------------------------------------------------
@@ -295,11 +298,98 @@ public final class Relay {
             Map<String, Object> out = Json.obj("state", state == S_SETUP ? "setup" : "playing", "game", game == null ? 0L : (long) game.no,
                     "viewers", (long) viewers.size(), "viewersEver", (long) viewersEver, "watching", (long) spectators.size(),
                     "host", cfg.hostName, "players", pl, "compatible", reason.isEmpty(), "reason", reason,
-                    "compat", Compat.VALUE, "protocol", (long) Compat.ENGINE_PROTOCOL,
+                    "compat", Compat.VALUE, "protocol", (long) Compat.ENGINE_PROTOCOL, "pin", getPin() != null,
                     "engine", (cfg.build + (cfg.engine.isEmpty() ? "" : ", engine " + cfg.engine)).trim());
             if (lastGameEnded != null) out.put("lastGame", Json.obj("n", (long) lastGameNo, "ended", lastGameEnded, "atMs", lastGameAt));
             return Json.write(out);
         }
+    }
+
+    // Game password ------------------------------------------------------------------------------
+
+    /** TV close codes for the game password: 4006 missing or wrong, 4007 the address is locked for a while. */
+    public static final int CLOSE_PASSWORD = 4006, CLOSE_PASSWORD_LOCKED = 4007;
+    /** The 5th wrong or missing password from one address locks it for {@link #pinLockMs}. */
+    public static final int PIN_MAX_WRONG = 5;
+    /** Lock length in milliseconds. Not final so the tests can shorten it; the app never changes it. */
+    public static volatile long pinLockMs = 30000;
+    private static final long PIN_FORGET_MS = 5 * 60000L;
+    private static final int PIN_MAX_ADDRESSES = 512;
+    static final int PIN_OK = 0, PIN_WRONG = 1, PIN_LOCKED = 2;
+
+    private volatile String pin;
+    private final Object pinGuard = new Object();
+    /** Per source address: wrong attempts so far, the end of a lock and the last time it was seen. Guarded by pinGuard. */
+    private final Map<String, long[]> pinTries = new LinkedHashMap<>();
+
+    /** Sets the game password for connections from now on (null or "" turns it off). Anything that is not exactly 4 digits is refused. */
+    public void setPin(String p) {
+        if (p != null && p.isEmpty()) p = null;
+        if (p != null && !isPin(p)) throw new IllegalArgumentException("The game password is exactly 4 digits.");
+        pin = p;
+        log(p == null ? "game password off" : "game password set");
+    }
+
+    /** The game password, or null when none is set. */
+    public String getPin() {
+        return pin;
+    }
+
+    /** True for exactly 4 ASCII digits. */
+    public static boolean isPin(String p) {
+        if (p == null || p.length() != 4) return false;
+        for (int i = 0; i < 4; i++) if (p.charAt(i) < '0' || p.charAt(i) > '9') return false;
+        return true;
+    }
+
+    /**
+     * Checks a given password from {@code addr}. PIN_OK when no password is set or it is right (the address's count is cleared),
+     * PIN_LOCKED while the address is locked (a lock is never extended, and a right password during it is refused too),
+     * otherwise PIN_WRONG, counting the attempt: the 5th wrong one is itself answered wrong and locks the address for the next ones.
+     */
+    int checkPin(String addr, String given) {
+        String want = pin;
+        if (want == null) return PIN_OK;
+        long now = System.currentTimeMillis();
+        synchronized (pinGuard) {
+            long[] t = pinTries.get(addr);
+            if (t != null && t[1] > now) { t[2] = now; return PIN_LOCKED; }
+            boolean right = given != null && MessageDigest.isEqual(given.getBytes(StandardCharsets.UTF_8), want.getBytes(StandardCharsets.UTF_8));
+            if (right) {
+                pinTries.remove(addr);
+                return PIN_OK;
+            }
+            if (pinTries.size() >= PIN_MAX_ADDRESSES) prunePins(now);
+            if (t == null) { t = new long[3]; pinTries.put(addr, t); }
+            t[2] = now;
+            if (++t[0] >= PIN_MAX_WRONG) { t[0] = 0; t[1] = now + pinLockMs; log("game password: " + addr + " locked for " + pinLockMs / 1000 + " s"); }
+            return PIN_WRONG;
+        }
+    }
+
+    /** pinGuard held. Forgets addresses not seen for a few minutes and not locked; if the map is still full, the oldest. */
+    private void prunePins(long now) {
+        for (Iterator<long[]> it = pinTries.values().iterator(); it.hasNext(); ) {
+            long[] t = it.next();
+            if (t[1] <= now && now - t[2] > PIN_FORGET_MS) it.remove();
+        }
+        while (pinTries.size() >= PIN_MAX_ADDRESSES) {
+            Iterator<long[]> it = pinTries.values().iterator();
+            it.next();
+            it.remove();
+        }
+    }
+
+    private static String addrOf(Socket s) {
+        java.net.InetAddress a = s.getInetAddress();
+        return a == null ? "?" : a.getHostAddress();
+    }
+
+    /** The lobby refusal text for a PIN_WRONG / PIN_LOCKED result, as {code, reason}. */
+    private static String[] pinRefusal(int r) {
+        return r == PIN_LOCKED
+                ? new String[] { "password-locked", "Too many wrong passwords. Try again in " + pinLockMs / 1000 + " s." }
+                : new String[] { "password", "Wrong password." };
     }
 
     public int viewerCount() {
@@ -673,8 +763,15 @@ public final class Relay {
     }
 
     private void refuse(Socket s, String reason) {
+        refuse(s, reason, null);
+    }
+
+    /** As above with a machine-readable {@code code} in the message ("password", "password-locked"); null leaves it out. */
+    private void refuse(Socket s, String reason, String code) {
         try {
-            s.getOutputStream().write((Json.write(Json.obj("t", "refuse", "reason", reason)) + "\n").getBytes(StandardCharsets.UTF_8));
+            Map<String, Object> m = Json.obj("t", "refuse", "reason", reason);
+            if (code != null) m.put("code", code);
+            s.getOutputStream().write((Json.write(m) + "\n").getBytes(StandardCharsets.UTF_8));
             s.getOutputStream().flush();
             s.close();
         } catch (IOException ignored) { }
@@ -698,6 +795,10 @@ public final class Relay {
             if (isHost && (!s.getInetAddress().isLoopbackAddress() || hasHost() || !secretOk(Json.str(hello, "secret", "")))) {
                 refuse(s, "Only the hosting phone can be the host.");
                 return;
+            }
+            if (!isHost) {
+                int pr = checkPin(addrOf(s), Json.str(hello, "pin", ""));
+                if (pr != PIN_OK) { String[] r = pinRefusal(pr); refuse(s, r[1], r[0]); return; }
             }
             if (players.size() >= MAX_PLAYERS) {
                 refuse(s, "The host is full: at most " + MAX_PLAYERS + " phones.");
@@ -1058,6 +1159,8 @@ public final class Relay {
                 refuse(s, "The hosting phone cannot be a watcher.");
                 return;
             }
+            int pr = checkPin(addrOf(s), Json.str(hello, "pin", ""));
+            if (pr != PIN_OK) { String[] r = pinRefusal(pr); refuse(s, r[1], r[0]); return; }
             if (spectators.size() >= MAX_SPECTATORS) {
                 refuse(s, "The host has enough watchers: at most " + MAX_SPECTATORS + " phones can watch.");
                 return;
@@ -2129,6 +2232,7 @@ public final class Relay {
                 return;
             }
             final Viewer me = new Viewer();
+            int pinResult = PIN_OK;
             synchronized (lock) {
                 if (game == null || state == S_SETUP || game.viewerLines.size() > MAX_SETUP_LINES) {
                     os.write("HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\nContent-Length: 0\r\n\r\n".getBytes(StandardCharsets.ISO_8859_1));
@@ -2136,6 +2240,14 @@ public final class Relay {
                     s.close();
                     return;
                 }
+                // The password is checked before the TV is attached to the game. A pin parameter is ignored when no password is set.
+                if (getPin() != null) {
+                    String given = queryParam(head.substring(0, Math.max(0, head.indexOf('\n'))), "pin");
+                    pinResult = checkPin(addrOf(s), given == null ? "" : given);
+                }
+                if (pinResult != PIN_OK) {
+                    // fall through to the refusal below, outside the lock
+                } else {
                 os.write(Ws.handshakeResponse(key));
                 os.flush();
                 me.sock = s;
@@ -2149,7 +2261,9 @@ public final class Relay {
                 viewersEver++;
                 addViewerEvent(game, "TV viewer joined from " + me.from + " (first message " + first.length + " bytes)");
                 log("viewer joined from " + me.from + ", first message " + first.length + " bytes, log " + game.logMsgs + " messages");
+                }
             }
+            if (pinResult != PIN_OK) { refuseViewerPin(s, os, in, key, pinResult); return; }
             v = me;
             s.setSoTimeout(0);
             changed();
@@ -2180,6 +2294,33 @@ public final class Relay {
         }
         if (v != null) viewerLost(v, why);
         else try { s.close(); } catch (IOException ignored) { }
+    }
+
+    /**
+     * A TV without the right game password: the WebSocket upgrade is completed, then the only frame is a close frame (4006 "password",
+     * or 4007 "password-locked" while its address is locked), no game data. Then, as for any close: wait briefly for the TV's close
+     * reply, shut the output side and close.
+     */
+    private void refuseViewerPin(Socket s, OutputStream os, InputStream in, String key, int result) {
+        boolean locked = result == PIN_LOCKED;
+        log("viewer " + s.getRemoteSocketAddress() + " refused: " + (locked ? "password-locked" : "password"));
+        try {
+            byte[] rb = (locked ? "password-locked" : "password").getBytes(StandardCharsets.UTF_8);
+            int code = locked ? CLOSE_PASSWORD_LOCKED : CLOSE_PASSWORD;
+            byte[] payload = new byte[2 + rb.length];
+            payload[0] = (byte) (code >> 8);
+            payload[1] = (byte) code;
+            System.arraycopy(rb, 0, payload, 2, rb.length);
+            os.write(Ws.handshakeResponse(key));
+            os.write(Ws.frame(8, payload));
+            os.flush();
+            s.setSoTimeout(2000);
+            try { Ws.readClient(in, reply -> { }); } catch (IOException ignored) { }   // the TV's close reply (or a timeout)
+        } catch (IOException ignored) {
+        } finally {
+            try { s.shutdownOutput(); } catch (IOException ignored) { }
+            try { s.close(); } catch (IOException ignored) { }
+        }
     }
 
     /** The viewer's connection ended (read side, or the writer failed). */

@@ -58,6 +58,9 @@ import java.util.concurrent.TimeUnit;
  * NET_SILENCE_MS, NET_GRACE_MS, NET_DELAY_MS (slowstart, default 30000), NET_INPUT=1, NET_SCRIPT.
  */
 public class NetHarness {
+    /** The game password every scenario uses. */
+    static final String PIN = "4827";
+
     static final class Phone implements RelayClient.Handler {
         final String name;
         final Path dir;
@@ -185,6 +188,7 @@ public class NetHarness {
         cfg.silenceMs = Long.parseLong(System.getenv().getOrDefault("NET_SILENCE_MS", "20000"));
         cfg.graceMs = Long.parseLong(System.getenv().getOrDefault("NET_GRACE_MS", "40000"));
         cfg.hostSecret = "harness-secret";
+        cfg.pin = PIN;      // the game password is on in every scenario: phones and the TV stand-in send it, the host's loopback link needs none
         if (scenario.equals("pausecap")) cfg.pauseMaxMs = Long.parseLong(System.getenv().getOrDefault("NET_PAUSE_MAX_MS", "15000"));
         final java.util.concurrent.atomic.AtomicBoolean tampered = new java.util.concurrent.atomic.AtomicBoolean();
         final int[] tamperId = { -1 };
@@ -277,7 +281,7 @@ public class NetHarness {
             if (scenario.equals("watchflap") && n == 2) sc = "0:waitfile:" + root.resolve("w2quit.now") + ";0:userquit";
             Phone w = new Phone("Phone W" + (scenario.equals("watchflap") ? Integer.toString(n) : ""), root.resolve(scenario.equals("watchflap") ? "phoneW" + n : "phoneW"), false, new ArrayList<>(), hosttest, data, sc);
             w.watch = true;
-            w.client = new RelayClient("127.0.0.1", relay.port(), "Phone W", "harness", false, new ArrayList<>(), w).watch(true).identity(org.hedgewars.android.net.Compat.VALUE, digest);
+            w.client = new RelayClient("127.0.0.1", relay.port(), "Phone W", "harness", false, new ArrayList<>(), w).watch(true).identity(org.hedgewars.android.net.Compat.VALUE, digest).pin(PIN);
             watchers.add(w);
             return w;
         };
@@ -288,13 +292,13 @@ public class NetHarness {
         List<Phone> list = new ArrayList<>();
         list.add(pa);
         if (!bTeams.isEmpty()) {
-            pb.client = new RelayClient("127.0.0.1", relay.port(), "Phone B", "harness", false, bTeams, pb).identity(org.hedgewars.android.net.Compat.VALUE, digest);
+            pb.client = new RelayClient("127.0.0.1", relay.port(), "Phone B", "harness", false, bTeams, pb).identity(org.hedgewars.android.net.Compat.VALUE, digest).pin(PIN);
             pb.client.connect();
             pb.client.setReady(true);
             list.add(pb);
         }
         if (!cTeams.isEmpty()) {
-            pc.client = new RelayClient("127.0.0.1", relay.port(), "Phone C", "harness", false, cTeams, pc).identity(org.hedgewars.android.net.Compat.VALUE, digest);
+            pc.client = new RelayClient("127.0.0.1", relay.port(), "Phone C", "harness", false, cTeams, pc).identity(org.hedgewars.android.net.Compat.VALUE, digest).pin(PIN);
             pc.client.connect();
             pc.client.setReady(true);
             list.add(pc);
@@ -881,7 +885,7 @@ public class NetHarness {
             sp.redirectErrorStream(true).redirectOutput(dir.resolve("spec.log").toFile());
             spec = sp.start();
             Thread.sleep(1500);
-            ProcessBuilder np = new ProcessBuilder("node", System.getenv("NET_VIEWER_SIM"), "--url", "ws://127.0.0.1:" + wsPort,
+            ProcessBuilder np = new ProcessBuilder("node", System.getenv("NET_VIEWER_SIM"), "--url", "ws://127.0.0.1:" + wsPort + "/?pin=" + PIN,
                     "--spec", "127.0.0.1:" + specPort, "--out", dir.resolve("result.json").toString(), "--max", "600");
             np.redirectErrorStream(true).redirectOutput(dir.resolve("viewer-sim.log").toFile());
             sim = np.start();

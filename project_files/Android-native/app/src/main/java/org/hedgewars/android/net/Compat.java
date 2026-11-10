@@ -19,9 +19,9 @@ public final class Compat {
      * changes what a game computes from the same messages: physics, weapons, AI, random number use, map generation, schemes, game
      * rules, Lua scripting behaviour) or the format or meaning of the messages between a phone and a TV (the setup lines, the framing,
      * the whitelisted message types, the e$spectate and backlog handling). Sound, touch, UI, rendering and launcher-only changes do
-     * not need a bump. Start: 1.
+     * not need a bump. Start: 1. 2: the game password (lobby hello field pin, viewer query pin, close codes 4006 and 4007).
      */
-    public static final int SIM = 1;
+    public static final int SIM = 2;
 
     public static final String VALUE = "hwnet-" + ENGINE_PROTOCOL + "-sim" + SIM;
 

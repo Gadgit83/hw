@@ -47,6 +47,9 @@ public final class RelayClient {
 
         /** The connection ended: refused, closed by the host, or lost. */
         void onClosed(String reason);
+
+        /** The host refused the join with a machine-readable code ("password", "password-locked"); called just before {@link #onClosed}. */
+        default void onRefused(String code, String reason) { }
     }
 
     private final String host;
@@ -56,6 +59,7 @@ public final class RelayClient {
     private String hostSecret = "";
     private boolean watch;
     private String compat = Compat.VALUE, digest = "";
+    private String pin = "";
     private final Handler handler;
     private volatile Socket socket;
     private OutputStream out;
@@ -84,6 +88,12 @@ public final class RelayClient {
     public RelayClient identity(String compat, String digest) {
         this.compat = compat == null ? "" : compat;
         this.digest = digest == null ? "" : digest;
+        return this;
+    }
+
+    /** The game password to send in the hello (4 digits); "" or null sends none. Call before connect(). */
+    public RelayClient pin(String p) {
+        pin = p == null ? "" : p;
         return this;
     }
 
@@ -159,7 +169,7 @@ public final class RelayClient {
         socket.setKeepAlive(true);
         out = socket.getOutputStream();
         send(Json.obj("t", "hello", "role", "lobby", "proto", (long) Relay.PROTO, "name", name, "build", build,
-                "compat", compat, "digest", digest, "host", isHost, "secret", hostSecret, "watch", watch, "teams", NetTeams.listToJson(watch ? new ArrayList<SetupModel.Team>() : teams)));
+                "compat", compat, "digest", digest, "host", isHost, "secret", hostSecret, "pin", pin, "watch", watch, "teams", NetTeams.listToJson(watch ? new ArrayList<SetupModel.Team>() : teams)));
         Thread t = new Thread(this::readLoop, "relay-client");
         t.setDaemon(true);
         t.start();
@@ -285,7 +295,13 @@ public final class RelayClient {
                     case "summary": handler.onSummary(m); break;
                     case "notice": handler.onNotice(Json.str(m, "text", "")); break;
                     case "ping": trySend(Json.obj("t", "pong")); break;
-                    case "refuse": close(Json.str(m, "reason", "Refused by the host.")); return;
+                    case "refuse": {
+                        String code = Json.str(m, "code", "");
+                        String reason = Json.str(m, "reason", "Refused by the host.");
+                        if (!code.isEmpty() && !closed) handler.onRefused(code, reason);
+                        close(reason);
+                        return;
+                    }
                     case "closed": close(Json.str(m, "reason", "The host left.")); return;
                     case "dropped": handler.onNotice(Json.str(m, "reason", "You were dropped.")); break;
                     default: break;

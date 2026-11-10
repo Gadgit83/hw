@@ -80,6 +80,22 @@ public class HostService extends Service {
 
     private static final NsdHost nsd = new NsdHost();
 
+    /** The game password was switched on or off: announce the host again so the Join list shows the right thing. Off the UI thread. */
+    static void refreshAdvert(final Context c) {
+        final Relay r = relay;
+        if (r == null) return;
+        final Context app = c.getApplicationContext();
+        Thread t = new Thread(() -> {
+            try {
+                nsd.register(app, r.port(), android.os.Build.MODEL, Diag.versionName(app), NetSession.dataDigest(app), r.viewerPort(), r.getPin() != null);
+            } catch (RuntimeException e) {
+                android.util.Log.w(Diag.TAG, "could not announce the host again: " + e);
+            }
+        }, "host-advert");
+        t.setDaemon(true);
+        t.start();
+    }
+
     private void startRelay(int gen) {
         final Context app = getApplicationContext();
         final int stopsAtStart;
@@ -92,6 +108,7 @@ public class HostService extends Service {
             StringBuilder sec = new StringBuilder();
             for (byte x : sb) sec.append(String.format("%02x", x & 0xff));
             cfg.hostSecret = sec.toString();
+            cfg.pin = NetSession.beginHostPin(app);
             cfg.data = Store.data(app);
             cfg.hostSetup = () -> Store.loadSetup(app, cfg.data);
             cfg.build = Diag.versionName(app);
@@ -135,7 +152,7 @@ public class HostService extends Service {
                 return;
             }
             NetSession.acquireLocks(app);
-            nsd.register(app, r.port(), cfg.hostName, cfg.build, cfg.dataDigest, r.viewerPort());
+            nsd.register(app, r.port(), cfg.hostName, cfg.build, cfg.dataDigest, r.viewerPort(), cfg.pin != null);
             List<String> addr = NetSession.localAddresses();
             String where = addr.isEmpty() ? "no Wi-Fi address found" : addr.get(0) + ":" + Relay.PHONE_PORT;
             goForeground("Hosting at " + where);
@@ -198,6 +215,7 @@ public class HostService extends Service {
             relay = null;
             hostSecret = "";
         }
+        NetSession.hostPin = null;
         nsd.unregister();
         NetSession.setNsdStatus("");
         NetSession.leave();

@@ -73,6 +73,10 @@ final class TestSupport {
         set(NetSession.class, "wake", null);
         set(NetSession.class, "wifi", null);
         set(NetSession.class, "nsdStatus", "");
+        set(NetSession.class, "hostPin", null);
+        set(NetSession.class, "refusedCode", "");
+        set(NetSession.class, "sentPin", "");
+        NetSession.knownPins.clear();
         set(HostService.class, "relay", null);
         LocalNetwork.forceKnown = null;
         LocalNetwork.forceGranted = null;

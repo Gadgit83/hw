@@ -52,6 +52,13 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
     /** Counts joins started on this screen: only the newest may report a problem or end "connecting". */
     private static volatile int joinSeq;
     private String lastHost = "";
+    // Asking for a game password (the host advertises one, or refused a join for it)
+    private String pinMsg;
+    private String pinHost = "";
+    private int pinPort;
+    private boolean pinWatch;
+    private String pinText = "";
+    private EditText pinField;
 
     @Override
     protected void onCreate(Bundle b) {
@@ -195,14 +202,22 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
         // Keep what has been typed: a rebuild (a state change) must not wipe the name or the address.
         if (nameField != null) name = nameField.getText().toString().trim();
         if (addressField != null) address = addressField.getText().toString().trim();
+        if (pinField != null) pinText = pinField.getText().toString().trim();
         content.removeAllViews();
         hostsBox = null;
         nameField = null;
         addressField = null;
+        pinField = null;
+        // A join the host refused for its game password: ask for the password and join again. ("password-locked" is just shown, below.)
+        if ("password".equals(NetSession.takeRefusal()) && !NetSession.joined) {
+            askPin(NetSession.lastHostName, NetSession.lastPort, NetSession.lastWatch,
+                    NetSession.sentPin.isEmpty() ? "This host asks for a game password." : "Wrong password. Try again.");
+        }
+        if (NetSession.joined || NetSession.hosting) pinMsg = null;
         if (!problem.isEmpty()) content.addView(coloured(problem, Ui.DANGER));
         if (connecting && !NetSession.connectProgress.isEmpty()) content.addView(ui.hint(NetSession.connectProgress));
         String closed = NetSession.closedReason;
-        if (!closed.isEmpty() && !NetSession.joined) content.addView(coloured(closed, Ui.DANGER));
+        if (!closed.isEmpty() && !NetSession.joined && pinMsg == null) content.addView(coloured(closed, Ui.DANGER));
         if (!NetSession.inGame) {
             // Why the last game stopped, if it did not end cleanly (the launcher records it, as for a local game).
             String err = Diag.readTail(new java.io.File(Diag.logsDir(this), Diag.LAST_ERROR), 800);
@@ -220,6 +235,7 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
 
     private void choose() {
         boolean wide = getResources().getConfiguration().screenWidthDp >= 700;
+        if (pinMsg != null) content.addView(pinCard(), ui.margins(full(), 0, 6, 0, 0));
         LinearLayout start = ui.card();
         LinearLayout before = ui.card();
         before.addView(ui.heading("Before you start"));
@@ -229,6 +245,9 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
         nameField = ui.field(name, "Player name");
         start.addView(nameField);
         start.addView(ui.heading("Host"));
+        start.addView(ui.toggle("Game password", NetSession.pinSetting(this), on -> NetSession.setPinOn(this, on)));
+        start.addView(ui.hint("On: each hosting session gets a random 4-digit password that players need to join or watch. "
+                + "Off: anyone on this Wi-Fi can join."));
         start.addView(ui.button(connecting ? "Starting..." : "Host network game", true, v -> host()), Ui.lp(ViewGroup.LayoutParams.MATCH_PARENT, ui.dp(52)));
         // The list of hosts is a card of its own: beside the other two cards when the screen is wide, so Join by address stays in view.
         hostsBox = ui.card();
@@ -422,6 +441,7 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
             row.setBackground(ui.round(Ui.PANEL_HI, 10));
             row.addView(ui.text(h.name + (h.serviceName.equals(lastHost) ? "   (last used)" : ""), 16, why == null ? Color.WHITE : Ui.DANGER));
             row.addView(ui.hint(h.address() + (h.version.isEmpty() ? "" : "   version " + h.version)));
+            if (h.pinRequired) row.addView(ui.hint("Asks for a game password"));
             if (why != null) {
                 row.addView(coloured("Cannot join: " + why, Ui.DANGER));
             }
@@ -446,7 +466,77 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
         getSharedPreferences(Store.PREFS_NAME, MODE_PRIVATE).edit().putString("lasthost", lastHost).apply();
         saveFields();
         problem = "";
+        if (h.pinRequired && NetSession.knownPins.get(h.host + ":" + h.port) == null) {
+            askPin(h.host, h.port, watch, "This host asks for a game password.");
+            return;
+        }
         connectTo(h.host, h.port, watch);
+    }
+
+    // Game password ------------------------------------------------------------------------------
+
+    private void askPin(String host, int port, boolean watch, String msg) {
+        pinHost = host;
+        pinPort = port;
+        pinWatch = watch;
+        pinMsg = msg;
+        pinText = "";
+        if (!destroyed && content != null && !NetSession.joined) render();
+    }
+
+    private LinearLayout pinCard() {
+        LinearLayout card = ui.card();
+        card.addView(ui.heading("Game password"));
+        card.addView(coloured(pinMsg, Ui.ACCENT));
+        pinField = ui.field(pinText, "4 digits");
+        pinField.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
+        pinField.setFilters(new android.text.InputFilter[] { new android.text.InputFilter.LengthFilter(4) });
+        pinField.setTextSize(28);
+        pinField.setGravity(android.view.Gravity.CENTER);
+        pinField.setContentDescription("Game password");
+        card.addView(pinField, ui.margins(full(), 0, 4, 0, 4));
+        LinearLayout row = ui.row();
+        row.addView(ui.button(pinWatch ? "Join to watch" : "Join to play", true, v -> {
+            String pin = pinField == null ? "" : pinField.getText().toString().trim();
+            if (!NetSession.validPin(pin)) {
+                pinMsg = "The password is exactly 4 digits.";
+                pinText = pin;
+                render();
+                return;
+            }
+            pinMsg = null;
+            pinText = "";
+            connectTo(pinHost, pinPort, pinWatch, pin);
+        }), ui.weight(1f));
+        row.addView(ui.button("Cancel", false, v -> {
+            pinMsg = null;
+            pinText = "";
+            render();
+        }), ui.margins(Ui.lp(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT), 8, 0, 0, 0));
+        card.addView(row, ui.margins(full(), 4, 0, 0, 0));
+        return card;
+    }
+
+    /** The host's "Change": type a 4-digit password, or make a new random one. */
+    private void changePinDialog() {
+        final EditText f = ui.field("", "4 digits");
+        f.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
+        f.setFilters(new android.text.InputFilter[] { new android.text.InputFilter.LengthFilter(4) });
+        f.setGravity(android.view.Gravity.CENTER);
+        f.setTextSize(24);
+        Ui.dialog(this)
+                .setTitle("Change the game password")
+                .setMessage("Type exactly 4 digits, or make a new random one. Phones already in the lobby stay; the new password is asked of new connections only.")
+                .setView(f)
+                .setPositiveButton("Use this", (d, w) -> {
+                    String p = f.getText().toString().trim();
+                    if (NetSession.validPin(p)) NetSession.changePin(this, p);
+                    else problem = "The game password is exactly 4 digits.";
+                    render();
+                })
+                .setNeutralButton("New random", (d, w) -> NetSession.changePin(this, null))
+                .setNegativeButton("Cancel", null)
+                .show();
     }
 
     private static final String NO_WIFI = "No Wi-Fi: connect the phone to the same Wi-Fi as the TV";
@@ -459,6 +549,19 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
         // The long explanations are collected and shown at the end of the card, so the addresses, the TVs and the phones come first.
         List<String> notes = new java.util.ArrayList<>();
         if (host) {
+            // The game password first and large: the host reads it out to the players before pressing Start.
+            String hp = NetSession.hostPin;
+            card.addView(ui.heading("Game password"));
+            TextView pt = ui.text(hp == null ? "Game password: off (anyone on this Wi-Fi can join)" : "Game password: " + hp,
+                    hp == null ? 16 : 34, Color.WHITE);
+            pt.setTypeface(Typeface.DEFAULT_BOLD);
+            pt.setContentDescription("Game password");
+            pt.setTag("pin");
+            card.addView(pt, ui.margins(full(), 2, 0, 0, 2));
+            LinearLayout pr = ui.row();
+            if (hp != null) pr.addView(ui.button("Change", false, v -> changePinDialog()), ui.margins(Ui.lp(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT), 0, 0, 12, 0));
+            pr.addView(ui.toggle("Password on", hp != null, on -> NetSession.setPinOn(this, on)));
+            card.addView(pr, ui.margins(full(), 0, 2, 0, 4));
             // All of this comes from a snapshot that a background ticker makes: listing the interfaces and reading the
             // relay take locks and must not run on the UI thread.
             NetSession.HostInfo hi = NetSession.hostInfo;
@@ -727,6 +830,11 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
     }
 
     private void connectTo(final String host, final int port, final boolean watch) {
+        String known = NetSession.knownPins.get(host + ":" + port);
+        connectTo(host, port, watch, known == null ? "" : known);
+    }
+
+    private void connectTo(final String host, final int port, final boolean watch, final String pin) {
         if (connecting) return;                  // one connect at a time (a join must not overtake the host's own connect)
         final String nick = name.isEmpty() ? Build.MODEL : name;
         connecting = true;
@@ -735,7 +843,7 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
         final int seq = ++joinSeq;
         new Thread(() -> {
             try {
-                NetSession.connect(getApplicationContext(), host, port, nick, false, watch);
+                NetSession.connect(getApplicationContext(), host, port, nick, false, watch, pin);
             } catch (NetSession.Cancelled e) {
                 // given up on purpose (Back, or a newer join): nothing to report
             } catch (Exception e) {

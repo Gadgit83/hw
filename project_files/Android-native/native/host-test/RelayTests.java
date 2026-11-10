@@ -51,6 +51,9 @@ public class RelayTests {
         public void onSummary(Map<String, Object> m) { }
         public void onNotice(String t) { notice = t; }
         public void onClosed(String r) { closed = r; }
+        volatile String refusedCode = "";
+        volatile RelayClient client;
+        public void onRefused(String code, String reason) { refusedCode = code; }
     }
 
     static final class Fix {
@@ -1193,7 +1196,7 @@ public class RelayTests {
                 Object p0 = ((List<?>) j.get("players")).get(0);
                 check(p0 instanceof Map && ((Map<?, ?>) p0).get("name") instanceof String && ((Map<?, ?>) p0).get("teams") instanceof Number, "  a player has a name and a team count");
                 check(j.get("compatible") instanceof Boolean && j.get("reason") instanceof String && j.get("engine") instanceof String && !((String) j.get("engine")).isEmpty() , "  compatible, reason and engine have the right types");
-                check("hwnet-60-sim1".equals(j.get("compat")) && j.get("protocol") instanceof Number && ((Number) j.get("protocol")).intValue() == 60, "  compat is hwnet-60-sim1 and protocol 60 (" + j.get("compat") + ")");
+                check("hwnet-60-sim2".equals(j.get("compat")) && j.get("protocol") instanceof Number && ((Number) j.get("protocol")).intValue() == 60, "  compat is hwnet-60-sim2 and protocol 60 (" + j.get("compat") + ")");
                 boolean bad = path.equals("/?proto=7") || path.equals("/?compat=hwnet-60-sim0") || path.equals("/?a=1&compat=hwnet-60-sim0") || path.equals("/?a=1&proto=7&b=2");
                 check(((Boolean) j.get("compatible")) == !bad && (bad == !((String) j.get("reason")).isEmpty()), "  compatible is " + !bad + (bad ? ", with a reason: " + j.get("reason") : ""));
             }
@@ -1451,7 +1454,7 @@ public class RelayTests {
         String C = org.hedgewars.android.net.Compat.VALUE;
         check(h.parsedOk && h.name.equals("Fairphone 4") && h.port == 46633 && h.tvPort == 8766 && h.protocol == 60 && h.address().equals("192.168.1.57:46633"), "parse reads the record back");
         check(h.incompatibility(C, "0.3.0-tv7", HD2) == null, "same compat, version, data: compatible");
-        check(h.incompatibility("hwnet-60-sim2", "0.3.0-tv7", HD2).startsWith("Different game versions"), "different compat: incompatible with the reason");
+        check(h.incompatibility("hwnet-60-sim1", "0.3.0-tv7", HD2).startsWith("Different game versions"), "different compat: incompatible with the reason");
         check(h.incompatibility(C, "0.3.0-tv6", HD2).contains("0.3.0-tv6") && h.incompatibility(C, "0.3.0-tv6", HD2).contains("0.3.0-tv7"), "different version: reason names both");
         check(h.incompatibility(C, "0.3.0-tv7", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb").startsWith("Game data differs"), "different data: incompatible with the reason");
         org.hedgewars.android.net.HostAdvert.Found junk = org.hedgewars.android.net.HostAdvert.parse("x", "10.0.0.1", 46633, new java.util.HashMap<String, byte[]>());
@@ -1459,11 +1462,195 @@ public class RelayTests {
         raw.put("tv", "12x".getBytes(StandardCharsets.UTF_8));
         raw.put("proto", new byte[0]);
         check(org.hedgewars.android.net.HostAdvert.parse("s", "h", 1, raw).tvPort == 0, "a garbled number reads as 0");
+        check("0".equals(t.get("pin")) && !h.pinRequired, "TXT pin=0 without a password; parsed as pinRequired false");
+        Map<String, String> tp = org.hedgewars.android.net.HostAdvert.txt("0.3.0-tv12", C, 60, "Fairphone 4", 8766, HD2, true);
+        Map<String, byte[]> rawp = new java.util.HashMap<>();
+        for (Map.Entry<String, String> e : tp.entrySet()) rawp.put(e.getKey(), e.getValue().getBytes(StandardCharsets.UTF_8));
+        check("1".equals(tp.get("pin")) && org.hedgewars.android.net.HostAdvert.parse("s", "h", 1, rawp).pinRequired, "TXT pin=1 with a password; parsed as pinRequired true");
+        rawp.remove("pin");
+        check(!org.hedgewars.android.net.HostAdvert.parse("s", "h", 1, rawp).pinRequired, "a record without pin (an older host) reads as no password");
+        rawp.put("pin", "yes".getBytes(StandardCharsets.UTF_8));
+        check(!org.hedgewars.android.net.HostAdvert.parse("s", "h", 1, rawp).pinRequired, "a garbled pin value reads as no password");
         check(org.hedgewars.android.net.HostAdvert.txt("v", "c", 60, new String(new char[500]).replace('\0', 'x'), 1, "").get("name").length() <= 100, "long values are cut");
         raw.put("name", "Pixel\u202E\u0007 7\u200B\n".getBytes(StandardCharsets.UTF_8));
         check("Pixel 7".equals(org.hedgewars.android.net.HostAdvert.parse("s", "h", 1, raw).name), "control and bidi characters are stripped from the name (Cc, Cf)");
         raw.put("name", "\u202E\u0001".getBytes(StandardCharsets.UTF_8));
         check("s".equals(org.hedgewars.android.net.HostAdvert.parse("s", "h", 1, raw).name), "a name of only control characters falls back to the service name");
+    }
+
+
+    // Game password ---------------------------------------------------------------------------
+
+    /** A phone join with an optional password; returns once the host has answered (a state) or refused (closed). */
+    static P phoneJoin(Fix f, String name, String pin, boolean watch, boolean host) throws Exception {
+        P h = new P();
+        RelayClient c = new RelayClient("127.0.0.1", f.port(), name, "tests", host,
+                watch ? new ArrayList<SetupModel.Team>() : Arrays.asList(team(name, 2, 0)), h).watch(watch);
+        if (host) c.hostSecret(f.secret);
+        if (pin != null) c.pin(pin);
+        c.connect();
+        waitFor(() -> h.state != null || !h.closed.isEmpty(), 3000);
+        h.client = c;
+        return h;
+    }
+
+    /** A TV viewer WebSocket request with the given extra query ("" or "pin=1234"); returns the socket after the handshake. */
+    static Socket viewerReq(Fix f, String query) throws Exception {
+        Socket s = new Socket("127.0.0.1", f.relay.viewerPort());
+        s.setSoTimeout(8000);
+        s.getOutputStream().write(("GET /" + (query.isEmpty() ? "" : "?" + query) + " HTTP/1.1\r\nHost: x\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n").getBytes(StandardCharsets.ISO_8859_1));
+        s.getOutputStream().flush();
+        readUntilBlank(s.getInputStream());
+        return s;
+    }
+
+    /** The first frame after the handshake: "data" for a binary frame, else "close code reason". */
+    static String firstFrame(Socket s) throws Exception {
+        int[] op = new int[1];
+        byte[] p = readWsFrame(s.getInputStream(), op);
+        if (p == null) return "none";
+        if (op[0] == 2) return "data";
+        if (op[0] == 8) return "close " + (p.length < 2 ? "empty" : (((p[0] & 0xff) << 8) | (p[1] & 0xff)) + " " + new String(p, 2, p.length - 2, StandardCharsets.UTF_8));
+        return "op" + op[0];
+    }
+
+    static boolean pinFlag(Fix f) throws Exception {
+        @SuppressWarnings("unchecked") Map<String, Object> j = (Map<String, Object>) Json.parse(statusBody(f));
+        return Boolean.TRUE.equals(j.get("pin"));
+    }
+
+    @SuppressWarnings("unchecked")
+    static void testGamePassword() throws Exception {
+        System.out.println("Game password: status flag, phones, TV viewers, lock");
+        long oldLock = Relay.pinLockMs;
+        Relay.pinLockMs = 1500;
+        try {
+            // Phones: no password set, then set.
+            Fix f = new Fix(20000, 1000);
+            check(!pinFlag(f), "GET shows pin false when no password is set");
+            P p0 = phoneJoin(f, "NoPin", null, false, false);
+            check(p0.state != null && p0.closed.isEmpty(), "no password set: a phone joins without a PIN");
+            P p0b = phoneJoin(f, "AnyPin", "0000", false, false);
+            check(p0b.state != null && p0b.closed.isEmpty(), "no password set: a pin in the hello is ignored");
+            p0.client.close(); p0b.client.close();
+            f.relay.setPin("0042");
+            check("0042".equals(f.relay.getPin()), "the PIN keeps its leading zeros");
+            check(pinFlag(f), "GET shows pin true when a password is set");
+            boolean threw = false;
+            try { f.relay.setPin("12a4"); } catch (IllegalArgumentException e) { threw = true; }
+            check(threw && "0042".equals(f.relay.getPin()), "a PIN that is not exactly 4 digits is refused");
+            P hst = phoneJoin(f, "HostPhone", null, false, true);
+            check(hst.state != null && hst.closed.isEmpty(), "the host's own loopback connection (with its secret) needs no PIN");
+            P pm = phoneJoin(f, "Missing", null, false, false);
+            check(!pm.closed.isEmpty() && pm.state == null && "password".equals(pm.refusedCode) && "Wrong password.".equals(pm.closed), "a phone without a PIN is refused with code password (" + pm.closed + ")");
+            P pw = phoneJoin(f, "Wrong", "1111", false, false);
+            check("password".equals(pw.refusedCode) && pw.state == null, "a phone with a wrong PIN is refused with code password");
+            P pws = phoneJoin(f, "WrongWatch", "1111", true, false);
+            check("password".equals(pws.refusedCode) && pws.state == null, "Join to watch with a wrong PIN is refused with code password");
+            P pr = phoneJoin(f, "Right", "0042", false, false);
+            check(pr.state != null && pr.refusedCode.isEmpty(), "a phone with the right PIN joins");
+            P prs = phoneJoin(f, "RightWatch", "0042", true, false);
+            check(prs.state != null && prs.refusedCode.isEmpty(), "Join to watch with the right PIN works");
+            check(!f.logged("0042") && !f.logged("1111"), "no PIN digits in the relay log");
+            // Brute force: 2 wrong so far from this address (Missing, Wrong, WrongWatch = 3), the right one cleared the count.
+            for (int i = 0; i < 4; i++) {
+                P w = phoneJoin(f, "W" + i, "9999", false, false);
+                check("password".equals(w.refusedCode), "wrong attempt " + (i + 1) + " after a right PIN: password, not locked");
+            }
+            P fifth = phoneJoin(f, "W5", null, false, false);
+            check("password".equals(fifth.refusedCode), "the 5th wrong or missing attempt is itself answered password");
+            long lockedAt = System.currentTimeMillis();
+            P locked = phoneJoin(f, "L1", "0042", false, false);
+            check("password-locked".equals(locked.refusedCode) && locked.state == null && locked.closed.startsWith("Too many wrong passwords. Try again in"), "afterwards the address is locked, even for the right PIN (" + locked.closed + ")");
+            Thread.sleep(700);
+            P locked2 = phoneJoin(f, "L2", "0042", true, false);
+            check("password-locked".equals(locked2.refusedCode), "a watch join during the lock is locked too");
+            Thread.sleep(Math.max(0, lockedAt + Relay.pinLockMs + 150 - System.currentTimeMillis()));
+            P after = phoneJoin(f, "After", "0042", false, false);
+            check(after.state != null && after.refusedCode.isEmpty(), "attempts during the lock did not extend it: the right PIN works once 30 s (here 1.5 s) have passed");
+            // the right PIN cleared the count: 4 more wrong ones do not lock
+            for (int i = 0; i < 4; i++) phoneJoin(f, "X" + i, "1234", false, false);
+            P still = phoneJoin(f, "StillOk", "0042", false, false);
+            check(still.state != null, "a right PIN clears the count: four more wrong ones then a right one still joins");
+            check(pinFlag(f), "GET never needs the PIN and is not an attempt");
+            for (int i = 0; i < 12; i++) statusBody(f);
+            P afterGets = phoneJoin(f, "AfterGets", "1234", false, false);
+            check("password".equals(afterGets.refusedCode), "twelve GETs were not counted as attempts: the next wrong PIN is plain password");
+            for (P q : new P[] { hst, pr, prs, after, still }) if (q.client != null) q.client.close();
+            f.stop();
+
+            // TV viewers: a running game.
+            Game g = new Game(20000, 1000);
+            g.f.relay.setPin("7305");
+            check(pinFlag(g.f), "GET shows pin true while a game runs");
+            int[] n = new int[1];
+            try (Socket s = viewerReq(g.f, "pin=7305")) {
+                String ff = firstFrame(s);
+                check(ff.equals("data") && waitFor(() -> g.f.relay.viewerCount() == 1, 2000), "a TV with the right PIN streams (" + ff + ")");
+            }
+            waitFor(() -> g.f.relay.viewerCount() == 0, 3000);
+            try (Socket s = viewerReq(g.f, "compat=" + org.hedgewars.android.net.Compat.VALUE + "&pin=7305")) {
+                check(firstFrame(s).equals("data"), "pin after compat, any order: streams");
+            }
+            waitFor(() -> g.f.relay.viewerCount() == 0, 3000);
+            try (Socket s = viewerReq(g.f, "")) {
+                String c = closeOf(s, n);
+                check(c.equals("4006 password") && n[0] == 0, "a TV without a PIN gets close 4006 password and no data frames (" + c + ", " + n[0] + " data)");
+                s.getOutputStream().write(maskedFrame(8, new byte[] { 0x0f, (byte) 0xa6 }, new byte[] { 1, 2, 3, 4 }));
+                s.getOutputStream().flush();
+                int after1;
+                try { after1 = s.getInputStream().read(); } catch (java.io.IOException e) { after1 = -3; }
+                check(after1 == -1, "the relay ends the connection after the TV's close reply (read " + after1 + ")");
+            }
+            check(g.f.relay.viewerCount() == 0, "a refused TV is never attached to the game");
+            try (Socket s = viewerReq(g.f, "pin=0000")) {
+                int[] n2 = new int[1];
+                String c = closeOf(s, n2);
+                check(c.equals("4006 password") && n2[0] == 0, "a TV with a wrong PIN gets 4006 password and no data (" + c + ")");
+            }
+            try (Socket s = viewerReq(g.f, "pin=73")) {
+                check(closeOf(s, new int[1]).equals("4006 password"), "a short PIN is wrong");
+            }
+            // Phones and TVs count together per address: 3 wrong so far here (missing, 0000, 73), then 1 phone, then the 5th from a TV
+            P pw2 = phoneJoin(g.f, "Late", "5555", false, false);
+            check("password".equals(pw2.refusedCode), "a phone's wrong PIN counts with the TV's (4th)");
+            long t5 = System.currentTimeMillis();
+            try (Socket s = viewerReq(g.f, "pin=1")) {
+                check(closeOf(s, new int[1]).equals("4006 password"), "the 5th wrong PIN (a TV) is answered 4006");
+            }
+            try (Socket s = viewerReq(g.f, "pin=7305")) {
+                int[] n3 = new int[1];
+                String c = closeOf(s, n3);
+                check(c.equals("4007 password-locked") && n3[0] == 0, "afterwards the address is locked: even the right PIN gets 4007 password-locked (" + c + ")");
+            }
+            P pw3 = phoneJoin(g.f, "Late2", "7305", false, false);
+            check("password-locked".equals(pw3.refusedCode), "the lock covers phones too");
+            Thread.sleep(Math.max(0, t5 + Relay.pinLockMs + 200 - System.currentTimeMillis()));
+            try (Socket s = viewerReq(g.f, "pin=7305")) {
+                check(firstFrame(s).equals("data"), "after the lock a right PIN streams again");
+            }
+            waitFor(() -> g.f.relay.viewerCount() == 0, 3000);
+            g.f.relay.setPin(null);
+            try (Socket s = viewerReq(g.f, "pin=1234")) {
+                check(firstFrame(s).equals("data"), "no password set: a pin parameter is ignored and the TV streams");
+            }
+            check(!pinFlag(g.f), "GET shows pin false again after the password is turned off");
+            check(!g.f.logged("7305"), "no PIN digits in the relay log (TV)");
+            g.end();
+            // No game running: still 503, PIN or not.
+            Fix f3 = new Fix(20000, 1000);
+            f3.relay.setPin("1234");
+            try (Socket s = new Socket("127.0.0.1", f3.relay.viewerPort())) {
+                s.setSoTimeout(3000);
+                s.getOutputStream().write("GET /?pin=1234 HTTP/1.1\r\nHost: x\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n".getBytes(StandardCharsets.ISO_8859_1));
+                byte[] b = new byte[64];
+                int r = s.getInputStream().read(b);
+                check(r > 12 && new String(b, 0, 12, StandardCharsets.ISO_8859_1).equals("HTTP/1.1 503"), "no game running: the viewer path still answers 503");
+            }
+            f3.stop();
+        } finally {
+            Relay.pinLockMs = oldLock;
+        }
     }
 
     static void testResolveQueue() throws Exception {
@@ -1640,6 +1827,7 @@ public class RelayTests {
         testCompat();
         testDataDigest();
         testHostAdvert();
+        testGamePassword();
         testResolveQueue();
         testLinkLiveness();
         testHostNetworkLoss();

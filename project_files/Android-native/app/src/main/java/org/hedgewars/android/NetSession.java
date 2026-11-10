@@ -177,7 +177,7 @@ final class NetSession {
     static void connect(Context c, String host, int port, String name, boolean isHost, boolean watch) throws IOException {
         leave();
         final int gen;
-        synchronized (NetSession.class) { gen = ++connectGen; }
+        synchronized (NetSession.class) { gen = ++connectGen; pendingIsHost = isHost; }
         closedReason = "";
         notice = "";
         state = null;
@@ -192,7 +192,6 @@ final class NetSession {
             // The phone left, or another join started, while this one was being set up: give up before connecting.
             if (gen != connectGen) throw new Cancelled();
             pending = rc;                        // leave() and cancelPending() close it, which ends a join still retrying
-            pendingIsHost = isHost;
         }
         try {
             if (isHost) rc.connect();            // loopback: no reason to retry
@@ -204,6 +203,7 @@ final class NetSession {
         } catch (IOException e) {
             synchronized (NetSession.class) {
                 if (pending == rc) pending = null;
+                if (gen == connectGen) pendingIsHost = false;
                 if (gen != connectGen) throw new Cancelled();      // a failure caused by the cancel is not "could not reach"
             }
             throw e;
@@ -217,6 +217,7 @@ final class NetSession {
                 throw new Cancelled();
             }
             pending = null;
+            pendingIsHost = false;
             client = rc;                         // in the same lock, so a leave() from now on sees it
             joined = true;
             watching = watch;

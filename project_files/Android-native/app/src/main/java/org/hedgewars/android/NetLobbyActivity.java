@@ -686,7 +686,9 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
                 if (r == null) throw new java.io.IOException(HostService.error.isEmpty() ? "The relay did not start." : HostService.error);
                 NetSession.connect(getApplicationContext(), "127.0.0.1", r.port(), nick, true);
             } catch (NetSession.Cancelled e) {
-                // hosting was stopped while connecting: the service is already stopping
+                // Stop hosting, or something else left, while the host connected: without its seat the relay is no use,
+                // so stop the service (harmless when it is already stopping).
+                stopService(new Intent(this, HostService.class));
             } catch (Exception e) {
                 problem = "Hosting failed: " + e.getMessage();
                 stopService(new Intent(this, HostService.class));
@@ -720,6 +722,7 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
     }
 
     private void connectTo(final String host, final int port, final boolean watch) {
+        if (connecting) return;                  // one connect at a time (a join must not overtake the host's own connect)
         final String nick = name.isEmpty() ? Build.MODEL : name;
         connecting = true;
         problem = "";

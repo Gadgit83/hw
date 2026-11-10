@@ -89,6 +89,14 @@ var
     buttonsDown: Longword;
     targetting, targetted: boolean; //true when targetting an airstrike or the like
 
+// ParseTeamCommand reads CurrentHedgehog^.BotLevel; a team can be removed or the game can end while a finger is
+// down, leaving no current hedgehog. A touch then does nothing instead of dereferencing nil.
+procedure TouchTeamCommand(s: shortstring);
+begin
+if (CurrentTeam <> nil) and (CurrentHedgehog <> nil) then
+    ParseTeamCommand(s);
+end;
+
 procedure onTouchDown(x, y: Single; pointerId: Int64);
 var
     finger: PTouch_Data;
@@ -119,28 +127,28 @@ end;
 
 if isOnWidget(fireButton, finger^) then
     begin
-    ParseTeamCommand('+attack');
+    TouchTeamCommand('+attack');
     moveCursor:= false;
     finger^.pressedWidget:= @fireButton;
     exit;
     end;
 if isOnWidget(arrowLeft, finger^) then
     begin
-    ParseTeamCommand('+left');
+    TouchTeamCommand('+left');
     moveCursor:= false;
     finger^.pressedWidget:= @arrowLeft;
     exit;
     end;
 if isOnWidget(arrowRight, finger^) then
     begin
-    ParseTeamCommand('+right');
+    TouchTeamCommand('+right');
     moveCursor:= false;
     finger^.pressedWidget:= @arrowRight;
     exit;
     end;
 if isOnWidget(arrowUp, finger^) then
     begin
-    ParseTeamCommand('+up');
+    TouchTeamCommand('+up');
     aimingUp:= true;
     moveCursor:= false;
     finger^.pressedWidget:= @arrowUp;
@@ -148,7 +156,7 @@ if isOnWidget(arrowUp, finger^) then
     end;
 if isOnWidget(arrowDown, finger^) then
     begin
-    ParseTeamCommand('+down');
+    TouchTeamCommand('+down');
     aimingDown:= true;
     moveCursor:= false;
     finger^.pressedWidget:= @arrowDown;
@@ -169,11 +177,11 @@ if isOnWidget(utilityWidget, finger^) then
     moveCursor:= false;
     if(CurrentHedgehog <> nil) then
         begin
-        if Ammoz[CurrentHedgehog^.CurAmmoType].Ammo.Propz and ammoprop_Timerable <> 0 then
+        if (CurrentHedgehog^.Gear <> nil) and (Ammoz[CurrentHedgehog^.CurAmmoType].Ammo.Propz and ammoprop_Timerable <> 0) then
             begin
             tmp:= HHGetTimerMsg(CurrentHedgehog^.Gear);
             if tmp <> MSGPARAM_INVALID then
-                ParseTeamCommand('/timer ' + inttostr(tmp mod 5 + 1));
+                TouchTeamCommand('/timer ' + inttostr(tmp mod 5 + 1));
             end;
         end;
     exit;
@@ -185,13 +193,13 @@ if isOnWidget(utilityWidget2, finger^) then
     moveCursor:= false;
     if(CurrentHedgehog <> nil) then
         begin
-        if Ammoz[CurrentHedgehog^.CurAmmoType].Ammo.Propz and ammoprop_SetBounce <> 0 then
+        if (CurrentHedgehog^.Gear <> nil) and (Ammoz[CurrentHedgehog^.CurAmmoType].Ammo.Propz and ammoprop_SetBounce <> 0) then
             begin
             tmp := HHGetBouncinessMsg(CurrentHedgehog^.Gear);
             if tmp <> MSGPARAM_INVALID then
                 begin
-                ParseTeamCommand('+precise');
-                ParseTeamCommand('timer ' + inttostr(tmp mod 5 + 1));
+                TouchTeamCommand('+precise');
+                TouchTeamCommand('timer ' + inttostr(tmp mod 5 + 1));
                 bounceButtonPressed:= true;
                 end;
             end;
@@ -316,8 +324,8 @@ if not(fingerHasMoved(finger^)) then
 if aimingCrosshair then
     begin
     aimingCrosshair:= false;
-    ParseTeamCommand('-up');
-    ParseTeamCommand('-down');
+    TouchTeamCommand('-up');
+    TouchTeamCommand('-down');
     dec(buttonsDown);
     end;
 
@@ -327,29 +335,29 @@ if (buttonsDown > 0) and (widget <> nil) then
     dec(buttonsDown);
 
     if widget = @arrowLeft then
-        ParseTeamCommand('-left');
+        TouchTeamCommand('-left');
 
     if widget = @arrowRight then
-        ParseTeamCommand('-right');
+        TouchTeamCommand('-right');
 
     if widget = @arrowUp then
-        ParseTeamCommand('-up');
+        TouchTeamCommand('-up');
 
     if widget = @arrowDown then
-        ParseTeamCommand('-down');
+        TouchTeamCommand('-down');
 
     if widget = @fireButton then
-        ParseTeamCommand('-attack');
+        TouchTeamCommand('-attack');
 
     if widget = @utilityWidget then
         if (CurrentHedgehog <> nil)then
             if(Ammoz[CurrentHedgehog^.CurAmmoType].Ammo.Propz and ammoprop_NeedTarget <> 0)then
                 begin
-                ParseTeamCommand('put');
+                TouchTeamCommand('put');
                 targetted:= true;
                 end
             else if (CurAmmoGear <> nil) and (CurAmmoGear^.AmmoType = amSwitch) then
-                ParseTeamCommand('switch')
+                TouchTeamCommand('switch')
             else WriteLnToConsole(inttostr(ord(Ammoz[CurrentHedgehog^.CurAmmoType].NameId)) + ' ' + inttostr(ord(sidSwitch)));
     end;
 
@@ -368,7 +376,7 @@ procedure onTouchLongClick(finger: TTouch_Data);
 begin
 if isOnWidget(jumpWidget, finger) then
     begin
-    ParseTeamCommand('ljump');
+    TouchTeamCommand('ljump');
     exit;
     end;
 end;
@@ -382,7 +390,7 @@ if bShowAmmoMenu then
         begin
         CursorPoint.X:= round(finger.x / cMenuScale);
         CursorPoint.Y:= round(finger.y / cMenuScale);
-        ParseTeamCommand('put');
+        TouchTeamCommand('put');
         end
     else
         bShowAmmoMenu:= false;
@@ -397,7 +405,7 @@ if isOnCurrentHog(finger) or isOnWidget(AMWidget, finger) then
 
 if isOnWidget(jumpWidget, finger) then
     begin
-    ParseTeamCommand('hjump');
+    TouchTeamCommand('hjump');
     exit;
     end;
 end;
@@ -497,6 +505,14 @@ var
     deltaAngle: LongInt;
 begin
 invertCursor := not(bShowAmmoMenu or targetting);
+if aimingCrosshair and ((CurrentHedgehog = nil) or (CurrentHedgehog^.Gear = nil)) then
+    begin
+    // the hedgehog is gone (team removed, game over) while the marker is held: stop steering. The flag stays until the
+    // finger lifts, so the finger count in buttonsDown remains balanced.
+    aimingUp:= false;
+    aimingDown:= false;
+    end
+else
 if aimingCrosshair then
     if CurrentHedgehog^.Gear <> nil then
         begin
@@ -506,12 +522,12 @@ if aimingCrosshair then
                 if(aimingUp)then
                     begin
                     aimingUp:= false;
-                    ParseTeamCommand('-up');
+                    TouchTeamCommand('-up');
                     end;
                 if(aimingDown)then
                     begin
                     aimingDown:= false;
-                    ParseTeamCommand('-down');
+                    TouchTeamCommand('-down');
                     end
             end
         else
@@ -521,25 +537,25 @@ if aimingCrosshair then
                 if aimingUp then
                     begin
                     aimingUp:= false;
-                    ParseTeamCommand('-up');
+                    TouchTeamCommand('-up');
                     end;
                 if(aimingDown)then
                     begin
                     aimingDown:= true;
-                    ParseTeamCommand('-down');
+                    TouchTeamCommand('-down');
                     end
                 end
             else
                 begin
                 if aimingDown then
                     begin
-                    ParseTeamCommand('-down');
+                    TouchTeamCommand('-down');
                     aimingDown:= false;
                     end;
                 if aimingUp then
                     begin
                     aimingUp:= true;
-                    ParseTeamCommand('+up');
+                    TouchTeamCommand('+up');
                     end;
                 end;
             end;
@@ -548,19 +564,19 @@ if aimingCrosshair then
         begin
         if aimingUp then
             begin
-            ParseTeamCommand('-up');
+            TouchTeamCommand('-up');
             aimingUp:= false;
             end;
         if aimingDown then
             begin
-            ParseTeamCommand('-down');
+            TouchTeamCommand('-down');
             aimingDown:= false;
             end;
         end;
 
 if bounceButtonPressed then
     begin
-    ParseTeamCommand('-precise');
+    TouchTeamCommand('-precise');
     bounceButtonPressed:= false;
     end;
 end;
@@ -582,7 +598,7 @@ procedure aim(finger: TTouch_Data);
 var
     hogX, hogY, touchX, touchY, deltaX, deltaY: LongInt;
 begin
-    if CurrentHedgehog^.Gear <> nil then
+    if (CurrentHedgehog <> nil) and (CurrentHedgehog^.Gear <> nil) then
         begin
         touchX := 0;//avoid compiler hint
         touchY := 0;
@@ -593,7 +609,8 @@ begin
         deltaX := abs(TouchX-HogX);
         deltaY := TouchY-HogY;
 
-        targetAngle:= (Round(DeltaY / sqrt(sqr(deltaX) + sqr(deltaY)) * 2048) + 2048) div 2;
+        if (deltaX <> 0) or (deltaY <> 0) then
+            targetAngle:= (Round(DeltaY / sqrt(sqr(deltaX) + sqr(deltaY)) * 2048) + 2048) div 2;
         end; //if CurrentHedgehog^.Gear <> nil
 end;
 
@@ -625,6 +642,9 @@ function isOnCurrentHog(finger: TTouch_Data): boolean;
 var
     x, y: LongInt;
 begin
+    isOnCurrentHog:= false;
+    if CurrentHedgehog = nil then exit;
+    if CurrentHedgehog^.Gear = nil then exit;
     x:= 0;
     y:= 0;
     convertToFingerCoord(x, y, hwRound(CurrentHedgehog^.Gear^.X), hwRound(CurrentHedgehog^.Gear^.Y));

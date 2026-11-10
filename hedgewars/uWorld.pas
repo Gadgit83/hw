@@ -2395,7 +2395,17 @@ procedure SetUtilityWidgetState(ammoType: TAmmoType);
 begin
 {$IFDEF USE_TOUCH_INTERFACE}
 if(ammoType = amNothing)then
+    begin
+    if CurrentHedgehog = nil then
+        begin
+        if utilityWidget.show then
+            animateWidget(@utilityWidget, true, false);
+        if utilityWidget2.show then
+            animateWidget(@utilityWidget2, true, false);
+        exit;
+        end;
     ammoType:= CurrentHedgehog^.CurAmmoType;
+    end;
 
 if(CurrentHedgehog <> nil)then
     if ((Ammoz[ammoType].Ammo.Propz and ammoprop_Timerable) <> 0) and (ammoType <> amDrillStrike) then

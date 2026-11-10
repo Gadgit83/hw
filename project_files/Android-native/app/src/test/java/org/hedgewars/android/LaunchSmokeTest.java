@@ -508,7 +508,7 @@ public class LaunchSmokeTest {
                 "/192.168.1.106:36617: round trip 12.3 ms (average 15.0, best 9.0, worst 41.0, 5 pongs of 5 pings), 3 frames behind (deepest 7), watching for 12 s");
         NetSession.hostInfo = new NetSession.HostInfo(java.util.Arrays.asList("192.168.1.57"), 8766, 1, "", "Game 1: 4 turns, log 120 messages", lines);
         String text = launch(NetLobbyActivity.class, null, 600);
-        assertTrue("TV address is shown: " + text, text.contains("ws://192.168.1.57:8766") && text.contains("TVs watching now: 1"));
+        assertTrue("TV address is shown: " + text, text.contains("ws://192.168.1.57:8766") && text.contains("1 TV watching"));
         assertTrue("per-TV round trip and queue depth are shown: " + text,
                 text.contains("192.168.1.106") && text.contains("round trip 12.3 ms") && text.contains("3 frames behind"));
         // Without a snapshot (before the first tick) the screen says so instead of claiming there is no Wi-Fi.

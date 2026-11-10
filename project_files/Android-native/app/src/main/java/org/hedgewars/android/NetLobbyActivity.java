@@ -64,9 +64,19 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
         scroll = new ScrollView(this);
         content = new LinearLayout(this);
         content.setOrientation(LinearLayout.VERTICAL);
-        content.setPadding(ui.dp(16), ui.dp(8), ui.dp(16), ui.dp(16));
+        content.setPadding(ui.dp(Ui.GUTTER), ui.dp(2), ui.dp(Ui.GUTTER), ui.dp(8));
         scroll.addView(content, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        root.addView(scroll, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+        // The same bar as the Options screen: Back on the left, the title beside it, fixed above the scrolling cards.
+        LinearLayout top = ui.row();
+        top.setPadding(ui.dp(Ui.GUTTER), ui.dp(2), ui.dp(Ui.GUTTER), 0);
+        top.addView(ui.button("\u2039 Back", false, v -> onBackPressed()), Ui.lp(ViewGroup.LayoutParams.WRAP_CONTENT, ui.dp(Ui.TOUCH_DP)));
+        TextView title = ui.text(BuildConfig.APP_NAME + " network game", 18, Color.WHITE);
+        title.setTypeface(Typeface.DEFAULT_BOLD);
+        title.setSingleLine(true);
+        title.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        top.addView(title, ui.margins(ui.weight(1f), 12, 0, 0, 0));
+        root.addView(top);
+        root.addView(ui.scrollWithHint(scroll), new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
         setContentView(root);
         ui.trackInsets(root, (l, t, r, bt, kb) -> root.setPadding(l, t, r, bt));
         NetSession.listener = this;
@@ -124,14 +134,15 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
             return;
         }
         final boolean host = NetSession.hosting;
-        new android.app.AlertDialog.Builder(this)
-                .setTitle(host ? "Stop hosting?" : NetSession.watching ? "Stop watching?" : "Leave the network game?")
-                .setMessage(host ? "Every phone that has joined is disconnected." : "You are removed from the lobby.")
-                .setPositiveButton(host ? "Stop hosting" : "Leave", (d, w) -> {
+        final boolean watch = NetSession.watching;
+        Ui.dialog(this)
+                .setTitle(host ? "Stop hosting?" : watch ? "Stop watching?" : "Leave the network game?")
+                .setMessage(host ? "Every phone that has joined is disconnected." : watch ? "You stop watching and are removed from the lobby." : "You are removed from the lobby.")
+                .setPositiveButton(host ? "Stop hosting" : watch ? "Stop watching" : "Leave", (d, w) -> {
                     leaveOrStop();
                     finish();
                 })
-                .setNegativeButton("Stay", null)
+                .setNegativeButton(watch ? "Keep watching" : "Stay", null)
                 .show();
     }
 
@@ -177,12 +188,6 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
         hostsBox = null;
         nameField = null;
         addressField = null;
-        TextView title = ui.text(BuildConfig.APP_NAME + " network game", 22, Color.WHITE);
-        title.setTypeface(Typeface.DEFAULT_BOLD);
-        LinearLayout top = ui.row();
-        top.addView(title, ui.weight(1f));
-        top.addView(ui.button("Back", false, v -> onBackPressed()));
-        content.addView(top);
         if (!problem.isEmpty()) content.addView(coloured(problem, Ui.DANGER));
         String closed = NetSession.closedReason;
         if (!closed.isEmpty() && !NetSession.joined) content.addView(coloured(closed, Ui.DANGER));
@@ -202,30 +207,55 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
     }
 
     private void choose() {
-        LinearLayout card = ui.card();
-        card.addView(ui.heading("Before you start"));
-        card.addView(ui.hint("All phones on the same Wi-Fi, same app version. Set up your own teams on the Teams tab of the "
+        boolean wide = getResources().getConfiguration().screenWidthDp >= 700;
+        LinearLayout start = ui.card();
+        LinearLayout before = ui.card();
+        before.addView(ui.heading("Before you start"));
+        before.addView(ui.hint("All phones on the same Wi-Fi, same app version. Set up your own teams on the Teams tab of the "
                 + "setup screen first. The host's Map and Rules tabs decide the game."));
-        card.addView(ui.heading("Your name"));
+        start.addView(ui.heading("Your name"));
         nameField = ui.field(name, "Player name");
-        card.addView(nameField);
-        card.addView(ui.heading("Host"));
-        card.addView(ui.button(connecting ? "Starting..." : "Host network game", true, v -> host()), Ui.lp(ViewGroup.LayoutParams.MATCH_PARENT, ui.dp(52)));
-        hostsBox = new LinearLayout(this);
-        hostsBox.setOrientation(LinearLayout.VERTICAL);
-        card.addView(hostsBox);
+        start.addView(nameField);
+        start.addView(ui.heading("Host"));
+        start.addView(ui.button(connecting ? "Starting..." : "Host network game", true, v -> host()), Ui.lp(ViewGroup.LayoutParams.MATCH_PARENT, ui.dp(52)));
+        // The list of hosts is a card of its own: beside the other two cards when the screen is wide, so Join by address stays in view.
+        hostsBox = ui.card();
         renderHosts();
-        card.addView(ui.heading("Join by address"));
+        LinearLayout join = ui.card();
+        join.addView(ui.heading("Join by address"));
         addressField = ui.field(address, "Host address, for example 192.168.1.20:46633");
         addressField.setInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
-        card.addView(addressField);
-        card.addView(ui.hint("Play joins with your teams. Watch joins without any: you see the game on this phone, with no controls, "
+        join.addView(addressField);
+        join.addView(ui.hint("Play joins with your teams. Watch joins without any: you see the game on this phone, with no controls, "
                 + "and you do not count as a player."));
         LinearLayout jb = ui.row();
         jb.addView(ui.button("Join to play", true, v -> join(false)), ui.weight(1f));
         jb.addView(ui.button("Join to watch", true, v -> join(true)), ui.margins(Ui.lp(0, ui.dp(52), 1f), 8, 0, 0, 0));
-        card.addView(jb, ui.margins(Ui.lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT), 0, 8, 0, 0));
-        content.addView(card, ui.margins(Ui.lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT), 0, 8, 0, 0));
+        join.addView(jb, ui.margins(Ui.lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT), 0, 8, 0, 0));
+        if (wide) {
+            LinearLayout cols = new LinearLayout(this);
+            cols.setBaselineAligned(false);
+            LinearLayout left = new LinearLayout(this);
+            left.setOrientation(LinearLayout.VERTICAL);
+            left.addView(start, full());
+            left.addView(join, ui.margins(full(), 0, 8, 0, 0));
+            cols.addView(left, ui.weight(1f));
+            LinearLayout right = new LinearLayout(this);
+            right.setOrientation(LinearLayout.VERTICAL);
+            right.addView(hostsBox, full());
+            right.addView(before, ui.margins(full(), 0, 8, 0, 0));
+            cols.addView(right, ui.margins(Ui.lp(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f), 8, 0, 0, 0));
+            content.addView(cols, ui.margins(full(), 0, 6, 0, 0));
+        } else {
+            content.addView(before, ui.margins(full(), 0, 6, 0, 0));
+            content.addView(start, ui.margins(full(), 0, 8, 0, 0));
+            content.addView(hostsBox, ui.margins(full(), 0, 8, 0, 0));
+            content.addView(join, ui.margins(full(), 0, 8, 0, 0));
+        }
+    }
+
+    private static LinearLayout.LayoutParams full() {
+        return Ui.lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
     }
 
     // Finding hosts ------------------------------------------------------------------------------
@@ -353,6 +383,7 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
             Button play = ui.button("Join to play", true, v -> pickHost(h, false));
             play.setEnabled(why == null);
             Button watch = ui.button("Join to watch", false, v -> pickHost(h, true));
+            watch.setBackground(ui.inset(ui.pressable(Ui.FIELD, Color.rgb(40, 60, 46), 9), 0, (Ui.TOUCH_DP - Ui.LOOK_DP) / 2));   // the row is as light as a plain button
             watch.setEnabled(why == null);
             bt.addView(play, ui.weight(1f));
             bt.addView(watch, ui.margins(Ui.lp(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f), 8, 0, 0, 0));
@@ -379,6 +410,8 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
         Map<String, Object> st = NetSession.state;
         LinearLayout card = ui.card();
         boolean host = NetSession.hosting;
+        // The long explanations are collected and shown at the end of the card, so the addresses, the TVs and the phones come first.
+        List<String> notes = new java.util.ArrayList<>();
         if (host) {
             // All of this comes from a snapshot that a background ticker makes: listing the interfaces and reading the
             // relay take locks and must not run on the UI thread.
@@ -386,39 +419,44 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
             List<String> addr = hi == null ? new java.util.ArrayList<String>() : hi.addresses;
             StringBuilder a = new StringBuilder();
             for (String s : addr) a.append(a.length() == 0 ? "" : "   or   ").append(s).append(':').append(Relay.PHONE_PORT);
-            // The TV address first and biggest: a one-phone host with the TV watching is the main use.
+            // The TV address first: a one-phone host with the TV watching is the main use.
             card.addView(ui.heading("TV viewer address"));
             if (hi == null) {
                 card.addView(ui.hint("Looking for the Wi-Fi address..."));
             } else if (hi.viewerPort > 0) {
                 StringBuilder w = new StringBuilder();
                 for (String s : addr) w.append(w.length() == 0 ? "" : "\n").append("ws://").append(s).append(':').append(hi.viewerPort);
-                TextView tv = ui.text(addr.isEmpty() ? NO_WIFI : w.toString(), 28, Color.WHITE);
+                TextView tv = ui.text(addr.isEmpty() ? NO_WIFI : w.toString(), 20, Color.WHITE);
                 tv.setTypeface(Typeface.DEFAULT_BOLD);
                 tv.setTextIsSelectable(true);
-                card.addView(tv);
-                card.addView(ui.hint("TVs watching now: " + hi.viewers + ", waiting for a game: " + hi.waiting
-                        + ". The TV finds this phone by itself on the same Wi-Fi. This address is the fallback: open the TV page with ?ws="
-                        + (addr.isEmpty() ? "ws://IP:" + hi.viewerPort : "ws://" + addr.get(0) + ":" + hi.viewerPort)
-                        + " (or set HW_WS_URL in the page) if it does not. The TV keeps trying until a game is started."));
+                card.addView(tv, ui.margins(full(), 2, 0, 0, 2));
+                // Watching and waiting TVs look different: green with a count for those on the game, amber for those still waiting.
+                LinearLayout chips = ui.row();
+                chips.addView(ui.chip(hi.viewers + (hi.viewers == 1 ? " TV watching" : " TVs watching"),
+                        hi.viewers > 0 ? Color.rgb(46, 125, 80) : Ui.PANEL_HI, Color.WHITE));
+                chips.addView(ui.chip(hi.waiting + " waiting for a game", hi.waiting > 0 ? Color.rgb(150, 100, 20) : Ui.PANEL_HI, Color.WHITE),
+                        ui.margins(Ui.lp(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT), 8, 0, 0, 0));
+                card.addView(chips, ui.margins(full(), 0, 4, 0, 2));
                 for (String vl : hi.viewerLines) {
-                    TextView t = ui.text("TV " + vl, 12, Color.WHITE);
-                    t.setTypeface(Typeface.MONOSPACE);
-                    card.addView(t);
+                    TextView t = ui.text("Watching: TV " + vl, 12, Color.rgb(160, 225, 180));
+                    card.addView(t, ui.margins(full(), 2, 2, 0, 0));
                 }
+                notes.add("The TV finds this phone by itself on the same Wi-Fi. The ws:// address is the fallback: open the TV page with ?ws="
+                        + (addr.isEmpty() ? "ws://IP:" + hi.viewerPort : "ws://" + addr.get(0) + ":" + hi.viewerPort)
+                        + " (or set HW_WS_URL in the page) if it does not. The TV keeps trying until a game is started.");
                 if (!hi.viewerLines.isEmpty()) {
-                    card.addView(ui.hint("Round trip is relay to TV and back (a WebSocket ping every 2 s). Frames behind is the TV's queue at the relay: "
-                            + "it grows when the TV cannot keep up. It does not include the time the TV needs to draw."));
+                    notes.add("Round trip is relay to TV and back (a WebSocket ping every 2 s). Frames behind is the TV's queue at the relay: "
+                            + "it grows when the TV cannot keep up. It does not include the time the TV needs to draw.");
                 }
             } else {
                 card.addView(coloured(hi.viewerError.isEmpty() ? "The TV viewer endpoint is not running." : hi.viewerError, Ui.DANGER));
             }
             card.addView(ui.heading("Hosting: address for other phones"));
-            TextView big = ui.text(hi == null ? "..." : addr.isEmpty() ? NO_WIFI : a.toString(), 18, Color.WHITE);
+            TextView big = ui.text(hi == null ? "..." : addr.isEmpty() ? NO_WIFI : a.toString(), 16, Color.WHITE);
             big.setTypeface(Typeface.DEFAULT_BOLD);
-            card.addView(big);
+            card.addView(big, ui.margins(full(), 2, 0, 0, 0));
             if (!NetSession.nsdStatus.isEmpty()) card.addView(ui.hint(NetSession.nsdStatus));
-            card.addView(ui.hint("Other phones normally find this phone by themselves on the same Wi-Fi (Join list). If they do not, they type this address (Join to play or Join to watch). Not needed for a one-phone game with the TV."));
+            notes.add("Other phones normally find this phone by themselves on the same Wi-Fi (Join list). If they do not, they type this address (Join to play or Join to watch). Not needed for a one-phone game with the TV.");
         } else {
             card.addView(ui.heading(NetSession.watching ? "Joined as a watcher" : "Joined"));
             card.addView(ui.text("Host " + NetSession.target + (st == null ? "" : " (" + Json.str(st, "host", "") + ")"), 18, Color.WHITE));
@@ -429,7 +467,7 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
         NetSession.HostInfo live = NetSession.hostInfo;
         if (host && live != null && playing && !live.live.isEmpty()) card.addView(ui.hint(live.live));
         long watchingN = st == null ? 0 : Json.num(st, "watching", 0);
-        if (host) card.addView(ui.text("Watching: " + watchingN, 16, Color.WHITE));
+        if (host) card.addView(ui.hint("Phones watching: " + watchingN));
         card.addView(ui.heading("Phones and teams"));
         if (st != null) {
             long you = Json.num(st, "you", -1);
@@ -462,7 +500,7 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
                 if (away.isEmpty()) {
                     startNow();
                 } else {
-                    new android.app.AlertDialog.Builder(this)
+                    Ui.dialog(this)
                             .setTitle("Not everyone is waiting")
                             .setMessage(away + " not on the Network screen. A phone that is somewhere else gets a notification to tap, "
                                     + "but may be late. Start anyway?")
@@ -501,7 +539,8 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
         card.addView(ui.hint(host ? "Your teams and the map and rules come from the setup screen. Leaving the game screen does not stop hosting."
                 : NetSession.watching ? "You are watching: no teams, no controls. The game starts on this phone when the host presses Start, or at once if one is running."
                 : "Your teams come from the Teams tab. Wait for the host to press Start."));
-        content.addView(card, ui.margins(Ui.lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT), 0, 8, 0, 0));
+        for (String n : notes) card.addView(ui.hint(n), ui.margins(full(), 0, 4, 0, 0));
+        content.addView(card, ui.margins(Ui.lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT), 0, 6, 0, 0));
     }
 
     private static void startNow() {

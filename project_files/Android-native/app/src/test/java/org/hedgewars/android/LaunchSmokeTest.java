@@ -279,7 +279,7 @@ public class LaunchSmokeTest {
         TestSupport.resetStatics();
         netState(LOBBY_WATCH.replace("\"you\":3", "\"you\":1"), true);
         String host = launch(NetLobbyActivity.class, null, 600);
-        assertTrue("the host sees how many watch and who: " + host, host.contains("Watching: 1") && host.contains("Tablet") && host.contains("Start game"));
+        assertTrue("the host sees how many watch and who: " + host, host.contains("Phones watching: 1") && host.contains("Tablet") && host.contains("Start game"));
         System.out.println("SDK " + android.os.Build.VERSION.SDK_INT + ": NetLobbyActivity watch path ok");
     }
 
@@ -372,13 +372,13 @@ public class LaunchSmokeTest {
         java.util.List<android.widget.Button> play = new java.util.ArrayList<>(), watch = new java.util.ArrayList<>();
         buttons(root, "Join to play", play);
         buttons(root, "Join to watch", watch);
-        // three host rows and the typed-address buttons; the compatible host comes first
+        // the typed-address buttons (left column, so first in the view tree) and three host rows; the compatible host comes first of those
         assertTrue("one play and one watch button per host plus the address ones: " + play.size(), play.size() == 4 && watch.size() == 4);
-        assertTrue("the compatible host can be joined", play.get(0).isEnabled() && watch.get(0).isEnabled());
-        assertTrue("the incompatible hosts cannot", !play.get(1).isEnabled() && !play.get(2).isEnabled() && !watch.get(1).isEnabled() && !watch.get(2).isEnabled());
-        assertTrue("the typed address entry stays", text.contains("Join by address") && play.get(3).isEnabled());
+        assertTrue("the compatible host can be joined", play.get(1).isEnabled() && watch.get(1).isEnabled());
+        assertTrue("the incompatible hosts cannot", !play.get(2).isEnabled() && !play.get(3).isEnabled() && !watch.get(2).isEnabled() && !watch.get(3).isEnabled());
+        assertTrue("the typed address entry stays", text.contains("Join by address") && play.get(0).isEnabled());
         // one tap on the compatible host connects (nothing listens on 127.0.0.1:1, so the failure message proves the attempt)
-        play.get(0).performClick();
+        play.get(1).performClick();
         TestSupport.settle(1500);
         String after = TestSupport.texts(a.getWindow().getDecorView());
         assertTrue("the tap tried to reach the host: " + after, after.contains("Could not reach 127.0.0.1:1"));

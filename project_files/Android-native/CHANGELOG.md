@@ -11,6 +11,7 @@ Only some builds were put on a phone, so a version below is a build that was mad
 ### Fixed
 
 - The TV saw close code 1006 with no reason at the end of every game, although the relay sent 4001 or 4002: after its close frame the relay held the connection open for 2 s, and the TV's WebView then reported the close as abnormal. The relay now ends the connection as soon as the TV answers its close frame (5 s at most if the TV never answers), and sends nothing after the close frame. The relay tests check this the way a browser behaves (it failed at 2001 ms before the fix, 0 ms after).
+- A TV that went away (killed, Wi-Fi lost) was sometimes recorded as "connection closed" in the game report, not as gone: the relay now records why before letting its last reply out (net-test `viewerflap` passes again).
 - Network, Hosts on this Wi-Fi: this phone's own host no longer shows in the list for a few seconds after Stop hosting (a phone cannot join itself).
 
 ## 0.3.0-tv8b (112): "More below" never hides the last row (test build)

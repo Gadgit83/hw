@@ -39,7 +39,9 @@ final class NsdFinder implements HostDiscovery {
         if (!running) return;
         stop();
         Listener l = listener;
-        if (l != null) l.status(visible() == 0 ? "No host found on this Wi-Fi." : "Search finished.", true);
+        int shown;
+        synchronized (this) { shown = visible(); }
+        if (l != null) l.status(shown == 0 ? "No host found on this Wi-Fi." : "Search finished.", true);
     };
 
     NsdFinder(Context c) {

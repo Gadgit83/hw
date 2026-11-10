@@ -2157,9 +2157,14 @@ public final class Relay {
                 return;
             }
             why = closeFrame ? "the TV closed the connection" : "the TV disconnected (end of stream)";
+            // Record why first: during the drain below a game frame would find the box closing and log "connection closed".
+            synchronized (lock) { retire(me, why); }
+            changed();
             // The client closed (and its close frame was echoed): let the echo out before the socket goes.
             me.out.closeWhenDrained();
             try { Thread.sleep(200); } catch (InterruptedException ignored) { }
+            finishClose(me);
+            return;
         } catch (Throwable e) {
             // A reset or a half frame is the TV going away (killed, Wi-Fi lost), not slowness.
             String m = String.valueOf(e.getMessage());
@@ -2223,8 +2228,8 @@ public final class Relay {
         System.arraycopy(rb, 0, payload, 2, rb.length);
         for (Viewer v : new ArrayList<>(viewers)) {
             retire(v, why);
+            v.closing = true;                       // first: no reply may be queued after the close frame
             v.out.offer(Ws.frame(8, payload));      // behind every game frame already queued: the close code is the last thing the TV reads
-            v.closing = true;
             v.out.closeWhenDrained();
             final Viewer cv = v;
             Thread t = new Thread(() -> {

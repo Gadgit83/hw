@@ -80,6 +80,7 @@ var
     //Pinch to zoom
     pinchSize : LongInt;
     baseZoomValue: GLFloat;
+    switcherShown: boolean;
 
     //aiming
     aimingCrosshair: boolean;
@@ -354,7 +355,9 @@ if (buttonsDown > 0) and (widget <> nil) then
 
     if widget = @utilityWidget then
         if (CurrentHedgehog <> nil)then
-            if(Ammoz[CurrentHedgehog^.CurAmmoType].Ammo.Propz and ammoprop_NeedTarget <> 0)then
+            if (CurAmmoGear <> nil) and (CurAmmoGear^.Kind = gtSwitcher) then
+                TouchTeamCommand('switch')
+            else if(Ammoz[CurrentHedgehog^.CurAmmoType].Ammo.Propz and ammoprop_NeedTarget <> 0)then
                 begin
                 TouchTeamCommand('put');
                 targetted:= true;
@@ -502,11 +505,25 @@ targetting:= false;
 SetUtilityWidgetState(amNothing);
 end;
 
+// The turn-start switcher (scheme flag "switch hedgehog at turn start") is a gear, not a selected weapon, so the
+// switch button has to follow the gear: shown while the switcher is there, hidden when it ends (any other action).
+procedure UpdateSwitchButton;
+var active: boolean;
+begin
+active:= (CurrentHedgehog <> nil) and (CurAmmoGear <> nil) and (CurAmmoGear^.Kind = gtSwitcher);
+if active <> switcherShown then
+    begin
+    switcherShown:= active;
+    SetUtilityWidgetState(amNothing);
+    end;
+end;
+
 
 procedure ProcessTouch;
 var
     deltaAngle: LongInt;
 begin
+UpdateSwitchButton;
 invertCursor := not(bShowAmmoMenu or targetting);
 if aimingCrosshair and ((CurrentHedgehog = nil) or (CurrentHedgehog^.Gear = nil)) then
     begin
@@ -741,6 +758,7 @@ procedure initModule;
 var
     index: Longword;
 begin
+    switcherShown:= false;
     buttonsDown:= 0;
     pointerCount:= 0;
     bounceButtonPressed:= false;

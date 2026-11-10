@@ -2405,6 +2405,9 @@ if(ammoType = amNothing)then
         exit;
         end;
     ammoType:= CurrentHedgehog^.CurAmmoType;
+    // the switcher that scheme flag gfSwitchHog starts at the turn start is a gear, the selected weapon is something else
+    if (CurAmmoGear <> nil) and (CurAmmoGear^.Kind = gtSwitcher) then
+        ammoType:= amSwitch;
     end;
 
 if(CurrentHedgehog <> nil)then

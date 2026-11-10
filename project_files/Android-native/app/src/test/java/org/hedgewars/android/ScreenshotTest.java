@@ -252,12 +252,78 @@ public class ScreenshotTest {
         });
     }
 
+    private static org.hedgewars.android.net.HostAdvert.Found advert(String service, String host, int port, String compat, String version, String data) {
+        java.util.Map<String, String> t = org.hedgewars.android.net.HostAdvert.txt(version, compat, 60, service, 8766, data);
+        java.util.Map<String, byte[]> raw = new java.util.HashMap<>();
+        for (java.util.Map.Entry<String, String> e : t.entrySet()) raw.put(e.getKey(), e.getValue().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        return org.hedgewars.android.net.HostAdvert.parse(service, host, port, raw);
+    }
+
+    /** The chooser with the "Hosts on this Wi-Fi" list: two joinable hosts and one that cannot be joined. */
+    @Test
+    public void chooserWithHosts() throws Exception {
+        eachDevice(c -> {
+            String digest = NetSession.dataDigest(c);
+            String ver = Diag.versionName(c);
+            String comp = org.hedgewars.android.net.Compat.VALUE;
+            final org.hedgewars.android.net.HostAdvert.Found[] found = {
+                advert("Fairphone", "192.168.1.57", 46633, comp, ver, digest),
+                advert("Pixel 7", "192.168.1.60", 46633, comp, ver, digest),
+                advert("OldPhone", "192.168.1.61", 46633, "hwnet-60-sim0", "0.2.9", digest) };
+            NetSession.discoveryFactory = cc -> new HostDiscovery() {
+                @Override public void start(Listener l) { l.status("Searching for hosts on this Wi-Fi...", false); l.hosts(Arrays.asList(found)); }
+                @Override public void stop() { }
+            };
+            NetLobbyActivity a = lobby();
+            shoot(a, "net-chooser-hosts");
+            for (View p = TestSupport.find(a.getWindow().getDecorView(), "Search again"); p != null && p.getParent() instanceof View; p = (View) p.getParent()) {
+                if (p instanceof android.widget.ScrollView) { ((android.widget.ScrollView) p).fullScroll(View.FOCUS_DOWN); break; }
+            }
+            shoot(a, "net-chooser-hosts-end");
+        });
+    }
+
+    private static final String WATCH_LOBBY = "{\"t\":\"state\",\"state\":\"%s\",\"host\":\"Pixel\",\"proto\":1,\"build\":\"0.3.0-tv7b\",\"you\":3,\"watching\":1,"
+            + "\"players\":[{\"id\":1,\"name\":\"Pixel\",\"host\":true,\"ready\":true,\"fg\":true,\"teams\":[{\"name\":\"Red Team\",\"color\":0,\"level\":0}]},"
+            + "{\"id\":2,\"name\":\"Fairphone\",\"host\":false,\"ready\":true,\"fg\":true,\"teams\":[{\"name\":\"Blue Team\",\"color\":1,\"level\":3}]},"
+            + "{\"id\":3,\"name\":\"Tablet\",\"host\":false,\"ready\":false,\"fg\":true,\"watching\":true,\"teams\":[]}],\"canStart\":false,\"game\":0}";
+
+    /** Watching phone: waiting in the lobby, a game running that it is not in, and the Stop watching question. */
+    @Test
+    public void watcherStates() throws Exception {
+        eachDevice(c -> {
+            netState(String.format(WATCH_LOBBY, "setup"), false);
+            NetSession.watching = true;
+            NetLobbyActivity w = lobby();
+            shoot(w, "net-watcher-waiting");
+            Bitmap behind = draw(w);
+            w.onBackPressed();
+            TestSupport.settle(200);
+            shootDialog(behind, org.robolectric.shadows.ShadowAlertDialog.getLatestAlertDialog(), "net-watch-stop-confirm");
+            TestSupport.resetStatics();
+
+            netState(String.format(WATCH_LOBBY, "playing"), false);
+            NetSession.watching = true;
+            shoot(lobby(), "net-watcher-running");
+            TestSupport.resetStatics();
+
+            // the host with one TV watching and one waiting, and a watching phone
+            netState(String.format(WATCH_LOBBY, "setup").replace("\"you\":3", "\"you\":1").replace("\"canStart\":false", "\"canStart\":true"), true);
+            NetSession.HostInfo hi = new NetSession.HostInfo(Arrays.asList("192.168.1.57"), 8766, 1, "", "",
+                    Arrays.asList("/192.168.1.106:36617: round trip 12.3 ms (average 15.0, best 9.0, worst 41.0, 5 pongs of 5 pings), 3 frames behind (deepest 7), watching for 12 s"));
+            hi.waiting = 1;
+            NetSession.hostInfo = hi;
+            shoot(lobby(), "net-host-watchers");
+            TestSupport.resetStatics();
+        });
+    }
+
     /** The Back question of a network game: GameActivity needs SDL, so its dialog is drawn over a black screen. */
     @Test
     public void gameBackDialog() throws Exception {
         eachDevice(c -> {
             File dir = c.getFilesDir();
-            for (String role : new String[] { "player", "host" }) {
+            for (String role : new String[] { "player", "host", "watch" }) {
                 java.nio.file.Files.write(new File(dir, "net.cfg").toPath(), ("host=1.2.3.4\nport=46633\ntoken=x\nrole=" + role + "\n").getBytes("UTF-8"));
                 org.robolectric.android.controller.ActivityController<GameActivity> ctl = Robolectric.buildActivity(GameActivity.class);
                 GameActivity a;

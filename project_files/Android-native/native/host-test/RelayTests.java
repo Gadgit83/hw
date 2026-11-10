@@ -959,6 +959,22 @@ public class RelayTests {
         check(lg2 != null && "over".equals(lg2.get("ended")), "lastGame ended over (" + lg2 + ")");
         v2.close();
         g2.end();
+        // a phone dropped earlier, then the game ends normally for the phone still in it: still 4002 and "over"
+        Game gd = new Game(20000, 1000);
+        Socket vd = viewerOn(gd.f);
+        waitFor(() -> gd.f.relay.viewerCount() == 1, 2000);
+        gd.ea.send(new byte[] { 'Z', 2 });
+        gd.eb.close();                                  // phone B's engine link closes mid-game: it is dropped
+        Thread.sleep(500);
+        check(gd.f.relay.lastSummary() == null, "the game goes on after phone B drops");
+        gd.ea.send("q");
+        gd.ea.close();                                  // phone A's engine sees the game over and exits
+        String cd = closeOf(vd, new int[1]);
+        check(cd.equals("4002 game-over"), "game over after a phone dropped: close code 4002 game-over (" + cd + ")");
+        Map<String, Object> lgd = (Map<String, Object>) ((Map<String, Object>) Json.parse(statusBody(gd.f))).get("lastGame");
+        check(lgd != null && "over".equals(lgd.get("ended")), "lastGame ended over after a drop (" + lgd + ")");
+        vd.close();
+        gd.end();
         // host loses its Wi-Fi: 4003
         Fix.netProbe = true;
         Fix.netLossMs = 500;

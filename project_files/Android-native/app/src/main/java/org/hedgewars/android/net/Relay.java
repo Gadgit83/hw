@@ -1671,9 +1671,15 @@ public final class Relay {
             // Nobody linked yet: keep waiting (the watchdog applies the link timeout).
             for (Player q : players.values()) if (!q.dropped && !q.linked) return;
         }
-        boolean anyDropped = false;
-        for (Player q : players.values()) if (q.dropped) anyDropped = true;
-        endGame(anyDropped ? "every engine is gone" : "every engine finished");
+        // A phone that dropped earlier does not turn a normal end into "gone": the game is over when every phone still
+        // in it saw the game over (its engine sent q). Only when no phone is left that finished is every engine gone.
+        boolean anyDropped = false, anyLive = false, liveAllFinished = true;
+        for (Player q : players.values()) {
+            if (q.dropped) { anyDropped = true; continue; }
+            anyLive = true;
+            if (!q.finished) liveAllFinished = false;
+        }
+        endGame(!anyDropped || (anyLive && liveAllFinished) ? "every engine finished" : "every engine is gone");
     }
 
     /** Lock held. */

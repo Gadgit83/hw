@@ -37,7 +37,8 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
     private EditText nameField, addressField;
     private String name = "";
     private String address = "";
-    private boolean connecting;
+    /** A host or join connect is running. Shared by every Network screen, so a reopened screen cannot start a second one. */
+    private static volatile boolean connecting;
     private String problem = "";
     private boolean destroyed;
     // Finding hosts (docs/tv-viewer-plan.md section 5.1)
@@ -49,7 +50,7 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
     private volatile String myDigest;
     private boolean digestRunning;
     /** Counts joins started on this screen: only the newest may report a problem or end "connecting". */
-    private volatile int joinSeq;
+    private static volatile int joinSeq;
     private String lastHost = "";
 
     @Override
@@ -681,7 +682,7 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
         new Thread(() -> {
             long end = System.currentTimeMillis() + 8000;
             while (HostService.relay == null && HostService.error.isEmpty() && System.currentTimeMillis() < end) {
-                try { Thread.sleep(100); } catch (InterruptedException e) { return; }
+                try { Thread.sleep(100); } catch (InterruptedException e) { break; }
             }
             Relay r = HostService.relay;
             try {
@@ -694,9 +695,11 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
             } catch (Exception e) {
                 problem = "Hosting failed: " + e.getMessage();
                 stopService(new Intent(this, HostService.class));
+            } finally {
+                connecting = false;
+                changed();
+                NetSession.ping();              // a reopened Network screen redraws too
             }
-            connecting = false;
-            changed();
         }, "host-connect").start();
     }
 
@@ -740,6 +743,7 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
             } finally {
                 if (seq == joinSeq) connecting = false;
                 changed();
+                NetSession.ping();
             }
         }, "join").start();
     }

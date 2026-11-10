@@ -162,7 +162,7 @@ public class ScreenshotTest {
             // the extra rules sit below the ones in view: scroll the nearest scroll container to the end as well
             shoot(r, "setup-rules-more");
             for (View p = sv; p != null && p.getParent() instanceof View; p = (View) p.getParent()) {
-                if (p instanceof android.widget.ScrollView) { ((android.widget.ScrollView) p).fullScroll(View.FOCUS_DOWN); break; }
+                if (p instanceof android.widget.ScrollView) { android.widget.ScrollView s = (android.widget.ScrollView) p; s.setSmoothScrollingEnabled(false); s.scrollTo(0, s.getChildAt(0).getHeight()); break; }
             }
             shoot(r, "setup-rules-more-end");
         });
@@ -277,7 +277,7 @@ public class ScreenshotTest {
             NetLobbyActivity a = lobby();
             shoot(a, "net-chooser-hosts");
             for (View p = TestSupport.find(a.getWindow().getDecorView(), "Search again"); p != null && p.getParent() instanceof View; p = (View) p.getParent()) {
-                if (p instanceof android.widget.ScrollView) { ((android.widget.ScrollView) p).fullScroll(View.FOCUS_DOWN); break; }
+                if (p instanceof android.widget.ScrollView) { android.widget.ScrollView s = (android.widget.ScrollView) p; s.setSmoothScrollingEnabled(false); s.scrollTo(0, s.getChildAt(0).getHeight()); break; }
             }
             shoot(a, "net-chooser-hosts-end");
         });

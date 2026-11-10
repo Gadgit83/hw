@@ -90,11 +90,18 @@ public final class Ui {
                 Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
         hp.bottomMargin = dp(6);
         f.addView(hint, hp);
+        final View content = sv.getChildAt(0);
+        if (content != null) {
+            // Reserve room below the last row for the hint, so the end of the list is never under it.
+            hint.measure(View.MeasureSpec.UNSPECIFIED, View.MeasureSpec.UNSPECIFIED);
+            content.setPadding(content.getPaddingLeft(), content.getPaddingTop(), content.getPaddingRight(),
+                    content.getPaddingBottom() + hint.getMeasuredHeight() + hp.bottomMargin + dp(4));
+        }
         final Runnable update = () -> {
             View c = sv.getChildAt(0);
             hint.setVisibility(c != null && sv.getScrollY() + sv.getHeight() < c.getHeight() - dp(6) ? View.VISIBLE : View.GONE);
         };
-        sv.getViewTreeObserver().addOnScrollChangedListener(update::run);
+        sv.setOnScrollChangeListener((v, x, y, ox, oy) -> update.run());
         sv.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> update.run());
         if (sv.getChildAt(0) != null) sv.getChildAt(0).addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> update.run());
         return f;

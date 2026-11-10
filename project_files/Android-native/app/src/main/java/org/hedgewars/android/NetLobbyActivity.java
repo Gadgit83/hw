@@ -48,6 +48,8 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
     private boolean searchDone, searching, permissionAsked, permissionDenied;
     private volatile String myDigest;
     private boolean digestRunning;
+    /** Counts joins started on this screen: only the newest may report a problem or end "connecting". */
+    private volatile int joinSeq;
     private String lastHost = "";
 
     @Override
@@ -296,12 +298,19 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
         if (myDigest == null && !digestRunning) {
             digestRunning = true;
             new Thread(() -> {
-                String d = NetSession.dataDigest(app);
-                runOnUiThread(() -> {
-                    myDigest = d;
-                    digestRunning = false;
-                    if (!destroyed) renderHosts();
-                });
+                String d = null;
+                try {
+                    d = NetSession.dataDigest(app);
+                } catch (RuntimeException e) {
+                    d = null;                   // left unknown: the host checks the data again at the join
+                } finally {
+                    final String got = d;
+                    runOnUiThread(() -> {
+                        if (got != null) myDigest = got;
+                        digestRunning = false;  // "Search again" can try once more
+                        if (!destroyed) renderHosts();
+                    });
+                }
             }, "host-digest").start();
         }
         stopDiscovery();
@@ -676,6 +685,8 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
             try {
                 if (r == null) throw new java.io.IOException(HostService.error.isEmpty() ? "The relay did not start." : HostService.error);
                 NetSession.connect(getApplicationContext(), "127.0.0.1", r.port(), nick, true);
+            } catch (NetSession.Cancelled e) {
+                // hosting was stopped while connecting: the service is already stopping
             } catch (Exception e) {
                 problem = "Hosting failed: " + e.getMessage();
                 stopService(new Intent(this, HostService.class));
@@ -713,13 +724,16 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
         connecting = true;
         problem = "";
         stopSearch();
+        final int seq = ++joinSeq;
         new Thread(() -> {
             try {
                 NetSession.connect(getApplicationContext(), host, port, nick, false, watch);
+            } catch (NetSession.Cancelled e) {
+                // given up on purpose (Back, or a newer join): nothing to report
             } catch (Exception e) {
-                problem = "Could not reach " + host + ":" + port + " (" + e.getMessage() + "). Same Wi-Fi? Is the host hosting?";
+                if (seq == joinSeq) problem = "Could not reach " + host + ":" + port + " (" + e.getMessage() + "). Same Wi-Fi? Is the host hosting?";
             }
-            connecting = false;
+            if (seq == joinSeq) connecting = false;
             changed();
         }, "join").start();
     }

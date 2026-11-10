@@ -176,6 +176,8 @@ final class NetSession {
 
     static void connect(Context c, String host, int port, String name, boolean isHost, boolean watch) throws IOException {
         leave();
+        final int gen;
+        synchronized (NetSession.class) { gen = ++connectGen; }
         closedReason = "";
         notice = "";
         state = null;
@@ -186,33 +188,41 @@ final class NetSession {
         RelayClient rc = new RelayClient(host, port, name, Diag.versionName(c), isHost, teams, HANDLER).watch(watch)
                 .identity(org.hedgewars.android.net.Compat.VALUE, dataDigest(c));
         if (isHost) rc.hostSecret(HostService.hostSecret);
-        final int gen;
         synchronized (NetSession.class) {
-            gen = ++connectGen;
-            pending = rc;                        // leave() closes it, which ends a join that is still retrying
+            // The phone left, or another join started, while this one was being set up: give up before connecting.
+            if (gen != connectGen) throw new Cancelled();
+            pending = rc;                        // leave() and cancelPending() close it, which ends a join still retrying
+            pendingIsHost = isHost;
         }
         try {
             if (isHost) rc.connect();            // loopback: no reason to retry
             else rc.connect(3, 1500, 15000, (n, of) -> {
+                if (gen != connectGen) return;
                 connectProgress = "Trying again (" + n + " of " + of + ")...";
                 ping();
             });
+        } catch (IOException e) {
+            synchronized (NetSession.class) {
+                if (pending == rc) pending = null;
+                if (gen != connectGen) throw new Cancelled();      // a failure caused by the cancel is not "could not reach"
+            }
+            throw e;
         } finally {
-            connectProgress = "";
+            synchronized (NetSession.class) { if (gen == connectGen) connectProgress = ""; }
         }
         synchronized (NetSession.class) {
             if (gen != connectGen || pending != rc) {
                 // The phone left, or another join started, while this one connected: it must not take a seat.
                 rc.close();
-                throw new IOException("The join was cancelled.");
+                throw new Cancelled();
             }
             pending = null;
+            client = rc;                         // in the same lock, so a leave() from now on sees it
+            joined = true;
+            watching = watch;
+            hosting = isHost;
+            target = host + ":" + port;
         }
-        client = rc;
-        joined = true;
-        watching = watch;
-        hosting = isHost;
-        target = host + ":" + port;
         acquireLocks(c);
         if (isHost) startTicker();
         ping();
@@ -220,12 +230,19 @@ final class NetSession {
 
     /** A join still connecting (retries can take up to 15 s), and a counter that makes an overtaken one give up. */
     private static RelayClient pending;
+    private static boolean pendingIsHost;
     private static int connectGen;
+
+    /** A join that was given up on purpose (the phone left, or a newer join started): not an error to show. */
+    static final class Cancelled extends IOException {
+        Cancelled() { super("The join was cancelled."); }
+    }
 
     /** Gives up a join that is still connecting; a session already joined is left alone. */
     static void cancelPending() {
         RelayClient p;
         synchronized (NetSession.class) {
+            if (pendingIsHost) return;           // the host's own connect carries on: hosting runs in the service
             p = pending;
             pending = null;
             connectGen++;
@@ -234,17 +251,17 @@ final class NetSession {
     }
 
     static void leave() {
-        RelayClient p;
+        RelayClient p, rc;
         synchronized (NetSession.class) {
             p = pending;
             pending = null;
             connectGen++;
+            rc = client;
+            client = null;
+            joined = false;
+            watching = false;
         }
         if (p != null) p.close();
-        RelayClient rc = client;
-        client = null;
-        joined = false;
-        watching = false;
         if (rc != null) rc.close();
         releaseLocks();
     }

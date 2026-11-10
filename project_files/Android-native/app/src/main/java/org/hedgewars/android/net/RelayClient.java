@@ -57,7 +57,7 @@ public final class RelayClient {
     private boolean watch;
     private String compat = Compat.VALUE, digest = "";
     private final Handler handler;
-    private Socket socket;
+    private volatile Socket socket;
     private OutputStream out;
     private volatile boolean closed;
     /** Taken only to decide who closes; never while writing, so close() never waits for a stalled write. */
@@ -124,6 +124,7 @@ public final class RelayClient {
             } catch (IOException e) {
                 last = e;
                 closeSocketQuietly();
+                if (closed) throw new IOException("The join was cancelled.");
                 if (!unreachable(e) || n == attempts) break;
                 try {
                     Thread.sleep(pauseMs);
@@ -149,8 +150,11 @@ public final class RelayClient {
     }
 
     private void connect(int timeoutMs) throws IOException {
-        socket = new Socket();
-        socket.connect(new InetSocketAddress(host, port), timeoutMs);
+        Socket s = new Socket();
+        socket = s;
+        if (closed) { try { s.close(); } catch (IOException ignored) { } throw new IOException("The join was cancelled."); }
+        s.connect(new InetSocketAddress(host, port), timeoutMs);
+        if (closed) { try { s.close(); } catch (IOException ignored) { } throw new IOException("The join was cancelled."); }
         socket.setTcpNoDelay(true);
         socket.setKeepAlive(true);
         out = socket.getOutputStream();

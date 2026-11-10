@@ -64,7 +64,7 @@ final class BackConfirm {
     /** As {@link #show(Activity, boolean, Runnable)} for any role: a watching phone gets "Stop watching?". */
     static AlertDialog show(Activity a, int role, Runnable onYes) {
         if (role != WATCH) return show(a, role == HOST, onYes);
-        AlertDialog d = new AlertDialog.Builder(a)
+        AlertDialog d = Ui.dialog(a)
                 .setTitle(WATCH_TITLE)
                 .setMessage(WATCH_MESSAGE)
                 .setPositiveButton(WATCH_YES, (dlg, w) -> onYes.run())
@@ -76,7 +76,7 @@ final class BackConfirm {
 
     /** Shows the question; {@code onYes} runs when the player confirms. */
     static AlertDialog show(Activity a, boolean host, Runnable onYes) {
-        AlertDialog d = new AlertDialog.Builder(a)
+        AlertDialog d = Ui.dialog(a)
                 .setTitle(title(host))
                 .setMessage(message(host))
                 .setPositiveButton(yes(host), (dlg, w) -> onYes.run())

@@ -29,9 +29,11 @@ import android.view.inputmethod.InputMethodManager;
 import android.widget.BaseAdapter;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.FrameLayout;
 import android.widget.GridView;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.SeekBar;
 import android.widget.Switch;
 import android.widget.TextView;
@@ -54,6 +56,8 @@ public final class Ui {
     public static final int ACCENT_DARK = Color.rgb(196, 140, 24);
     public static final int ON_ACCENT = Color.rgb(40, 30, 8);
     public static final int MUTED = Color.rgb(190, 212, 192);
+    /** Side gutter of every screen, in dp: the title, the cards and the bottom bar all start this far inside the safe area. */
+    public static final int GUTTER = 12;
     public static final int DANGER = Color.rgb(229, 115, 115);
 
     public final Context ctx;
@@ -63,6 +67,47 @@ public final class Ui {
     public Ui(Context c) {
         ctx = c;
         density = c.getResources().getDisplayMetrics().density;
+    }
+
+    /** A dialog builder in the app's dialog style, whatever the activity's own theme is. */
+    public static AlertDialog.Builder dialog(Context c) {
+        return new AlertDialog.Builder(c, R.style.HpDialog);
+    }
+
+    /**
+     * The scroll view in a frame that shows "More below" at its bottom edge while there is more to scroll to, so a list that is
+     * cut off by the screen is not mistaken for a complete one. The scroll view must already hold its content.
+     */
+    public FrameLayout scrollWithHint(ScrollView sv) {
+        FrameLayout f = new FrameLayout(ctx);
+        f.addView(sv, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        final TextView hint = text("More below \u25be", 12, ACCENT);
+        hint.setTypeface(Typeface.DEFAULT_BOLD);
+        hint.setPadding(dp(12), dp(3), dp(12), dp(3));
+        hint.setBackground(round(Color.argb(225, 20, 30, 24), 12));
+        hint.setVisibility(View.GONE);
+        FrameLayout.LayoutParams hp = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
+        hp.bottomMargin = dp(6);
+        f.addView(hint, hp);
+        final Runnable update = () -> {
+            View c = sv.getChildAt(0);
+            hint.setVisibility(c != null && sv.getScrollY() + sv.getHeight() < c.getHeight() - dp(6) ? View.VISIBLE : View.GONE);
+        };
+        sv.getViewTreeObserver().addOnScrollChangedListener(update::run);
+        sv.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> update.run());
+        if (sv.getChildAt(0) != null) sv.getChildAt(0).addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> update.run());
+        return f;
+    }
+
+    /** A small rounded label, for a state or a count. */
+    public TextView chip(String s, int fill, int textColor) {
+        TextView t = text(s, 13, textColor);
+        t.setTypeface(Typeface.DEFAULT_BOLD);
+        t.setSingleLine(true);
+        t.setPadding(dp(10), dp(3), dp(10), dp(3));
+        t.setBackground(round(fill, 12));
+        return t;
     }
 
     public int dp(int v) {
@@ -182,7 +227,7 @@ public final class Ui {
 
     public StateListDrawable pressable(int color, int pressed, int radiusDp) {
         StateListDrawable s = new StateListDrawable();
-        s.addState(new int[] { -android.R.attr.state_enabled }, round(Color.argb(90, 120, 130, 120), radiusDp));
+        s.addState(new int[] { -android.R.attr.state_enabled }, round(Color.rgb(58, 82, 64), radiusDp));
         s.addState(new int[] { android.R.attr.state_pressed }, round(pressed, radiusDp));
         s.addState(new int[] {}, round(color, radiusDp));
         return s;
@@ -239,7 +284,9 @@ public final class Ui {
         b.setTextSize(14);
         b.setSingleLine(true);
         b.setEllipsize(android.text.TextUtils.TruncateAt.END);
-        b.setTextColor(primary ? ON_ACCENT : Color.WHITE);
+        b.setTextColor(new android.content.res.ColorStateList(
+                new int[][] { { -android.R.attr.state_enabled }, {} },
+                new int[] { Color.rgb(170, 188, 172), primary ? ON_ACCENT : Color.WHITE }));
         b.setBackground(inset(primary ? pressable(ACCENT, ACCENT_DARK, 9) : pressable(PANEL_HI, Color.rgb(84, 120, 92), 9),
                 0, (TOUCH_DP - LOOK_DP) / 2));
         b.setMinHeight(dp(TOUCH_DP));
@@ -510,7 +557,7 @@ public final class Ui {
         e.setInputType(InputType.TYPE_CLASS_NUMBER | (min < 0 ? InputType.TYPE_NUMBER_FLAG_SIGNED : 0));
         e.setText(Integer.toString(current));
         e.setSelectAllOnFocus(true);
-        AlertDialog d = new AlertDialog.Builder(ctx)
+        AlertDialog d = dialog(ctx)
                 .setTitle((label.isEmpty() ? "Value" : label) + " (" + min + " to " + max + ")")
                 .setView(e)
                 .setPositiveButton("OK", (dlg, w) -> {
@@ -556,7 +603,7 @@ public final class Ui {
     }
 
     public void pickFromList(String title, List<String> options, int selected, IntConsumer on) {
-        new AlertDialog.Builder(ctx)
+        dialog(ctx)
                 .setTitle(title)
                 .setSingleChoiceItems(options.toArray(new String[0]), selected, (dlg, which) -> {
                     dlg.dismiss();
@@ -575,6 +622,7 @@ public final class Ui {
         s.setMinHeight(dp(TOUCH_DP));
         s.setMinimumHeight(dp(TOUCH_DP));
         s.setPadding(0, 0, dp(2), 0);
+        s.setSwitchPadding(dp(20));
         s.setOnCheckedChangeListener((b, c) -> on.accept(c));
         return s;
     }
@@ -594,6 +642,11 @@ public final class Ui {
         sb.setMax(max - min);
         sb.setProgress(value - min);
         sb.setPadding(dp(14), dp(4), dp(14), dp(4));
+        // visible when switched off as well: the default tints of a disabled bar vanish on the green panel
+        int[][] st = { { -android.R.attr.state_enabled }, {} };
+        sb.setProgressTintList(new android.content.res.ColorStateList(st, new int[] { Color.rgb(130, 154, 134), ACCENT }));
+        sb.setProgressBackgroundTintList(new android.content.res.ColorStateList(st, new int[] { Color.rgb(100, 126, 106), Color.rgb(96, 130, 104) }));
+        sb.setThumbTintList(new android.content.res.ColorStateList(st, new int[] { Color.rgb(170, 190, 174), ACCENT }));
         sb.setMinimumHeight(dp(36));
         sb.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override public void onProgressChanged(SeekBar s, int p, boolean fromUser) {
@@ -701,7 +754,7 @@ public final class Ui {
             dlg[0].dismiss();
             on.accept(keys.get(i));
         });
-        dlg[0] = new AlertDialog.Builder(ctx).setTitle(title).setView(grid).setNegativeButton("Cancel", null).create();
+        dlg[0] = dialog(ctx).setTitle(title).setView(grid).setNegativeButton("Cancel", null).create();
         dlg[0].setOnDismissListener(d -> loader.shutdownNow());
         dlg[0].show();
         int sel = keys.indexOf(selected);

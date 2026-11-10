@@ -59,7 +59,7 @@ public class TeamEditActivity extends SetupActivity {
         root.setBackgroundColor(Ui.BG);
 
         topBar = ui.row();
-        topBar.setPadding(ui.dp(10), ui.dp(2), ui.dp(10), 0);
+        topBar.setPadding(ui.dp(Ui.GUTTER), ui.dp(2), ui.dp(Ui.GUTTER), 0);
         Button back = ui.button("‹ Done", true, v -> finish());
         topBar.addView(back, Ui.lp(ViewGroup.LayoutParams.WRAP_CONTENT, ui.dp(Ui.TOUCH_DP)));
         title = ui.text("", 18, Color.WHITE);
@@ -80,7 +80,7 @@ public class TeamEditActivity extends SetupActivity {
         scroll = new ScrollView(this);
         scroll.setClipToPadding(false);
         holder = new LinearLayout(this);
-        holder.setPadding(ui.dp(12), ui.dp(2), ui.dp(12), ui.dp(8));
+        holder.setPadding(ui.dp(Ui.GUTTER), ui.dp(2), ui.dp(Ui.GUTTER), ui.dp(8));
         scroll.addView(holder, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         root.addView(scroll, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
 

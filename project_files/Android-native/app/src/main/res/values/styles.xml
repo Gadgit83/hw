@@ -9,6 +9,19 @@
         <item name="android:colorControlActivated">#F2B632</item>
         <item name="android:textColorHint">#78927C</item>
     </style>
+    <!-- Every dialog (lobby, options and the Back question in the game, whose own theme is the old full-screen one):
+         the dark Material alert in the app's green and gold. -->
+    <style name="HpDialog" parent="@android:style/Theme.Material.Dialog.Alert">
+        <item name="android:windowBackground">@drawable/hp_dialog_bg</item>
+        <item name="android:colorBackground">#2E4634</item>
+        <item name="android:colorAccent">#F2B632</item>
+        <item name="android:textColorPrimary">#FFFFFF</item>
+        <item name="android:textColorSecondary">#BED4C0</item>
+        <item name="android:buttonBarButtonStyle">@style/HpDialogButton</item>
+    </style>
+    <style name="HpDialogButton" parent="@android:style/Widget.Material.Button.Borderless.Colored">
+        <item name="android:textColor">#F2B632</item>
+    </style>
     <style name="GameTheme" parent="@android:style/Theme.NoTitleBar.Fullscreen">
         <item name="android:windowBackground">@android:color/black</item>
     </style>

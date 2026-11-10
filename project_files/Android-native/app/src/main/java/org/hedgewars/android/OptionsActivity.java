@@ -59,7 +59,7 @@ public class OptionsActivity extends SetupActivity {
         root.setBackgroundColor(Ui.BG);
 
         topBar = ui.row();
-        topBar.setPadding(ui.dp(10), ui.dp(2), ui.dp(10), 0);
+        topBar.setPadding(ui.dp(Ui.GUTTER), ui.dp(2), ui.dp(Ui.GUTTER), 0);
         topBar.addView(ui.button("‹ Done", true, v -> finish()), Ui.lp(ViewGroup.LayoutParams.WRAP_CONTENT, ui.dp(Ui.TOUCH_DP)));
         TextView title = ui.text("Options", 18, Color.WHITE);
         title.setTypeface(Typeface.DEFAULT_BOLD);
@@ -83,9 +83,9 @@ public class OptionsActivity extends SetupActivity {
         scroll.setClipToPadding(false);
         holder = new LinearLayout(this);
         holder.setOrientation(LinearLayout.VERTICAL);
-        holder.setPadding(ui.dp(12), ui.dp(2), ui.dp(12), ui.dp(8));
+        holder.setPadding(ui.dp(Ui.GUTTER), ui.dp(2), ui.dp(Ui.GUTTER), ui.dp(8));
         scroll.addView(holder, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        root.addView(scroll, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+        root.addView(ui.scrollWithHint(scroll), new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
 
         ui.trackInsets(root, (l, t, r, bt, kb) -> root.setPadding(l, t, r, bt));
         return root;
@@ -119,7 +119,7 @@ public class OptionsActivity extends SetupActivity {
 
     private static void enableAll(View v, boolean on) {
         v.setEnabled(on);
-        v.setAlpha(on ? 1f : 0.45f);
+        v.setAlpha(on ? 1f : 0.8f);
         if (v instanceof ViewGroup) {
             ViewGroup g = (ViewGroup) v;
             for (int i = 0; i < g.getChildCount(); i++) enableAll(g.getChildAt(i), on);
@@ -161,15 +161,16 @@ public class OptionsActivity extends SetupActivity {
         float mmPx = DisplayCalc.pxPerMm(dm);
 
         LinearLayout size = ui.card();
-        size.addView(ui.heading("Size of the controls"));
-        LinearLayout hudSlider = ui.slider("Buttons and text on screen", 100, 340, o.hudPct, n -> n + "%", n -> o.hudPct = n);
+        size.addView(ui.heading("Buttons and text on screen"));
+        LinearLayout hudSlider = ui.slider("Size when Automatic is off", 100, 340, o.hudPct, n -> n + "%", n -> o.hudPct = n);
         enableAll(hudSlider, !o.hudAuto);
         size.addView(ui.toggle("Automatic (" + auto[0] + "% on this screen)", o.hudAuto, c -> {
             o.hudAuto = c;
             enableAll(hudSlider, !c);
         }));
         size.addView(hudSlider);
-        LinearLayout menuSlider = ui.slider("Weapon menu", 100, 400, o.menuPct, n -> n + "%", n -> o.menuPct = n);
+        size.addView(ui.heading("Weapon menu"));
+        LinearLayout menuSlider = ui.slider("Size when Automatic is off", 100, 400, o.menuPct, n -> n + "%", n -> o.menuPct = n);
         enableAll(menuSlider, !o.menuAuto);
         size.addView(ui.toggle("Automatic (" + auto[1] + "% on this screen)", o.menuAuto, c -> {
             o.menuAuto = c;
@@ -308,14 +309,14 @@ public class OptionsActivity extends SetupActivity {
         t.setTextIsSelectable(true);
         ScrollView sv = new ScrollView(this);
         sv.addView(t);
-        AlertDialog d = new AlertDialog.Builder(this).setTitle(title).setView(sv).setPositiveButton("Close", null).create();
+        AlertDialog d = Ui.dialog(this).setTitle(title).setView(sv).setPositiveButton("Close", null).create();
         d.show();
         DisplayMetrics dm = getResources().getDisplayMetrics();
         d.getWindow().setLayout(Math.min(dm.widthPixels - ui.dp(48), ui.dp(700)), Math.min(dm.heightPixels - ui.dp(24), ui.dp(380)));
     }
 
     private void confirm(String title, String message, Runnable yes) {
-        new AlertDialog.Builder(this).setTitle(title).setMessage(message)
+        Ui.dialog(this).setTitle(title).setMessage(message)
                 .setPositiveButton("Yes", (d, w) -> yes.run()).setNegativeButton("Cancel", null).show();
     }
 

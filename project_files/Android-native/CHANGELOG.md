@@ -4,6 +4,15 @@ All notable changes to the native Android app (`project_files/Android-native`), 
 
 Only some builds were put on a phone, so a version below is a build that was made, not necessarily one that was released. Releases are tags on `android-master` with the APK attached; there is none yet.
 
+## 0.3.0-tv8b (112): "More below" never hides the last row (test build)
+
+`HP_PROFILE=test`, versionName `0.3.0-tv8b-test`. Layout only.
+
+### Fixed
+
+- Scrolling screens leave room below the last row for the "More below" mark, and the mark hides as soon as the end of the list is reached, so the last row is never under it.
+- The screenshot test now scrolls the Rules and Network screens fully to the end for its end-of-list pictures.
+
 ## 0.3.0-tv8 (111): screen layout polish (test build)
 
 `HP_PROFILE=test`, versionName `0.3.0-tv8-test`. Layout and styling only; no behaviour changes. Found by looking at the offline screenshots (`scripts/ui-screenshots.sh`, which now also draws the Network chooser with a host list, the watcher states and the Stop watching question).

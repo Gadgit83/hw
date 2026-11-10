@@ -47,6 +47,21 @@ final class NetSession {
     static volatile boolean inGame;
     /** The Network screen is resumed (in front). Set by that screen. */
     static volatile boolean lobbyVisible;
+    /** How hosts are found for the Join list; tests replace it. */
+    static volatile java.util.function.Function<Context, HostDiscovery> discoveryFactory = NsdFinder::new;
+    /** What the host's announcement on the Wi-Fi did ("" before it was tried); shown on the host screen. */
+    static volatile String nsdStatus = "";
+
+    static void setNsdStatus(String s) {
+        nsdStatus = s;
+        ping();
+    }
+
+    /** The fingerprint of this phone's installed game data (cached beside the install marker). Not for the UI thread. */
+    static String dataDigest(Context c) {
+        return org.hedgewars.android.net.DataDigest.cached(Store.data(c).root);
+    }
+
     private static final String START_CHANNEL = "gamestart";
     private static final int START_NOTIFICATION_ID = 46634;
     private static PowerManager.WakeLock wake;
@@ -164,7 +179,8 @@ final class NetSession {
         relaySummary = "";
         NetDiag.clear(c);
         List<SetupModel.Team> teams = watch ? new ArrayList<SetupModel.Team>() : Store.loadSetup(c, Store.data(c)).teams;
-        RelayClient rc = new RelayClient(host, port, name, Diag.versionName(c), isHost, teams, HANDLER).watch(watch);
+        RelayClient rc = new RelayClient(host, port, name, Diag.versionName(c), isHost, teams, HANDLER).watch(watch)
+                .identity(org.hedgewars.android.net.Compat.VALUE, dataDigest(c));
         if (isHost) rc.hostSecret(HostService.hostSecret);
         rc.connect();
         client = rc;
@@ -215,7 +231,13 @@ final class NetSession {
         }
     }
 
+    /**
+     * Releases the wake lock and the Wi-Fi lock, unless this phone is still hosting: a host keeps both for as long as its relay runs
+     * (its own lobby link ending, for example, must not let the Wi-Fi go to sleep under the other phones). HostService.stopHosting
+     * clears the relay first, so stopping hosting does release them.
+     */
     static synchronized void releaseLocks() {
+        if (HostService.relay != null) return;
         try {
             if (wake != null && wake.isHeld()) wake.release();
             if (wifi != null && wifi.isHeld()) wifi.release();

@@ -78,6 +78,8 @@ public class HostService extends Service {
         return START_NOT_STICKY;
     }
 
+    private static final NsdHost nsd = new NsdHost();
+
     private void startRelay(int gen) {
         final Context app = getApplicationContext();
         final int stopsAtStart;
@@ -93,6 +95,9 @@ public class HostService extends Service {
             cfg.data = Store.data(app);
             cfg.hostSetup = () -> Store.loadSetup(app, cfg.data);
             cfg.build = Diag.versionName(app);
+            cfg.dataDigest = NetSession.dataDigest(app);
+            // The relay ends a running game with a clear reason when the host has had no Wi-Fi, hotspot or Ethernet address for a few seconds.
+            cfg.networkUp = () -> !NetSession.localAddresses().isEmpty();
             cfg.engine = BuildConfig.ENGINE_COMMIT;
             cfg.hostName = android.os.Build.MODEL;
             cfg.listener = new Relay.Listener() {
@@ -130,6 +135,7 @@ public class HostService extends Service {
                 return;
             }
             NetSession.acquireLocks(app);
+            nsd.register(app, r.port(), cfg.hostName, cfg.build, cfg.dataDigest, r.viewerPort());
             List<String> addr = NetSession.localAddresses();
             String where = addr.isEmpty() ? "no Wi-Fi address found" : addr.get(0) + ":" + Relay.PHONE_PORT;
             goForeground("Hosting at " + where);
@@ -192,6 +198,8 @@ public class HostService extends Service {
             relay = null;
             hostSecret = "";
         }
+        nsd.unregister();
+        NetSession.setNsdStatus("");
         NetSession.leave();
         NetSession.hosting = false;
         // Relay.stop() closes sockets (and can block): never on the main thread.

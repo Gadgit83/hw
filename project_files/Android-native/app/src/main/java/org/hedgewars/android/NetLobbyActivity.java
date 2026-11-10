@@ -16,6 +16,7 @@ import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
+import org.hedgewars.android.net.HostAdvert;
 import org.hedgewars.android.net.Json;
 import org.hedgewars.android.net.Relay;
 import org.hedgewars.android.net.RelayClient;
@@ -39,6 +40,14 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
     private boolean connecting;
     private String problem = "";
     private boolean destroyed;
+    // Finding hosts (docs/tv-viewer-plan.md section 5.1)
+    private HostDiscovery discovery;
+    private LinearLayout hostsBox;
+    private final List<HostAdvert.Found> hosts = new java.util.ArrayList<>();
+    private String searchStatus = "";
+    private boolean searchDone, searching, permissionAsked, permissionDenied;
+    private volatile String myDigest;
+    private String lastHost = "";
 
     @Override
     protected void onCreate(Bundle b) {
@@ -48,6 +57,7 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
         android.content.SharedPreferences p = getSharedPreferences(Store.PREFS_NAME, MODE_PRIVATE);
         name = p.getString("netname", Build.MODEL);
         address = p.getString("netaddr", "");
+        lastHost = p.getString("lasthost", "");
         root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(Ui.BG);
@@ -71,6 +81,7 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
         NetSession.cancelStartNotification(this);
         if (NetSession.hosting) NetSession.startTicker();
         sendForeground(true);
+        if (!NetSession.joined && !NetSession.hosting) startSearch(false);
         getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         RelayClient.StartInfo s = NetSession.pendingStart;
         if (s != null) {
@@ -84,6 +95,7 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
     @Override
     protected void onPause() {
         NetSession.lobbyVisible = false;
+        stopSearch();
         sendForeground(false);
         saveFields();
         super.onPause();
@@ -158,7 +170,11 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
     // Screens -----------------------------------------------------------------------------------
 
     private void render() {
+        // Keep what has been typed: a rebuild (a state change) must not wipe the name or the address.
+        if (nameField != null) name = nameField.getText().toString().trim();
+        if (addressField != null) address = addressField.getText().toString().trim();
         content.removeAllViews();
+        hostsBox = null;
         nameField = null;
         addressField = null;
         TextView title = ui.text(BuildConfig.APP_NAME + " network game", 22, Color.WHITE);
@@ -195,6 +211,10 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
         card.addView(nameField);
         card.addView(ui.heading("Host"));
         card.addView(ui.button(connecting ? "Starting..." : "Host network game", true, v -> host()), Ui.lp(ViewGroup.LayoutParams.MATCH_PARENT, ui.dp(52)));
+        hostsBox = new LinearLayout(this);
+        hostsBox.setOrientation(LinearLayout.VERTICAL);
+        card.addView(hostsBox);
+        renderHosts();
         card.addView(ui.heading("Join by address"));
         addressField = ui.field(address, "Host address, for example 192.168.1.20:46633");
         addressField.setInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
@@ -206,6 +226,145 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
         jb.addView(ui.button("Join to watch", true, v -> join(true)), ui.margins(Ui.lp(0, ui.dp(52), 1f), 8, 0, 0, 0));
         card.addView(jb, ui.margins(Ui.lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT), 0, 8, 0, 0));
         content.addView(card, ui.margins(Ui.lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT), 0, 8, 0, 0));
+    }
+
+    // Finding hosts ------------------------------------------------------------------------------
+
+    /** (Re)starts the search for hosts: asks for the local network permission first where this Android has one. */
+    private void startSearch(boolean again) {
+        if (searching && !again) return;
+        if (!LocalNetwork.granted(this)) {
+            if (!permissionAsked) {
+                permissionAsked = true;
+                if (LocalNetwork.request(this)) return;
+            }
+            permissionDenied = true;
+            searchDone = true;
+            searchStatus = "Finding hosts needs the \"nearby devices\" (local network) permission, which was not given. "
+                    + "Type the host's address below instead; it works the same way.";
+            renderHosts();
+            return;
+        }
+        permissionDenied = false;
+        searching = true;
+        searchDone = false;
+        searchStatus = "Searching for hosts on this Wi-Fi...";
+        hosts.clear();
+        renderHosts();
+        final android.content.Context app = getApplicationContext();
+        new Thread(() -> {
+            // The fingerprint of this phone's data is read (or computed once) off the UI thread; the list needs it to judge each host.
+            if (myDigest == null) myDigest = NetSession.dataDigest(app);
+            runOnUiThread(() -> {
+                if (destroyed || !searching) return;
+                stopDiscovery();
+                discovery = NetSession.discoveryFactory.apply(app);
+                discovery.start(new HostDiscovery.Listener() {
+                    @Override public void hosts(List<HostAdvert.Found> all) {
+                        runOnUiThread(() -> {
+                            if (destroyed) return;
+                            hosts.clear();
+                            hosts.addAll(all);
+                            renderHosts();
+                        });
+                    }
+
+                    @Override public void status(String text, boolean finished) {
+                        runOnUiThread(() -> {
+                            if (destroyed) return;
+                            searchStatus = text;
+                            searchDone = finished;
+                            if (finished) searching = false;
+                            renderHosts();
+                        });
+                    }
+                });
+            });
+        }, "host-search").start();
+    }
+
+    private void stopDiscovery() {
+        HostDiscovery d = discovery;
+        discovery = null;
+        if (d != null) d.stop();
+    }
+
+    private void stopSearch() {
+        searching = false;
+        stopDiscovery();
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int code, String[] perms, int[] results) {
+        if (code == LocalNetwork.REQUEST) {
+            if (LocalNetwork.granted(this) || (results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED)) {
+                LocalNetwork.forceGranted = null;
+                startSearch(false);
+            } else {
+                permissionDenied = true;
+                searchDone = true;
+                searchStatus = "Finding hosts needs the \"nearby devices\" (local network) permission, which was not given. "
+                        + "Type the host's address below instead; it works the same way.";
+                renderHosts();
+            }
+            return;
+        }
+        // Hosting works without the notification permission (the notification is just not shown); go on either way.
+        if (code == 7) reallyHost();
+    }
+
+    /** Hosts that cannot be joined come last; the one picked last time comes first. */
+    private List<HostAdvert.Found> sortedHosts() {
+        List<HostAdvert.Found> l = new java.util.ArrayList<>(hosts);
+        final String d = myDigest;
+        java.util.Collections.sort(l, (a, b) -> {
+            boolean ba = a.incompatibility(org.hedgewars.android.net.Compat.VALUE, Diag.versionName(this), d) == null;
+            boolean bb = b.incompatibility(org.hedgewars.android.net.Compat.VALUE, Diag.versionName(this), d) == null;
+            if (ba != bb) return ba ? -1 : 1;
+            boolean la = a.serviceName.equals(lastHost), lb = b.serviceName.equals(lastHost);
+            if (la != lb) return la ? -1 : 1;
+            return a.name.compareToIgnoreCase(b.name);
+        });
+        return l;
+    }
+
+    private void renderHosts() {
+        LinearLayout box = hostsBox;
+        if (box == null) return;
+        box.removeAllViews();
+        box.addView(ui.heading("Hosts on this Wi-Fi"));
+        if (!searchStatus.isEmpty()) box.addView(ui.hint(searchStatus));
+        final String digest = myDigest;
+        for (final HostAdvert.Found h : sortedHosts()) {
+            String why = h.incompatibility(org.hedgewars.android.net.Compat.VALUE, Diag.versionName(this), digest);
+            LinearLayout row = ui.card();
+            row.setBackground(ui.round(Ui.PANEL_HI, 10));
+            row.addView(ui.text(h.name + (h.serviceName.equals(lastHost) ? "   (last used)" : ""), 16, why == null ? Color.WHITE : Ui.DANGER));
+            row.addView(ui.hint(h.address() + (h.version.isEmpty() ? "" : "   version " + h.version)));
+            if (why != null) {
+                row.addView(coloured("Cannot join: " + why, Ui.DANGER));
+            }
+            LinearLayout bt = ui.row();
+            Button play = ui.button("Join to play", true, v -> pickHost(h, false));
+            play.setEnabled(why == null);
+            Button watch = ui.button("Join to watch", false, v -> pickHost(h, true));
+            watch.setEnabled(why == null);
+            bt.addView(play, ui.weight(1f));
+            bt.addView(watch, ui.margins(Ui.lp(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f), 8, 0, 0, 0));
+            row.addView(bt);
+            box.addView(row, ui.margins(Ui.lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT), 0, 4, 0, 0));
+        }
+        if (searchDone) {
+            box.addView(ui.button("Search again", false, v -> startSearch(true)), ui.margins(Ui.lp(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT), 0, 6, 0, 0));
+        }
+    }
+
+    private void pickHost(HostAdvert.Found h, boolean watch) {
+        lastHost = h.serviceName;
+        getSharedPreferences(Store.PREFS_NAME, MODE_PRIVATE).edit().putString("lasthost", lastHost).apply();
+        saveFields();
+        problem = "";
+        connectTo(h.host, h.port, watch);
     }
 
     private static final String NO_WIFI = "No Wi-Fi: connect the phone to the same Wi-Fi as the TV";
@@ -253,7 +412,8 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
             TextView big = ui.text(hi == null ? "..." : addr.isEmpty() ? NO_WIFI : a.toString(), 18, Color.WHITE);
             big.setTypeface(Typeface.DEFAULT_BOLD);
             card.addView(big);
-            card.addView(ui.hint("Other phones type this address (Join to play or Join to watch). Not needed for a one-phone game with the TV."));
+            if (!NetSession.nsdStatus.isEmpty()) card.addView(ui.hint(NetSession.nsdStatus));
+            card.addView(ui.hint("Other phones normally find this phone by themselves on the same Wi-Fi (Join list). If they do not, they type this address (Join to play or Join to watch). Not needed for a one-phone game with the TV."));
         } else {
             card.addView(ui.heading(NetSession.watching ? "Joined as a watcher" : "Joined"));
             card.addView(ui.text("Host " + NetSession.target + (st == null ? "" : " (" + Json.str(st, "host", "") + ")"), 18, Color.WHITE));
@@ -398,12 +558,6 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
         reallyHost();
     }
 
-    @Override
-    public void onRequestPermissionsResult(int code, String[] perms, int[] results) {
-        // Hosting works without the permission (the notification is just not shown); go on either way.
-        if (code == 7) reallyHost();
-    }
-
     private void reallyHost() {
         connecting = true;
         render();
@@ -456,8 +610,13 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
             render();
             return;
         }
+        connectTo(host, port, watch);
+    }
+
+    private void connectTo(final String host, final int port, final boolean watch) {
         final String nick = name.isEmpty() ? Build.MODEL : name;
         connecting = true;
+        stopSearch();
         new Thread(() -> {
             try {
                 NetSession.connect(getApplicationContext(), host, port, nick, false, watch);

@@ -70,6 +70,16 @@ final class TestSupport {
         set(NetSession.class, "client", null);
         set(NetSession.class, "listener", null);
         set(NetSession.class, "hostInfo", null);
+        set(NetSession.class, "wake", null);
+        set(NetSession.class, "wifi", null);
+        set(NetSession.class, "nsdStatus", "");
+        set(HostService.class, "relay", null);
+        LocalNetwork.forceKnown = null;
+        LocalNetwork.forceGranted = null;
+        NetSession.discoveryFactory = c -> new HostDiscovery() {        // NSD does not run under Robolectric: a search that finds nothing
+            @Override public void start(Listener l) { l.status("Searching for hosts on this Wi-Fi...", false); }
+            @Override public void stop() { }
+        };
         set(NetSession.class, "tickerOff", true);            // no background thread: a test sets hostInfo itself
     }
 

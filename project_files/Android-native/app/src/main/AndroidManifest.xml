@@ -19,6 +19,10 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Local network access (Android 16 and later; required of apps that target Android 17). Declared without maxSdk: older systems
+         ignore a permission they do not know. Joining by typed address works without it. NEARBY_WIFI_DEVICES is not declared:
+         NSD and plain sockets do not need it (it is for Wi-Fi Direct, Aware and scans). See LocalNetwork.java. -->
+    <uses-permission android:name="android.permission.ACCESS_LOCAL_NETWORK" />
 
     <application
         android:name=".HpApp"

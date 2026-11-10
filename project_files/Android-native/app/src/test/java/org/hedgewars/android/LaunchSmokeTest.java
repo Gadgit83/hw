@@ -326,6 +326,139 @@ public class LaunchSmokeTest {
         System.out.println("SDK " + android.os.Build.VERSION.SDK_INT + ": NetLobbyActivity chooser ok");
     }
 
+    // Phase 5: finding hosts ----------------------------------------------------------------------------------
+
+    private static org.hedgewars.android.net.HostAdvert.Found advert(String service, String host, int port, String compat, String version, String data) {
+        java.util.Map<String, String> t = org.hedgewars.android.net.HostAdvert.txt(version, compat, 60, service, 8766, data);
+        java.util.Map<String, byte[]> raw = new java.util.HashMap<>();
+        for (java.util.Map.Entry<String, String> e : t.entrySet()) raw.put(e.getKey(), e.getValue().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        return org.hedgewars.android.net.HostAdvert.parse(service, host, port, raw);
+    }
+
+    private static void buttons(android.view.View v, String text, java.util.List<android.widget.Button> out) {
+        if (v instanceof android.widget.Button && text.contentEquals(((android.widget.Button) v).getText())) out.add((android.widget.Button) v);
+        if (v instanceof android.view.ViewGroup) {
+            for (int i = 0; i < ((android.view.ViewGroup) v).getChildCount(); i++) buttons(((android.view.ViewGroup) v).getChildAt(i), text, out);
+        }
+    }
+
+    /** A fake search that reports two hosts at once: one that matches this phone, one with another game version. */
+    private static void fakeHosts(final org.hedgewars.android.net.HostAdvert.Found... found) {
+        NetSession.discoveryFactory = c -> new HostDiscovery() {
+            @Override public void start(Listener l) {
+                l.status("Searching for hosts on this Wi-Fi...", false);
+                l.hosts(java.util.Arrays.asList(found));
+            }
+            @Override public void stop() { }
+        };
+    }
+
+    @Test
+    public void netLobbyActivity_discoveredHosts_listedAndIncompatibleDisabled() throws Exception {
+        TestSupport.installData(app());
+        String digest = NetSession.dataDigest(app());
+        String ver = Diag.versionName(app());
+        String C = org.hedgewars.android.net.Compat.VALUE;
+        fakeHosts(advert("Fairphone", "127.0.0.1", 1, C, ver, digest),
+                advert("OldPhone", "192.168.1.60", 46633, "hwnet-60-sim0", "0.2.9", digest),
+                advert("OtherData", "192.168.1.61", 46633, C, ver, "ffffffffffffffffffffffffffffffff"));
+        Activity a = Robolectric.buildActivity(NetLobbyActivity.class, null).create().start().postCreate(null).resume().visible().get();
+        TestSupport.settle(800);
+        TestSupport.layout(a);
+        android.view.View root = a.getWindow().getDecorView();
+        String text = TestSupport.texts(root);
+        assertTrue("the three hosts are listed: " + text, text.contains("Fairphone") && text.contains("OldPhone") && text.contains("OtherData"));
+        assertTrue("incompatible hosts show the reason: " + text, text.contains("Cannot join: Different game versions") && text.contains("Cannot join: Game data differs"));
+        java.util.List<android.widget.Button> play = new java.util.ArrayList<>(), watch = new java.util.ArrayList<>();
+        buttons(root, "Join to play", play);
+        buttons(root, "Join to watch", watch);
+        // three host rows and the typed-address buttons; the compatible host comes first
+        assertTrue("one play and one watch button per host plus the address ones: " + play.size(), play.size() == 4 && watch.size() == 4);
+        assertTrue("the compatible host can be joined", play.get(0).isEnabled() && watch.get(0).isEnabled());
+        assertTrue("the incompatible hosts cannot", !play.get(1).isEnabled() && !play.get(2).isEnabled() && !watch.get(1).isEnabled() && !watch.get(2).isEnabled());
+        assertTrue("the typed address entry stays", text.contains("Join by address") && play.get(3).isEnabled());
+        // one tap on the compatible host connects (nothing listens on 127.0.0.1:1, so the failure message proves the attempt)
+        play.get(0).performClick();
+        TestSupport.settle(1500);
+        String after = TestSupport.texts(a.getWindow().getDecorView());
+        assertTrue("the tap tried to reach the host: " + after, after.contains("Could not reach 127.0.0.1:1"));
+        assertTrue("the host picked is remembered",
+                app().getSharedPreferences(Store.PREFS_NAME, Context.MODE_PRIVATE).getString("lasthost", "").equals("Fairphone"));
+        System.out.println("SDK " + android.os.Build.VERSION.SDK_INT + ": discovered hosts list ok");
+    }
+
+    @Test
+    public void netLobbyActivity_noHostFound_offersSearchAgainAndTypedAddress() throws Exception {
+        TestSupport.installData(app());
+        NetSession.discoveryFactory = c -> new HostDiscovery() {
+            @Override public void start(Listener l) { l.status("No host found on this Wi-Fi.", true); }
+            @Override public void stop() { }
+        };
+        Activity a = Robolectric.buildActivity(NetLobbyActivity.class, null).create().start().postCreate(null).resume().visible().get();
+        TestSupport.settle(800);
+        String text = TestSupport.texts(a.getWindow().getDecorView());
+        assertTrue(text, text.contains("No host found on this Wi-Fi.") && text.contains("Search again") && text.contains("Join by address"));
+        System.out.println("SDK " + android.os.Build.VERSION.SDK_INT + ": no host found ok");
+    }
+
+    @Test
+    public void netLobbyActivity_localNetworkPermissionDenied_fallsBackToTypedAddress() throws Exception {
+        TestSupport.installData(app());
+        final int[] started = { 0 };
+        NetSession.discoveryFactory = c -> new HostDiscovery() {
+            @Override public void start(Listener l) { started[0]++; }
+            @Override public void stop() { }
+        };
+        LocalNetwork.forceKnown = true;
+        LocalNetwork.forceGranted = false;
+        NetLobbyActivity a = Robolectric.buildActivity(NetLobbyActivity.class, null).create().start().postCreate(null).resume().visible().get();
+        TestSupport.settle(300);
+        assertTrue("the permission is asked for", org.robolectric.Shadows.shadowOf(a).getLastRequestedPermission() != null
+                && org.robolectric.Shadows.shadowOf(a).getLastRequestedPermission().requestedPermissions[0].equals(LocalNetwork.PERMISSION));
+        assertTrue("no search runs before the answer", started[0] == 0);
+        a.onRequestPermissionsResult(LocalNetwork.REQUEST, new String[] { LocalNetwork.PERMISSION }, new int[] { android.content.pm.PackageManager.PERMISSION_DENIED });
+        TestSupport.settle(300);
+        TestSupport.layout(a);
+        android.view.View root = a.getWindow().getDecorView();
+        String text = TestSupport.texts(root);
+        assertTrue("the refusal is explained and the typed address offered: " + text,
+                text.contains("permission, which was not given") && text.contains("Type the host's address") && text.contains("Join by address"));
+        assertTrue("still no search", started[0] == 0);
+        java.util.List<android.widget.Button> play = new java.util.ArrayList<>();
+        buttons(root, "Join to play", play);
+        assertTrue("the typed-address join is enabled", play.size() == 1 && play.get(0).isEnabled());
+        // granted later (the person changed it in Settings): Search again works
+        LocalNetwork.forceGranted = true;
+        java.util.List<android.widget.Button> again = new java.util.ArrayList<>();
+        buttons(root, "Search again", again);
+        assertTrue("Search again is offered", again.size() == 1);
+        again.get(0).performClick();
+        TestSupport.settle(600);
+        assertTrue("the search starts once the permission is there", started[0] == 1);
+        System.out.println("SDK " + android.os.Build.VERSION.SDK_INT + ": local network permission denied ok");
+    }
+
+    @Test
+    public void netSession_locksFollowHosting() throws Exception {
+        NetSession.acquireLocks(app());
+        java.lang.reflect.Field wf = NetSession.class.getDeclaredField("wifi");
+        wf.setAccessible(true);
+        java.lang.reflect.Field kf = NetSession.class.getDeclaredField("wake");
+        kf.setAccessible(true);
+        assertTrue("both locks held", ((android.net.wifi.WifiManager.WifiLock) wf.get(null)).isHeld() && ((android.os.PowerManager.WakeLock) kf.get(null)).isHeld());
+        NetSession.releaseLocks();
+        assertFalse("released when not hosting", ((android.net.wifi.WifiManager.WifiLock) wf.get(null)).isHeld() || ((android.os.PowerManager.WakeLock) kf.get(null)).isHeld());
+        NetSession.acquireLocks(app());
+        HostService.relay = new org.hedgewars.android.net.Relay(new org.hedgewars.android.net.Relay.Config());
+        NetSession.releaseLocks();                              // the host's own link ended, the relay still runs: keep the locks
+        assertTrue("kept while the relay runs", ((android.net.wifi.WifiManager.WifiLock) wf.get(null)).isHeld() && ((android.os.PowerManager.WakeLock) kf.get(null)).isHeld());
+        HostService.relay = null;
+        NetSession.releaseLocks();
+        assertFalse("released after hosting stopped", ((android.net.wifi.WifiManager.WifiLock) wf.get(null)).isHeld() || ((android.os.PowerManager.WakeLock) kf.get(null)).isHeld());
+        System.out.println("SDK " + android.os.Build.VERSION.SDK_INT + ": locks ok");
+    }
+
+
     @Test
     public void netLobbyActivity_joinedState() throws Exception {
         TestSupport.installData(app());

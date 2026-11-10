@@ -59,6 +59,8 @@ public final class DataInstaller {
         try (FileOutputStream m = new FileOutputStream(new File(dest, MARKER))) {
             m.write(stamp(c).getBytes("UTF-8"));
         }
+        // Fingerprint of the data for the join check, cached beside the marker so it is computed once per install.
+        org.hedgewars.android.net.DataDigest.cached(dest);
         new File(c.getFilesDir(), "user").mkdirs();
     }
 

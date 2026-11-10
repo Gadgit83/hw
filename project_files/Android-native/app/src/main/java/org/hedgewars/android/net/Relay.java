@@ -292,11 +292,13 @@ public final class Relay {
         synchronized (lock) {
             List<Object> pl = new ArrayList<>();
             for (Player p : players.values()) pl.add(Json.obj("name", p.name, "teams", (long) p.teams.size(), "host", p.host));
-            return Json.write(Json.obj("state", state == S_SETUP ? "setup" : "playing", "game", game == null ? 0L : (long) game.no,
+            Map<String, Object> out = Json.obj("state", state == S_SETUP ? "setup" : "playing", "game", game == null ? 0L : (long) game.no,
                     "viewers", (long) viewers.size(), "viewersEver", (long) viewersEver, "watching", (long) spectators.size(),
                     "host", cfg.hostName, "players", pl, "compatible", reason.isEmpty(), "reason", reason,
                     "compat", Compat.VALUE, "protocol", (long) Compat.ENGINE_PROTOCOL,
-                    "engine", (cfg.build + (cfg.engine.isEmpty() ? "" : ", engine " + cfg.engine)).trim()));
+                    "engine", (cfg.build + (cfg.engine.isEmpty() ? "" : ", engine " + cfg.engine)).trim());
+            if (lastGameEnded != null) out.put("lastGame", Json.obj("n", (long) lastGameNo, "ended", lastGameEnded, "atMs", lastGameAt));
+            return Json.write(out);
         }
     }
 
@@ -323,7 +325,10 @@ public final class Relay {
         running = false;
         try { if (server != null) server.close(); } catch (IOException ignored) { }
         try { ServerSocket vs = viewerServer; if (vs != null) vs.close(); } catch (IOException ignored) { }
-        synchronized (lock) { closeViewers("the host stopped hosting"); }
+        synchronized (lock) {
+            if (game != null) noteLastGame(game.no, "stopped");
+            closeViewers("the host stopped hosting", CLOSE_STOPPED, "relay-stopped");
+        }
         List<Player> all;
         synchronized (lock) {
             all = new ArrayList<>(players.values());
@@ -1689,7 +1694,11 @@ public final class Relay {
             Player pl = players.get(d.player);
             s.digests.add("turn " + d.seq + ": " + d.checksum + " tick " + d.tick + " from " + (pl == null ? "?" : pl.name));
         }
-        closeViewers(reason.equals(HOST_ENDED) ? "the host ended the game" : "the game ended");
+        String endedAs = endedAs(reason);
+        noteLastGame(g.no, endedAs);
+        closeViewers(reason.equals(HOST_ENDED) ? "the host ended the game" : "the game ended",
+                endedAs.equals("host") ? CLOSE_HOST_ENDED : endedAs.equals("over") ? CLOSE_GAME_OVER : CLOSE_HOST_LOST,
+                endedAs.equals("host") ? "host-ended" : endedAs.equals("over") ? "game-over" : "host-lost");
         for (Spectator sp : spectators.values()) retireWatchLink(sp, "the game ended");
         if (g.watcherReportDropped > 0) s.watchers.add("(" + g.watcherReportDropped + " earlier watcher lines not listed; the last " + MAX_VIEWER_LINES + " follow)");
         s.watchers.addAll(g.watcherReport);
@@ -1824,6 +1833,26 @@ public final class Relay {
     public static final String WIFI_LOST = "The host lost its Wi-Fi connection";
 
     /** Lock held. The host has had no LAN address for the limit: end the running game for everyone, say why to the lobby. */
+    /** WebSocket close codes the TV viewer is sent when a game ends or hosting stops (docs/multiphone-test.md, "How the TV is told the game ended"). */
+    public static final int CLOSE_HOST_ENDED = 4001, CLOSE_GAME_OVER = 4002, CLOSE_HOST_LOST = 4003, CLOSE_STOPPED = 4004;
+    private int lastGameNo;
+    private String lastGameEnded;
+    private long lastGameAt;
+
+    /** Lock held. */
+    private void noteLastGame(int n, String ended) {
+        lastGameNo = n;
+        lastGameEnded = ended;
+        lastGameAt = System.currentTimeMillis();
+    }
+
+    /** "host" (the host or the relay ended it), "over" (a normal game over), "host-lost" (the host's Wi-Fi went, or every engine is gone). */
+    static String endedAs(String reason) {
+        if (reason.equals("every engine finished")) return "over";
+        if (reason.equals(WIFI_LOST) || reason.equals("every engine is gone")) return "host-lost";
+        return "host";
+    }
+
     private void hostNetworkLost(long now) {
         netLossHandled = true;
         log("host network down for " + (now - netDownSince) / 1000 + " s");
@@ -2169,14 +2198,19 @@ public final class Relay {
     }
 
     /** Lock held. Sends a close frame after everything queued and lets go of every viewer. */
-    private void closeViewers(String why) {
+    private void closeViewers(String why, int code, String reasonText) {
+        byte[] rb = reasonText.getBytes(StandardCharsets.UTF_8);
+        byte[] payload = new byte[2 + rb.length];
+        payload[0] = (byte) (code >> 8);
+        payload[1] = (byte) code;
+        System.arraycopy(rb, 0, payload, 2, rb.length);
         for (Viewer v : new ArrayList<>(viewers)) {
             retire(v, why);
-            v.out.offer(Ws.frame(8, new byte[0]));
+            v.out.offer(Ws.frame(8, payload));      // behind every game frame already queued: the close code is the last thing the TV reads
             v.out.closeWhenDrained();
             final Socket vs = v.sock;
             Thread t = new Thread(() -> {
-                try { Thread.sleep(1000); vs.close(); } catch (Exception ignored) { }
+                try { Thread.sleep(2000); vs.close(); } catch (Exception ignored) { }     // the drain: time for the TV to read the frames and echo the close
             });
             t.setDaemon(true);
             t.start();

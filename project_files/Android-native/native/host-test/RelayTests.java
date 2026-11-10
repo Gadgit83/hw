@@ -870,6 +870,115 @@ public class RelayTests {
         return p;
     }
 
+    /** Connects a TV viewer to a running game; returns the open socket after the handshake and the first (setup) message. */
+    static Socket viewerOn(Fix f) throws Exception {
+        Socket s = new Socket("127.0.0.1", f.relay.viewerPort());
+        s.setSoTimeout(8000);
+        s.getOutputStream().write(("GET / HTTP/1.1\r\nHost: x\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n").getBytes(StandardCharsets.ISO_8859_1));
+        readUntilBlank(s.getInputStream());
+        readWsFrame(s.getInputStream());
+        return s;
+    }
+
+    /** Reads frames until the close frame; returns "code reason", or "none" if the socket ended without one. {@code lastData} gets the number of data frames read. */
+    static String closeOf(Socket s, int[] dataFrames) throws Exception {
+        InputStream in = s.getInputStream();
+        long deadline = System.currentTimeMillis() + 15000;      // pings arrive every few hundred ms, so a read never times out by itself
+        while (System.currentTimeMillis() < deadline) {
+            int[] op = new int[1];
+            byte[] p;
+            try { p = readWsFrame(in, op); } catch (java.io.IOException e) { return "none"; }
+            if (p == null) return "none";
+            if (op[0] == 8) return p.length < 2 ? "empty" : (((p[0] & 0xff) << 8) | (p[1] & 0xff)) + " " + new String(p, 2, p.length - 2, StandardCharsets.UTF_8);
+            if (op[0] == 2) dataFrames[0]++;
+        }
+        return "none";
+    }
+
+    static String statusBody(Fix f) throws Exception {
+        try (Socket c = new Socket("127.0.0.1", f.relay.viewerPort())) {
+            c.setSoTimeout(3000);
+            c.getOutputStream().write("GET / HTTP/1.1\r\nHost: x\r\n\r\n".getBytes(StandardCharsets.UTF_8));
+            ByteArrayOutputStream all = new ByteArrayOutputStream();
+            byte[] buf = new byte[4096];
+            int n;
+            while ((n = c.getInputStream().read(buf)) > 0) all.write(buf, 0, n);
+            String r = new String(all.toByteArray(), StandardCharsets.UTF_8);
+            return r.substring(r.indexOf("\r\n\r\n") + 4);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    static void testViewerCloseCodes() throws Exception {
+        System.out.println("TV viewer: close codes and lastGame (how the TV is told the game ended)");
+        // before any game
+        Fix f0 = new Fix(20000, 1000);
+        check(!statusBody(f0).contains("lastGame"), "lastGame is absent before the first game");
+        f0.stop();
+        // host ends the game: 4001
+        Game g = new Game(20000, 1000);
+        Socket v = viewerOn(g.f);
+        check(waitFor(() -> g.f.relay.viewerCount() == 1, 2000), "viewer attached");
+        g.ea.send(new byte[] { 'Z', 1 });
+        g.ea.send("Q");
+        g.ea.close();                                   // the engine sends Q and exits: its link ends
+        int[] n = new int[1];
+        String c = closeOf(v, n);
+        check(c.equals("4001 host-ended"), "host ended the game: close code 4001 host-ended (" + c + ")");
+        check(n[0] >= 1, "the queued game frame was delivered before the close (" + n[0] + " data frames)");
+        Map<String, Object> st = (Map<String, Object>) Json.parse(statusBody(g.f));
+        Map<String, Object> lg = (Map<String, Object>) st.get("lastGame");
+        check(lg != null && "host".equals(lg.get("ended")) && ((Number) lg.get("n")).intValue() == 1 && ((Number) lg.get("atMs")).longValue() > System.currentTimeMillis() - 20000, "lastGame {n:1, ended:host, atMs} (" + lg + ")");
+        check("setup".equals(st.get("state")), "state stays setup after the game");
+        v.close();
+        g.end();
+        // normal game over: 4002, after the last messages
+        Game g2 = new Game(20000, 1000);
+        Socket v2 = viewerOn(g2.f);
+        waitFor(() -> g2.f.relay.viewerCount() == 1, 2000);
+        g2.ea.send(new byte[] { 'Z', 2 });
+        g2.ea.send("q");
+        g2.eb.send("q");
+        g2.ea.close();
+        g2.eb.close();                                  // each engine says q and exits
+        int[] n2 = new int[1];
+        String c2 = closeOf(v2, n2);
+        check(c2.equals("4002 game-over"), "normal game over: close code 4002 game-over (" + c2 + ")");
+        check(n2[0] >= 1, "the final messages came first (" + n2[0] + ")");
+        Map<String, Object> lg2 = (Map<String, Object>) ((Map<String, Object>) Json.parse(statusBody(g2.f))).get("lastGame");
+        check(lg2 != null && "over".equals(lg2.get("ended")), "lastGame ended over (" + lg2 + ")");
+        v2.close();
+        g2.end();
+        // host loses its Wi-Fi: 4003
+        Fix.netProbe = true;
+        Fix.netLossMs = 500;
+        try {
+            Game g3 = new Game(60000, 1000);
+            Socket v3 = viewerOn(g3.f);
+            waitFor(() -> g3.f.relay.viewerCount() == 1, 2000);
+            g3.f.netUp.set(false);
+            String c3 = closeOf(v3, new int[1]);
+            check(c3.equals("4003 host-lost"), "host lost: close code 4003 host-lost (" + c3 + ")");
+            Map<String, Object> lg3 = (Map<String, Object>) ((Map<String, Object>) Json.parse(statusBody(g3.f))).get("lastGame");
+            check(lg3 != null && "host-lost".equals(lg3.get("ended")), "lastGame ended host-lost (" + lg3 + ")");
+            v3.close();
+            g3.end();
+        } finally {
+            Fix.netProbe = false;
+            Fix.netLossMs = 4000;
+        }
+        // hosting stops during a game: 4004
+        Game g4 = new Game(20000, 1000);
+        Socket v4 = viewerOn(g4.f);
+        waitFor(() -> g4.f.relay.viewerCount() == 1, 2000);
+        Thread stopper = new Thread(g4.f::stop);
+        stopper.start();
+        String c4 = closeOf(v4, new int[1]);
+        check(c4.equals("4004 relay-stopped"), "hosting stopped: close code 4004 relay-stopped (" + c4 + ")");
+        v4.close();
+        stopper.join(5000);
+    }
+
     static void testViewerCount() throws Exception {
         System.out.println("M2: the viewer's first message counts the setup lines in one byte");
         Game g = new Game(20000, 1000);
@@ -1428,6 +1537,7 @@ public class RelayTests {
         testWatchers();
         testViewerCount();
         testViewerAbuse();
+        testViewerCloseCodes();
         testViewerReconnect();
         testViewerRtt();
         testViewerClassification();

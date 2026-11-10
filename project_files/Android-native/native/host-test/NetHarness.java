@@ -179,6 +179,8 @@ public class NetHarness {
         cfg.data = d;
         cfg.hostSetup = () -> hostModel;
         cfg.build = "harness";
+        final String digest = org.hedgewars.android.net.DataDigest.compute(new File(data));      // the join check runs for real in every scenario
+        cfg.dataDigest = digest;
         cfg.hostName = "Phone A";
         cfg.silenceMs = Long.parseLong(System.getenv().getOrDefault("NET_SILENCE_MS", "20000"));
         cfg.graceMs = Long.parseLong(System.getenv().getOrDefault("NET_GRACE_MS", "40000"));
@@ -275,24 +277,24 @@ public class NetHarness {
             if (scenario.equals("watchflap") && n == 2) sc = "0:waitfile:" + root.resolve("w2quit.now") + ";0:userquit";
             Phone w = new Phone("Phone W" + (scenario.equals("watchflap") ? Integer.toString(n) : ""), root.resolve(scenario.equals("watchflap") ? "phoneW" + n : "phoneW"), false, new ArrayList<>(), hosttest, data, sc);
             w.watch = true;
-            w.client = new RelayClient("127.0.0.1", relay.port(), "Phone W", "harness", false, new ArrayList<>(), w).watch(true);
+            w.client = new RelayClient("127.0.0.1", relay.port(), "Phone W", "harness", false, new ArrayList<>(), w).watch(true).identity(org.hedgewars.android.net.Compat.VALUE, digest);
             watchers.add(w);
             return w;
         };
-        pa.client = new RelayClient("127.0.0.1", relay.port(), "Phone A", "harness", true, aTeams, pa).hostSecret(cfg.hostSecret);
+        pa.client = new RelayClient("127.0.0.1", relay.port(), "Phone A", "harness", true, aTeams, pa).hostSecret(cfg.hostSecret).identity(org.hedgewars.android.net.Compat.VALUE, digest);
         if (scenario.equals("slowstart")) pb.extraEnv.put("HP_NET_TX_DELAY_MS", System.getenv().getOrDefault("NET_DELAY_MS", "30000"));
         pa.client.connect();
         pa.client.setReady(true);
         List<Phone> list = new ArrayList<>();
         list.add(pa);
         if (!bTeams.isEmpty()) {
-            pb.client = new RelayClient("127.0.0.1", relay.port(), "Phone B", "harness", false, bTeams, pb);
+            pb.client = new RelayClient("127.0.0.1", relay.port(), "Phone B", "harness", false, bTeams, pb).identity(org.hedgewars.android.net.Compat.VALUE, digest);
             pb.client.connect();
             pb.client.setReady(true);
             list.add(pb);
         }
         if (!cTeams.isEmpty()) {
-            pc.client = new RelayClient("127.0.0.1", relay.port(), "Phone C", "harness", false, cTeams, pc);
+            pc.client = new RelayClient("127.0.0.1", relay.port(), "Phone C", "harness", false, cTeams, pc).identity(org.hedgewars.android.net.Compat.VALUE, digest);
             pc.client.connect();
             pc.client.setReady(true);
             list.add(pc);
@@ -325,6 +327,7 @@ public class NetHarness {
         final String specPort = System.getenv().getOrDefault("NET_SPEC_PORT", "18770");
         final List<ViewerRun> runs = new ArrayList<>();
         ViewerRun cur = null;
+        CloseProbe probe = null;
         long reconnectAt = 0, flapQuitAt = 0;
         final int watchAfter = Integer.parseInt(System.getenv().getOrDefault("NET_WATCH_AFTER_TURNS", scenario.equals("watchflap") ? "1" : "3"));
         while (System.currentTimeMillis() - t0 < timeout * 1000) {
@@ -337,6 +340,7 @@ public class NetHarness {
                         cur = new ViewerRun(root.resolve("viewer" + (flap ? "-" + (n + 1) : "")), n + 1, data, specPort, relay.viewerPort());
                         cur.start();
                         runs.add(cur);
+                        if (probe == null && (scenario.equals("viewer3") || scenario.equals("hostpause"))) probe = CloseProbe.start(relay.viewerPort());
                         System.out.println("[harness] === TV viewer session " + (n + 1) + " (viewer-sim.js + spectator engine) connected after " + relay.turns() + " turn checksums ===");
                     }
                 } else if (flap && n <= killAt.length && relay.turns() >= killAt[n - 1]) {
@@ -416,6 +420,12 @@ public class NetHarness {
         }
         if (wantViewer && runs.isEmpty()) fails.add("the TV viewer never connected (the game was too short or the viewer port was closed)");
         if (flap && runs.size() < 3) fails.add("only " + runs.size() + " of the 3 TV viewer sessions started (the game ended too early)");
+        if (probe != null) {
+            // The TV page is not ours to change; this stand-in reads the WebSocket close frame the relay sends when the game ends.
+            String got = probe.await(15000);
+            System.out.println("[harness] WebSocket close seen by a second viewer connection: " + got);
+            if (!got.equals("4002 game-over")) fails.add("the TV close signal after a normal game over should be \"4002 game-over\", the viewer saw: " + got);
+        }
         for (ViewerRun vr : runs) {
             if (!vr.killed) vr.finish();
             vr.report(fails, vr.idx > 1);
@@ -806,6 +816,49 @@ public class NetHarness {
     static String jsonLikeTypes(String diag) {
         int i = diag.indexOf("by type tx/rx:");
         return i < 0 ? "" : diag.substring(i, diag.indexOf('\n', i) < 0 ? diag.length() : diag.indexOf('\n', i));
+    }
+
+    /** A minimal WebSocket viewer that only waits for the close frame and keeps its code and reason. */
+    static final class CloseProbe {
+        private volatile String result = "none";
+        private Thread t;
+
+        static CloseProbe start(int port) {
+            CloseProbe c = new CloseProbe();
+            c.t = new Thread(() -> {
+                try (java.net.Socket s = new java.net.Socket("127.0.0.1", port)) {
+                    s.setSoTimeout(600000);
+                    s.getOutputStream().write(("GET / HTTP/1.1\r\nHost: x\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n").getBytes(java.nio.charset.StandardCharsets.ISO_8859_1));
+                    java.io.InputStream in = new java.io.BufferedInputStream(s.getInputStream());
+                    int state = 0, ch;
+                    while (state < 4 && (ch = in.read()) >= 0) state = (ch == '\r' && (state == 0 || state == 2)) ? state + 1 : (ch == '\n' && (state == 1 || state == 3)) ? state + 1 : 0;
+                    for (;;) {
+                        int b0 = in.read(), b1 = in.read();
+                        if (b0 < 0 || b1 < 0) return;
+                        long len = b1 & 0x7f;
+                        if (len == 126) len = (in.read() << 8) | in.read();
+                        else if (len == 127) { len = 0; for (int i = 0; i < 8; i++) len = (len << 8) | in.read(); }
+                        byte[] pl = new byte[(int) len];
+                        int got = 0;
+                        while (got < len) { int r = in.read(pl, got, (int) len - got); if (r < 0) return; got += r; }
+                        if ((b0 & 0x0f) == 8) {
+                            c.result = pl.length < 2 ? "empty" : (((pl[0] & 0xff) << 8) | (pl[1] & 0xff)) + " " + new String(pl, 2, pl.length - 2, java.nio.charset.StandardCharsets.UTF_8);
+                            return;
+                        }
+                    }
+                } catch (Exception e) {
+                    c.result = "error " + e;
+                }
+            }, "close-probe");
+            c.t.setDaemon(true);
+            c.t.start();
+            return c;
+        }
+
+        String await(long ms) {
+            try { t.join(ms); } catch (InterruptedException ignored) { }
+            return result;
+        }
     }
 
     /** One TV viewer session: viewer-sim.js (the TV page's stand-in) feeding a spectator engine, both from hedgewars-party's e2e-host. */

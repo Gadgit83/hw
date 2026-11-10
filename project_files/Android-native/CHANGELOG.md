@@ -4,6 +4,31 @@ All notable changes to the native Android app (`project_files/Android-native`), 
 
 Only some builds were put on a phone, so a version below is a build that was made, not necessarily one that was released. Releases are tags on `android-master` with the APK attached; there is none yet.
 
+## 0.3.0-tv7 (109): hosting robustness, finding hosts, join check (test build)
+
+`HP_PROFILE=test`, versionName `0.3.0-tv7-test`. Phase 5 of docs/tv-viewer-plan.md.
+
+### Added
+
+- Finding hosts: a hosting phone registers `_hedgeparty._tcp` with NsdManager on the phone port (46633). The TXT record holds `v` (app version), `compat` (`net/Compat.java`), `proto` (engine protocol 60), `name` (the device model: the player name is an open owner decision), `tv` (TV WebSocket port 8766), `data` (game data fingerprint) and `lp` (lobby protocol); `HostAdvert.txt`. The Network screen lists hosts found on the Wi-Fi ("Hosts on this Wi-Fi") with the version and whether this phone can join; "Join to play" and "Join to watch" on a row join at once. A host that does not match is listed, greyed, with the reason. The last host used comes first. The typed address stays. Resolving is serialised with a 5 s limit per try and three tries (`net/ResolveQueue.java`), because `resolveService` fails when two run at once and sometimes never answers; the search stops after 45 s ("Search again"). The host screen says whether the announcement worked.
+- Join check: the hello carries `compat`, the app version and a fingerprint of the installed game data (`net/DataDigest.java`: SHA-256 over the sorted list of file paths and sizes under Data, dot-files left out, 32 hex digits; computed once after install and cached in `Data/.digest` beside `.installed`). The relay refuses, naming both sides: a different `compat` ("Different game versions"), a different app version ("This phone has X and the host has Y: update the app..."), different data ("Game data differs"), a phone with no fingerprint while the host has one. Watching phones are checked too. The whole manifest is compared, not only what the host's setup uses, because the theme, map and scheme are chosen after joining and each phone's teams bring their own forts, hats and voices; the test and full builds therefore refuse each other. The app version must match exactly (stricter than the TV, which compares `compat` only); relaxing it is one line in `Compat.refusal`.
+- Engine link liveness: while a game runs the relay pings every engine link (control frame `\0K`, every 5 s) and the launcher answers on its own thread (so a phone that is generating a map or is paused still answers). A phone whose link has been silent for 20 s (any frame counts) is dropped like any dropout (team-gone `F`, the game goes on), a watcher's link is cut. This finds a half-open link of a phone that is not the one playing, which the silence rule cannot. The launcher also treats 60 s without any frame from the relay as a lost host. Reconnecting to a running game is not built (out of scope; a dropped phone can only watch again).
+- Host Wi-Fi loss: the relay asks the host service once a second whether the phone still has a Wi-Fi, hotspot or Ethernet address; after 4 s without one the running game ends for everyone with "The host lost its Wi-Fi connection", and a lobby phone gets a notice.
+- Local network permission: `android.permission.ACCESS_LOCAL_NETWORK` is declared and requested on Android 16 and later before searching; if it is refused the search is off, the screen says so and the typed address still works. `NEARBY_WIFI_DEVICES` is not declared (NSD and plain sockets do not need it). The app targets API 34, where the system should not enforce either; not checked on a phone with Android 16 or 17.
+- Tests: `RelayTests` `testCompat`, `testDataDigest`, `testHostAdvert`, `testResolveQueue`, `testLinkLiveness`, `testHostNetworkLoss` and the query-string check; smoke tests for the discovered-hosts list (NSD replaced by a fake), a disabled incompatible host, one-tap join, the permission-denied fallback and the Wi-Fi and wake lock life cycle.
+
+- Telling the TV how a game ended: the relay sends each TV a WebSocket close frame with a code and reason after the last queued game frame (4001 `host-ended`, 4002 `game-over`, 4003 `host-lost`, 4004 `relay-stopped`; before, an empty close and a socket closed after 1 s, so a host-ended game left the TV waiting until its own 15 s timeout), and the status GET gains `lastGame` `{n, ended, atMs}`. Table and rules in docs/multiphone-test.md.
+
+### Changed
+
+- The wake lock and the Wi-Fi lock are no longer released when the host's own lobby link ends while the relay still runs; they go when hosting stops (they were already taken for hosting, for joined phones and watchers, and the game screen of a network game already keeps the screen on).
+- The status GET on the viewer port reads `proto=` and `compat=` from the query string (after `?` or `&`), not by substring: `?xcompat=...` is no longer taken for `compat`.
+
+### Not changed
+
+- The host's own engine (in the `:game` process) stalls when the host's screen turns off or the game screen goes to the background; the relay in the main process, kept alive by the foreground service, goes on, and the 20 s rule drops the host's teams. Documented in docs/multiphone-test.md.
+- The player name, music, "host leaving ends the game" and the TV defaults are open owner decisions and were not touched; the host name in the record is the device model.
+
 ## 0.3.0-tv6 (108): a phone can join to watch (test build)
 
 `HP_PROFILE=test`, versionName `0.3.0-tv6-test`.

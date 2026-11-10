@@ -90,7 +90,7 @@ Also worth one try each, write down what happens: A presses Home during the lobb
 
 Known limits of this build: no automatic host discovery (type the address), no check that both phones run the same app or game data (use the same APK), a joining phone should stay on the Network screen until the host presses Start (otherwise it gets a notification to tap), one game at a time per lobby, the host's phone must stay hosting (stop hosting = game over for everyone).
 
-Follow-ups, not done in this build: the engine link has no ping of its own (a phone whose process is frozen but whose TCP connection stays up is caught by the 20 s silence rule only when it is the phone expected to play; a liveness ping between the relay and each launcher would catch it at any time), and a dropped phone cannot reconnect to the running game (it can only watch as a TV would, which is not built either).
+Follow-ups of 0.3.0-mp2 (the engine link ping is done in 0.3.0-tv7): the engine link has no ping of its own (a phone whose process is frozen but whose TCP connection stays up is caught by the 20 s silence rule only when it is the phone expected to play; a liveness ping between the relay and each launcher would catch it at any time), and a dropped phone cannot reconnect to the running game (it can only watch as a TV would, which is not built either).
 
 ## Added in 0.3.0-tv3: leaving a game and the TV round trip
 
@@ -104,3 +104,34 @@ The status GET on the viewer port (8766) carries `compat` (string) and `protocol
 ## Watching phones
 
 Join offers "Join to play" and "Join to watch". A watcher is a spectator at the relay (cap 8, apart from the 8 players): no teams, no say in the game, everything it sends is ignored and logged. Its setup lines end with `e$spectate 1` (a local command; the launcher drops any `e` frame from the relay, see `hp_ipc_relay_frame_ok`), then the backlog and the live stream. Scenarios: `watch1`, `watchlate`, `watchflap`, `watchsend`, `watchpause`, and `injecte` (the launcher drops an injected `e` and an unknown frame).
+
+## Added in 0.3.0-tv7: hosting robustness, finding hosts, join check (device test steps)
+
+NSD, the Wi-Fi and wake locks, Doze and the permission cannot be run on the build machine; these steps are the test. Use two phones on the same Wi-Fi (A hosts, B joins), the test build on both. Report Android versions, router model, and what each step did.
+
+1. **Finding the host.** A: Network, Host network game (allow notifications). A's Network screen says "Visible to other phones as ...". B: Network. Within about 10 s B lists A under "Hosts on this Wi-Fi" with the version and no red text. Tap "Join to play": B is in A's lobby. Repeat with "Join to watch". Note the time until the host appeared. If it never appears, say so, then type A's address (shown on A's screen): that must still join. Also report whether "Search again" finds it after the 45 s end.
+2. **Incompatible host.** Install a different build on B (the full build, or tv6) and open the Network screen: A must be listed, greyed, with "Cannot join: ..." naming both versions or "Game data differs". The buttons must be disabled. Typing A's address and pressing Join must give the same reason from the relay (red text on B).
+3. **Wi-Fi lock and wake lock.** While A hosts: `adb shell dumpsys wifi | grep -i hedgeparty` shows a lock (mode `LOW_LATENCY` on Android 10 and later) and `adb shell dumpsys power | grep hedgeparty` shows `hedgeparty:net`. After Stop hosting (on the notification or the screen) both are gone. The same on B while it sits in the lobby or a game, and after Leave.
+4. **Host presses Home in the lobby for 60 s** (and 5 minutes, and with the screen switched off for 5 minutes): B must stay connected and listed in A's lobby. If B drops, note whether the host phone was on battery, its battery saver setting, and the Android version (Doze may cut the network of a screen-off phone; the wake lock is a partial wake lock and Doze ignores it).
+5. **Host in a game, screen off or Home.** Start a game. On A press the power button during B's turn: B plays on normally. During A's turn A's engine stalls (the game screen is stopped by Android, A's engine lives in the `:game` process), B waits, and after 20 s of silence A's teams are dropped and the game goes on; the relay keeps running (check A's notification is still there). Pressing Home on A during a game does the same. A's game screen keeps the screen on while it is in front (no sleep during a 10-minute game).
+6. **Wi-Fi off on the host mid-game.** A switches Wi-Fi off during a game: within about 5 s A's relay ends the game; B shows "The game ended: The host lost its Wi-Fi connection" (or "the host left" if B notices first). A switches Wi-Fi on again: A can host a new game without restarting the app (if the port is reported in use, say so).
+7. **Half-open phone.** B switches Wi-Fi off (or enables aeroplane mode) while it is not B's turn: A's relay must log the drop within about 20 s ("half-open link" in the shared log, Share log on A) instead of waiting for B's turn; A sees B's teams gone and the game goes on. With B's Wi-Fi switched off, B itself shows "The connection to the host was lost" within about a minute.
+8. **Three games in a row and a 10-minute game** on one hosting session, without restarting the app: the relay keeps answering, B can always rejoin the lobby, and A's battery drain over 30 minutes is recorded (plan section 10).
+9. **Notification permission denied** on A (Android 13 and later): hosting works, no notification shows; say whether the relay keeps running with A in the background for 5 minutes.
+10. **Local network permission** (Android 16 and later only). On a phone with Android 16 or 17: does B ask for "nearby devices"/"local network" when it opens the Network screen? Deny it: the screen must say the search needs the permission and the typed address must still work (or say what the system does to the connection). Grant it in Settings, App, Permissions, press "Search again": the host appears. Report the exact permission name shown by `adb shell dumpsys package <id> | grep -i local` and whether hosting or joining by address worked while it was denied.
+11. **Router client isolation.** If B cannot reach A at all (neither list nor typed address), the router isolates its Wi-Fi clients (AP isolation); report the router. If the list is empty but the typed address works, the router filters multicast; report that too.
+
+Host tests (no phones): `scripts/net-test.sh <scenario>`; the join check, the liveness ping, Wi-Fi loss and the NSD record are in `RelayTests` (`scripts/net-test.sh malformed`). NSD itself (registration, discovery, resolving) is not run anywhere on the build machine; only its parsing, listing and resolve queue are tested.
+
+### How the TV is told the game ended (WebSocket close codes and `lastGame`)
+
+When a game ends, or hosting stops, the relay sends every connected TV a WebSocket close frame with a status code and a reason, after every game frame that was queued for that TV (the close is the last thing it reads), then keeps the socket open for 2 s so the TV can read and answer, then closes it. Codes:
+
+| code | reason | when |
+|---|---|---|
+| 4001 | `host-ended` | the host ended the game (Back, End the game; the host's engine quit), and any end the relay itself decides (a desync it acts on) |
+| 4002 | `game-over` | a normal game over: every engine finished |
+| 4003 | `host-lost` | the host lost its Wi-Fi (`The host lost its Wi-Fi connection`), or every engine is gone |
+| 4004 | `relay-stopped` | hosting stopped (Stop hosting, the app closed from recents) |
+
+The status GET on 8766 gains `lastGame`: `{"n": <game number>, "ended": "host"|"over"|"host-lost"|"stopped", "atMs": <epoch ms>}` for the most recent game that ended (absent before the first); `ended` matches the codes above (`host` = 4001). `state` is unchanged (`setup` or `playing`). Checked in `RelayTests.testViewerCloseCodes` (each code, the order of the last game frame and the close, `lastGame`), and in the net-test scenarios `viewer3` and `hostpause`, where a small WebSocket probe in the harness (`NetHarness.CloseProbe`; the TV page's own stand-in `viewer-sim.js` lives in hedgewars-party and was not changed) must see `4002 game-over`.

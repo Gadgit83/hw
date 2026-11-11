@@ -237,6 +237,7 @@ final class NetSession {
 
         @Override public void onStart(RelayClient.StartInfo s) {
             inGame = true;
+            lastEndReason = "";
             gaveUp = false;
             notice = "";
             Listener l = listener;
@@ -421,7 +422,9 @@ final class NetSession {
                 if (gen != connectGen) throw new Cancelled();      // a failure caused by the cancel is not "could not reach"
             }
             // A rejoin to a host that does not answer at all (after the retries): the host has gone, so the Rejoin card goes too.
-            if (back && RelayClient.unreachable(e)) clearRejoin(c);
+            // Only a refusal counts (nothing listens on the host any more); a timeout or no route can be this phone's own Wi-Fi,
+            // while the relay still keeps the seat, so the card stays for the window or until "Forget it".
+            if (back && e instanceof java.net.ConnectException && !(e instanceof java.net.NoRouteToHostException)) clearRejoin(c);
             throw e;
         } finally {
             synchronized (NetSession.class) { if (gen == connectGen) connectProgress = ""; }

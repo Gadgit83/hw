@@ -1992,7 +1992,8 @@ public final class Relay {
     private void appendAndForward(Game g, byte[] msg, Player from, List<Runnable> after) {
         // The last two bytes of an engine's timed message are the low 16 bits of its game ticks; remember the latest, so a line the
         // relay writes itself carries a real time (a reader that follows the game time, like the TV, must not see it jump).
-        if (from != null && msg.length >= 3 && msg[0] != 'F' && msg[0] != 'G') {
+        // M (the map digest) is sent untimed by the engine (SendIPCRaw), so its last bytes are digits, not a time.
+        if (from != null && msg.length >= 3 && msg[0] != 'F' && msg[0] != 'G' && msg[0] != 'M') {
             g.lastStamp0 = msg[msg.length - 2];
             g.lastStamp1 = msg[msg.length - 1];
         }

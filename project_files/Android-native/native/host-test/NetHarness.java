@@ -33,11 +33,21 @@ import java.util.concurrent.TimeUnit;
  *   viewerflap one phone, a short game; the TV viewer connects, is killed, connects again, is killed and connects a third time
  *              (each time a new viewer-sim and spectator engine, so each joins with the backlog); the last one must see the game over;
  *              the relay must log two departures as lost connections, never as "too slow"
- *   hostquit   two phones; at turn NET_TURNS_BEFORE_KILL the host phone's engine gets Escape then Y, exactly what the app's
- *              Back confirmation sends: the host's engine must exit cleanly (0) and the relay must end the game for everyone
- *              with "The host ended the game" (the other phone is told by the launcher)
- *   hostquitchat / joinerquitchat  the same with the chat open and half a message typed, quitting through the launcher's explicit
- *              user quit (control frame Q to the relay plus the engine's forcequit), as the app now does
+ *   hostquit   two phones; at turn NET_TURNS_BEFORE_KILL the host phone's engine gets Escape then Y (the engine's own quit): the host
+ *              LEAVES, its engine exits cleanly (0), the game goes on for phone B (its teams are not cut off) to a normal game over;
+ *              the host's teams sit out (F injected), the relay does not end the game and does not say "The host ended the game"
+ *   hostleave  the same through the launcher's explicit user quit (Back > "Leave the game"), with a TV close probe: it must see
+ *              4002 game-over at the end, never 4001
+ *   hostend    the host confirms "End the game for everyone" (control frame Z, then the engine quits): the relay ends the game for
+ *              everyone with "The host ended the game" (the other phone is told by the launcher), the TV probe sees 4001 host-ended
+ *   hostquitchat / joinerquitchat  the same as hostquit / joinerquit with the chat open and half a message typed, quitting through
+ *              the launcher's explicit user quit (control frame Q to the relay plus the engine's forcequit), as the app does
+ *   rejoin     two phones; phone B's engine is killed and its lobby link closed (Wi-Fi lost, app killed); after NET_REJOIN_AFTER_S
+ *              (default 8) seconds B comes back with its rejoin token (a wrong token is refused first): a new engine replays the game
+ *              from the relay's log, the relay asks for B's teams to come back, B plays on; the game goes to a normal end with 0
+ *              desync and identical turn checksums on every phone, also for the turns after the rejoin
+ *   rejoinlate the same with a short window (NET_REJOIN_MS, default 15000): B tries after the window, is refused ("rejoin-late"),
+ *              its teams stay gone, the game goes to a normal end with 0 desync
  *   joinerquit the same on phone B: B's engine exits 0, the relay says B quit (not dropped by force), A is unaffected
  *   negcontrol two phones, the relay deliberately alters one byte of the first turn checksum N sent to phone B: the
  *              desync detection MUST fire (this scenario passes only if it does)
@@ -89,6 +99,9 @@ public class NetHarness {
         public void onStart(RelayClient.StartInfo si) {
             try {
                 id = si.you;
+                // Experiment only (docs/network.md, Rejoining): NET_STRIP_EOWNER=1 takes the owner lines out of a rejoining phone's setup, to show that the engine
+                // does not hand the team back without them. Never set in the scenarios.
+                if (si.rejoin && System.getenv("NET_STRIP_EOWNER") != null) si.lines.removeIf(l -> l.startsWith("eowner "));
                 Files.createDirectories(dir.resolve("user"));
                 RelayClient.writeGameFiles(dir.resolve("game.ipc").toFile(), dir.resolve("net.cfg").toFile(), si,
                         dir.resolve("netgame.txt").toString());
@@ -122,7 +135,11 @@ public class NetHarness {
 
         public void onSummary(Map<String, Object> m) { summary = m; gotSummary.countDown(); }
         volatile String lastNotice = "";
-        public void onNotice(String t) { lastNotice = t; System.out.println("[harness] " + name + " notice: " + t); }
+        final List<String> notices = new java.util.concurrent.CopyOnWriteArrayList<>();
+        volatile String rejoinToken = "", refused = "", refusedReason = "";
+        public void onJoined(int you, String nick, String token) { rejoinToken = token; }
+        public void onRefused(String code, String reason) { refused = code; refusedReason = reason; System.out.println("[harness] " + name + " refused: " + code + ": " + reason); }
+        public void onNotice(String t) { lastNotice = t; notices.add(t); System.out.println("[harness] " + name + " notice: " + t); }
         public void onClosed(String r) { closed = r; System.out.println("[harness] " + name + " lobby closed: " + r); }
     }
 
@@ -166,6 +183,7 @@ public class NetHarness {
         if (scenario.equals("solo") || scenario.startsWith("viewer1") || scenario.equals("viewer3") || scenario.equals("viewerflap") || (watchScen && !scenario.equals("watchpause"))) { aTeams.add(team(d, rnd, "Alpha Three", 3, 4, aTeams)); bTeams.clear(); }
         java.util.Set<String> known = new java.util.HashSet<>(java.util.Arrays.asList("basic", "basic3", "dropout", "dropout3", "stall",
                 "slowstart", "solo", "viewer1", "viewer2", "viewer3", "viewerflap", "hostquit", "joinerquit", "hostquitchat", "joinerquitchat", "negcontrol", "injecte",
+                "rejoin", "rejoinlate", "hostleave", "hostend",
                 "hostpause", "hostpausequit", "joinerpause", "pausecap", "watch1", "watchlate", "watchflap", "watchsend", "watchpause"));
         if (!known.contains(scenario)) {
             System.out.println("[harness] unknown scenario '" + scenario + "'; known: " + new java.util.TreeSet<>(known));
@@ -189,6 +207,8 @@ public class NetHarness {
         cfg.graceMs = Long.parseLong(System.getenv().getOrDefault("NET_GRACE_MS", "40000"));
         cfg.hostSecret = "harness-secret";
         cfg.pin = PIN;      // the game password is on in every scenario: phones and the TV stand-in send it, the host's loopback link needs none
+        final boolean rejoinScen = scenario.equals("rejoin") || scenario.equals("rejoinlate");
+        if (rejoinScen) cfg.rejoinMs = Long.parseLong(System.getenv().getOrDefault("NET_REJOIN_MS", scenario.equals("rejoinlate") ? "15000" : "120000"));
         if (scenario.equals("pausecap")) cfg.pauseMaxMs = Long.parseLong(System.getenv().getOrDefault("NET_PAUSE_MAX_MS", "15000"));
         final java.util.concurrent.atomic.AtomicBoolean tampered = new java.util.concurrent.atomic.AtomicBoolean();
         final int[] tamperId = { -1 };
@@ -233,11 +253,16 @@ public class NetHarness {
         String script = System.getenv("NET_SCRIPT");
         if (script == null && System.getenv("NET_INPUT") != null) script = inputScript(400);
         // hostquit / joinerquit: the quitter's engine waits for a file the harness creates, then gets Escape and Y (the app's Back confirmation).
-        boolean quitScenario = scenario.startsWith("hostquit") || scenario.startsWith("joinerquit") || scenario.equals("hostpausequit");
+        // hostLeave: the host leaves, the game goes on. hostEnd: the host ends the game for everyone.
+        final boolean hostLeave = scenario.startsWith("hostquit") || scenario.equals("hostleave");
+        final boolean hostEnd = scenario.equals("hostend") || scenario.equals("hostpausequit");
+        boolean quitScenario = hostLeave || hostEnd || scenario.startsWith("joinerquit");
         boolean chatQuit = scenario.endsWith("chat");
         Path quitFlag = root.resolve("quit.now");
         // The chat variants open the chat and leave half a message in it, then confirm the way GameActivity now does (hp_ipc_user_quit).
         String quitScript = chatQuit ? "0:waitfile:" + quitFlag + ";0:key:enter;400:text:half typed;800:userquit"
+                : scenario.equals("hostleave") ? "0:waitfile:" + quitFlag + ";0:userquit"
+                : scenario.equals("hostend") ? "0:waitfile:" + quitFlag + ";0:endall"
                 : "0:waitfile:" + quitFlag + ";0:key:esc;600:key:y";
         // Host pause scenarios. The host's script taps the pause button (top right of the touch HUD) when the harness creates a flag
         // file, so the whole path is exercised: touch, engine, launcher, relay, every launcher, every engine. Phone B has scripted
@@ -250,12 +275,12 @@ public class NetHarness {
             hostScript = "0:waitfile:" + root.resolve("pause1.now") + ";" + tapPause;
             if (scenario.equals("hostpause") || scenario.equals("watchpause")) hostScript += "0:waitfile:" + root.resolve("resume1.now") + ";" + tapPause
                     + "0:waitfile:" + root.resolve("pause2.now") + ";" + tapPause + "0:waitfile:" + root.resolve("resume2.now") + ";" + tapPause;
-            if (scenario.equals("hostpausequit")) hostScript += "0:waitfile:" + quitFlag + ";" + (System.getenv("NET_PAUSEQUIT_KEYS") != null ? "0:key:esc;600:key:y" : "0:userquit");
+            if (scenario.equals("hostpausequit")) hostScript += "0:waitfile:" + quitFlag + ";0:endall";
         }
         String joinerScript = script;
         if (pauseScenario) joinerScript = inputScript(400);
         if (scenario.equals("joinerpause")) joinerScript = "0:waitfile:" + root.resolve("jp.now") + ";0:ctl:P;1500:ctl:P;1500:ctl:R";
-        Phone pa = new Phone("Phone A", root.resolve("phoneA"), true, aTeams, hosttest, data, scenario.startsWith("hostquit") ? quitScript : hostScript);
+        Phone pa = new Phone("Phone A", root.resolve("phoneA"), true, aTeams, hosttest, data, (hostLeave || scenario.equals("hostend")) ? quitScript : hostScript);
         Phone pb = new Phone("Phone B", root.resolve("phoneB"), false, bTeams, hosttest, data, scenario.startsWith("joinerquit") ? quitScript : joinerScript);
         if (pauseScenario) pb.extraEnv.put("HP_NET_PAUSE_JITTER_MS", "700");
         Phone pc = new Phone("Phone C", root.resolve("phoneC"), false, cTeams, hosttest, data, script);
@@ -304,7 +329,7 @@ public class NetHarness {
             list.add(pc);
         }
         Phone[] players = list.toArray(new Phone[0]);
-        Phone victim = cTeams.isEmpty() ? pb : pc;
+        Phone victim = hostLeave ? pa : cTeams.isEmpty() ? pb : pc;
         final boolean watchFromStart = scenario.equals("watch1") || scenario.equals("watchsend") || scenario.equals("watchpause");
         if (watchFromStart) {
             Phone w = newWatcher.get();
@@ -334,8 +359,53 @@ public class NetHarness {
         CloseProbe probe = null;
         long reconnectAt = 0, flapQuitAt = 0;
         final int watchAfter = Integer.parseInt(System.getenv().getOrDefault("NET_WATCH_AFTER_TURNS", scenario.equals("watchflap") ? "1" : "3"));
+        // rejoin / rejoinlate: phone B dies, then comes back as Phone B2 (own directory, own engine) with the token the relay gave it
+        Phone pb2 = null;
+        int rjStage = 0, turnsAtKill = 0, turnsAtRejoin = 0;
+        long rjKilledAt = 0;
+        final long rejoinAfterMs = Long.parseLong(System.getenv().getOrDefault("NET_REJOIN_AFTER_S", "8")) * 1000
+                + (scenario.equals("rejoinlate") ? cfg.rejoinMs : 0);
+        final String[] badAttempts = { "", "" };            // refusal codes of a wrong token and of another name
+        int turnsAtQuit = -1;
+        final boolean closeProbeScen = scenario.equals("hostleave") || scenario.equals("hostend");
         while (System.currentTimeMillis() - t0 < timeout * 1000) {
             if (pa.gotSummary.await(1, TimeUnit.SECONDS)) break;
+            if (closeProbeScen && probe == null && relay.viewerPort() > 0 && relay.turns() >= 1) {
+                probe = CloseProbe.start(relay.viewerPort());
+                System.out.println("[harness] === a WebSocket probe (a TV) connects after " + relay.turns() + " turn checksums; it must see the right close code at the end ===");
+            }
+            if (rejoinScen) {
+                long nowMs = System.currentTimeMillis();
+                if (rjStage == 0 && relay.turns() >= killAfterTurns) {
+                    System.out.println("[harness] === " + scenario + ": phone B's engine is killed and its lobby link closed (Wi-Fi lost / app killed) after " + relay.turns() + " turn checksums ===");
+                    pb.killed = true;
+                    pb.proc.destroyForcibly();
+                    pb.client.close();
+                    rjStage = 1;
+                    rjKilledAt = nowMs;
+                    turnsAtKill = relay.turns();
+                } else if (rjStage == 1 && nowMs - rjKilledAt >= rejoinAfterMs / 2 && badAttempts[0].isEmpty() && !scenario.equals("rejoinlate")) {
+                    // another phone cannot take B's seat: a wrong token, and the right token with another name
+                    for (int k = 0; k < 2; k++) {
+                        final Phone[] hold = { new Phone("Intruder", root.resolve("intruder"), false, bTeams, hosttest, data, null) };
+                        RelayClient bad = new RelayClient("127.0.0.1", relay.port(), k == 0 ? "Phone B" : "Phone Z", "harness", false, new ArrayList<>(), hold[0])
+                                .identity(org.hedgewars.android.net.Compat.VALUE, digest).rejoin(k == 0 ? "00112233445566778899aabbccddeeff" : pb.rejoinToken);
+                        bad.connect();
+                        for (int w = 0; w < 50 && hold[0].refused.isEmpty(); w++) Thread.sleep(100);
+                        badAttempts[k] = hold[0].refused.isEmpty() ? "none" : hold[0].refused;
+                        bad.close();
+                    }
+                    System.out.println("[harness] === a wrong token was answered '" + badAttempts[0] + "', the right token with another name '" + badAttempts[1] + "' ===");
+                } else if (rjStage == 1 && nowMs - rjKilledAt >= rejoinAfterMs) {
+                    turnsAtRejoin = relay.turns();
+                    System.out.println("[harness] === " + scenario + ": phone B asks to come back " + (nowMs - rjKilledAt) / 1000 + " s after it was lost, " + turnsAtRejoin + " turn checksums so far ===");
+                    pb2 = new Phone("Phone B2", root.resolve("phoneB2"), false, bTeams, hosttest, data, joinerScript);
+                    pb2.client = new RelayClient("127.0.0.1", relay.port(), "Phone B", "harness", false, bTeams, pb2)
+                            .identity(org.hedgewars.android.net.Compat.VALUE, digest).rejoin(pb.rejoinToken);
+                    pb2.client.connect();
+                    rjStage = 2;
+                }
+            }
             if (wantViewer && relay.viewerPort() > 0) {
                 int n = runs.size();
                 if (cur == null) {
@@ -395,8 +465,9 @@ public class NetHarness {
             }
             if (pauseScenario || scenario.equals("joinerpause")) pauseDriver(scenario, relay, root, ps);
             if (quitScenario && !scenario.equals("hostpausequit") && !Files.exists(quitFlag) && relay.turns() >= killAfterTurns) {
-                System.out.println("[harness] === " + scenario + ": " + (scenario.startsWith("hostquit") ? "the host" : "phone B") + " confirms 'leave the game' (" + (chatQuit ? "chat open with typed text, then the launcher quit" : "Escape then Y") + ") after " + relay.turns() + " turn checksums ===");
+                System.out.println("[harness] === " + scenario + ": " + (hostLeave || hostEnd ? "the host" : "phone B") + " confirms '" + (hostEnd ? "end the game for everyone" : "leave the game") + "' (" + (chatQuit ? "chat open with typed text, then the launcher quit" : "Escape then Y") + ") after " + relay.turns() + " turn checksums ===");
                 Files.write(quitFlag, new byte[] { 1 });
+                turnsAtQuit = relay.turns();
             }
             if (!killed && (scenario.startsWith("dropout") || scenario.equals("stall")) && relay.turns() >= killAfterTurns) {
                 killed = true;
@@ -409,6 +480,7 @@ public class NetHarness {
         boolean over = pa.gotSummary.getCount() == 0;
         List<Phone> everyone = new ArrayList<>(java.util.Arrays.asList(players));
         everyone.addAll(watchers);
+        if (pb2 != null && pb2.proc != null) everyone.add(pb2);
         final Phone[] phones = everyone.toArray(new Phone[0]);
         final List<String> fails = new ArrayList<>();
         final Map<String, Integer> exits = new HashMap<>();
@@ -428,7 +500,8 @@ public class NetHarness {
             // The TV page is not ours to change; this stand-in reads the WebSocket close frame the relay sends when the game ends.
             String got = probe.await(15000);
             System.out.println("[harness] WebSocket close seen by a second viewer connection: " + got);
-            if (!got.equals("4002 game-over")) fails.add("the TV close signal after a normal game over should be \"4002 game-over\", the viewer saw: " + got);
+            String wantClose = scenario.equals("hostend") ? "4001 host-ended" : "4002 game-over";
+            if (!got.equals(wantClose)) fails.add("the TV close signal should be \"" + wantClose + "\", the viewer saw: " + got);
         }
         for (ViewerRun vr : runs) {
             if (!vr.killed) vr.finish();
@@ -512,8 +585,8 @@ public class NetHarness {
         System.out.println("viewer backlog framing available after the game: " + (vb == null ? "no (game cleared)" : vb.length + " bytes"));
 
         // Verdict ---------------------------------------------------------------------------------
-        boolean droppedScenario = scenario.startsWith("dropout") || scenario.equals("stall") || scenario.startsWith("joinerquit");
-        boolean hostQuit = scenario.startsWith("hostquit") || scenario.equals("hostpausequit");
+        boolean droppedScenario = scenario.startsWith("dropout") || scenario.equals("stall") || scenario.startsWith("joinerquit") || hostLeave || rejoinScen;
+        boolean hostQuit = hostEnd;
         int desyncLines = 0;
         for (int v : desyncs.values()) desyncLines += v;
         boolean relayDesync = false;
@@ -535,7 +608,7 @@ public class NetHarness {
             if (ex == null) { fails.add(p.name + ": its engine never started"); continue; }
             if (p.killed) continue;                                            // a watching phone the harness killed on purpose
             boolean cutByHost = hostQuit && p != pa;                           // the other phone's engine is cut off by the host's quit
-            if (quitScenario && p == (hostQuit ? pa : pb) && ex != 0) fails.add(p.name + ": quit by Escape then Y but the engine exit code is " + ex + " (a clean quit is 0)");
+            if (quitScenario && p == (hostQuit || hostLeave ? pa : pb) && ex != 0) fails.add(p.name + ": quit by Escape then Y but the engine exit code is " + ex + " (a clean quit is 0)");
             if (!isVictim && !cutByHost && ex != 0) fails.add(p.name + ": engine exit code " + ex + " (expected 0)");
             if (!isVictim && !cutByHost && !Boolean.TRUE.equals(streamOk.get(p.name))) fails.add(p.name + ": the relay's stream and the launcher's received stream differ");
         }
@@ -549,7 +622,7 @@ public class NetHarness {
             if (!al.contains("RX DROPPED by the whitelist: 0")) fails.add("Phone A's launcher dropped relay messages in a normal game");
         }
         if (quitScenario) {
-            Phone q = hostQuit ? pa : pb;
+            Phone q = hostQuit || hostLeave ? pa : pb;
             String ql = Files.exists(q.dir.resolve("engine.log")) ? new String(Files.readAllBytes(q.dir.resolve("engine.log"))) : "";
             String nl = Files.exists(q.dir.resolve("netgame.txt")) ? new String(Files.readAllBytes(q.dir.resolve("netgame.txt"))) : "";
             System.out.println("quit check: " + q.name + " engine log: " + grep(ql, "engine returned") + "; launcher: " + grep(nl, "CONTROL") + " / SUMMARY " + (nl.contains("SUMMARY") ? "written" : "missing"));
@@ -602,6 +675,21 @@ public class NetHarness {
             for (String e : gs.events) if (e.contains("dropped")) fails.add("unexpected dropout: " + e);
             if (!gs.endReason.contains("every engine finished")) fails.add("the game did not end by every engine finishing: " + gs.endReason);
         }
+        if (hostLeave) {
+            // The host left on purpose; the hosting service runs on, so the game carries on for the others and ends the normal way.
+            System.out.println("host leave check: end reason '" + gs.endReason + "', turns " + turnsAtQuit + " at the leave and " + gs.digests.size() + " at the end; the host was told '" + pa.lastNotice + "'");
+            if (!gs.endReason.equals("every engine finished")) fails.add("the game did not go on to a normal end after the host left: " + gs.endReason);
+            if (gs.digests.size() < turnsAtQuit + 1) fails.add("no turn was played after the host left (" + turnsAtQuit + " -> " + gs.digests.size() + ")");
+            if (!pa.lastNotice.contains("You left the game") && pa.notices.stream().noneMatch(x -> x.contains("You left the game"))) fails.add("the host was not told 'You left the game.': " + pa.notices);
+            boolean injected = false;
+            for (String e : gs.events) { if (e.contains("(the host) ended the game")) fails.add("the host's leaving was taken as ending the game: " + e); if (e.startsWith("injected F")) injected = true; }
+            if (!injected) fails.add("the host's teams were not marked gone (no F injected)");
+            boolean bAway = false;
+            for (String n : pb.notices) if (n.contains("Phone A left the game; waiting up to 2 minutes for them to rejoin")) bAway = true;
+            if (!bAway) fails.add("phone B was not told that the host left and may rejoin: " + pb.notices);
+            if (pb.notices.stream().anyMatch(x -> x.contains("The host ended the game"))) fails.add("phone B was told the host ended the game: " + pb.notices);
+        }
+        if (rejoinScen) rejoinChecks(scenario, gs, pa, pb, pb2, bTeams.size(), turnsAtKill, turnsAtRejoin, badAttempts, cfg.rejoinMs, fails);
         if (pauseScenario || scenario.equals("joinerpause")) pauseChecks(scenario, gs, relayLog, phones, ps, fails);
         if (watchScen) watchChecks(scenario, gs, relayLog, pa, watchers, fails);
         System.out.println("\nchecks: desync lines " + desyncLines + ", checksum mismatches " + mismatches + ", turns " + gs.digests.size() + ", engine exits " + exits);
@@ -668,7 +756,7 @@ public class NetHarness {
                 else if (ps.stage == 1 && now - ps.at > 4000) { ps.stage = 2; ps.at = now; ps.turnsAtPause = turns; flag(root, "pause1.now");
                     System.out.println("[harness] === hostpausequit: the host pauses ==="); }
                 else if (ps.stage == 2 && now - ps.at > 6000) { ps.stage = 3; ps.turnsFrozen = turns; flag(root, "quit.now");
-                    System.out.println("[harness] === hostpausequit: the host, still paused, confirms 'leave the game' (" + (System.getenv("NET_PAUSEQUIT_KEYS") != null ? "Escape then Y" : "the launcher quit, as the app's Back dialog does") + ") ==="); }
+                    System.out.println("[harness] === hostpausequit: the host, still paused, confirms 'End the game for everyone' (the launcher's end-for-everyone, as the app's Back dialog does) ==="); }
                 break;
             default:
         }
@@ -724,6 +812,62 @@ public class NetHarness {
                 if (ps.turnsAtResume < ps.turnsAtPause + 1) fails.add("the game did not go on while the joiner asked for a pause (turns " + ps.turnsAtPause + " -> " + ps.turnsAtResume + ")");
                 break;
             default:
+        }
+    }
+
+    /** Checks for rejoin and rejoinlate: the away window, the refusals, the replay, the teams coming back, the turns played after it. */
+    static void rejoinChecks(String sc, Relay.GameSummary gs, Phone pa, Phone pb, Phone pb2, int bTeamCount, int turnsAtKill, int turnsAtRejoin,
+                             String[] bad, long windowMs, List<String> fails) throws Exception {
+        boolean rejoined = false, gaveUp = false, injectedG = false, away = false;
+        int back = 0;
+        for (String e : gs.events) {
+            if (e.startsWith("Phone B rejoined after")) rejoined = true;
+            if (e.contains("Phone B did not come back")) gaveUp = true;
+            if (e.startsWith("injected G")) injectedG = true;
+            if (e.startsWith("Phone B's team ") && e.contains("is back (synced team-back seen)")) back++;
+            if (e.startsWith("Phone B lost connection; waiting up to ")) away = true;
+        }
+        boolean aNotifiedAway = false, aNotifiedBack = false, aNotifiedGaveUp = false;
+        for (String n : pa.notices) {
+            if (n.equals("Phone B lost connection; waiting up to " + (windowMs == 120000 ? "2 minutes" : windowMs / 1000 + " s") + " for them to rejoin")) aNotifiedAway = true;
+            if (n.equals("Phone B is back")) aNotifiedBack = true;
+            if (n.equals("Phone B did not come back; their teams sit out")) aNotifiedGaveUp = true;
+        }
+        System.out.println("rejoin check: relay events: away " + away + ", rejoined " + rejoined + ", G injected " + injectedG + ", teams back " + back + " of " + bTeamCount
+                + ", gave up " + gaveUp + "; Phone A was told: away " + aNotifiedAway + ", back " + aNotifiedBack + ", gave up " + aNotifiedGaveUp
+                + "; turns " + turnsAtKill + " at the loss, " + turnsAtRejoin + " at the rejoin, " + gs.digests.size() + " at the end; end reason '" + gs.endReason + "'");
+        if (!away) fails.add("the relay did not mark Phone B away with the waiting time");
+        if (!aNotifiedAway) fails.add("Phone A was not told that Phone B lost connection and may rejoin: " + pa.notices);
+        if (!gs.endReason.equals("every engine finished")) fails.add("the game did not reach a normal end: " + gs.endReason);
+        if (sc.equals("rejoin")) {
+            if (!"rejoin-unknown".equals(bad[0])) fails.add("a wrong rejoin token should be refused with rejoin-unknown, got '" + bad[0] + "'");
+            if (!"rejoin-unknown".equals(bad[1])) fails.add("the right token with another name should be refused with rejoin-unknown, got '" + bad[1] + "'");
+            if (pb2 == null || pb2.proc == null) { fails.add("Phone B never got its engine started again"); return; }
+            if (!rejoined) fails.add("the relay did not record Phone B rejoining");
+            if (!injectedG) fails.add("no team-back G was injected");
+            if (back != bTeamCount) fails.add("expected " + bTeamCount + " teams of Phone B to come back (synced g seen), saw " + back);
+            if (gaveUp) fails.add("Phone B was reported as not coming back");
+            if (!aNotifiedBack) fails.add("Phone A was not told Phone B is back: " + pa.notices);
+            if (gs.digests.size() < turnsAtRejoin + 2) fails.add("fewer than 2 turns were played after the rejoin (" + turnsAtRejoin + " -> " + gs.digests.size() + ")");
+            String d = Files.exists(pb2.dir.resolve("netgame.txt")) ? new String(Files.readAllBytes(pb2.dir.resolve("netgame.txt"))) : "";
+            int nrx = count(d, " N rx turn "), ntx = count(d, " N tx turn ");
+            System.out.println("rejoin check: Phone B2 launcher: turn checksums received " + nrx + ", sent " + ntx + " (relay saw " + gs.digests.size() + "); 'F rx' " + count(d, "F rx team") + ", 'G rx' " + count(d, "G rx team")
+                    + ", 'g rx' " + count(d, "g rx team") + ", 'f rx' " + count(d, "f rx team"));
+            if (nrx + ntx != gs.digests.size()) fails.add("Phone B2 saw " + (nrx + ntx) + " turn checksums, the relay " + gs.digests.size());
+            if (ntx < 1) fails.add("Phone B2 played no turn of its own after coming back (no turn checksum sent)");
+            String al = Files.exists(pa.dir.resolve("engine.log")) ? new String(Files.readAllBytes(pa.dir.resolve("engine.log"))) : "";
+            String bl = Files.exists(pb2.dir.resolve("engine.log")) ? new String(Files.readAllBytes(pb2.dir.resolve("engine.log"))) : "";
+            System.out.println("rejoin check: chat lines in the engines: Phone A " + grep(al, "Phone B is back") + " | Phone B2 " + grep(bl, "Phone B is back"));
+            if (!al.contains("Phone B is back")) fails.add("the 'Phone B is back' chat line did not reach Phone A's engine");
+        } else {
+            System.out.println("rejoin check: the late attempt was answered '" + (pb2 == null ? "(no attempt)" : pb2.refused) + "': " + (pb2 == null ? "" : pb2.refusedReason));
+            if (pb2 == null) { fails.add("the late rejoin attempt was never made"); return; }
+            if (pb2.proc != null) fails.add("Phone B's engine was started again after the window had run out");
+            if (!"rejoin-late".equals(pb2.refused)) fails.add("a rejoin after the window should be refused with rejoin-late, got '" + pb2.refused + "'");
+            if (!pb2.refusedReason.contains("away too long") || !pb2.refusedReason.contains("You can watch")) fails.add("the refusal does not say why and offer watching: " + pb2.refusedReason);
+            if (!gaveUp) fails.add("the relay did not record that Phone B did not come back");
+            if (!aNotifiedGaveUp) fails.add("Phone A was not told that Phone B did not come back: " + pa.notices);
+            if (rejoined || back > 0) fails.add("Phone B's teams came back after the window");
         }
     }
 

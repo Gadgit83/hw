@@ -236,6 +236,7 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
     private void choose() {
         boolean wide = getResources().getConfiguration().screenWidthDp >= 700;
         if (pinMsg != null) content.addView(pinCard(), ui.margins(full(), 0, 6, 0, 0));
+        rejoinCard();
         LinearLayout start = ui.card();
         LinearLayout before = ui.card();
         before.addView(ui.heading("Before you start"));
@@ -294,6 +295,63 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
             content.addView(hostsBox, ui.margins(full(), 0, 8, 0, 0));
             content.addView(join, ui.margins(full(), 0, 8, 0, 0));
         }
+    }
+
+    /**
+     * A phone that was playing a network game and lost the connection (or left, or whose app was restarted) is offered its seat back for a
+     * little while: the relay keeps it for two minutes. The offer comes from the note the phone keeps at join (NetSession.RejoinNote).
+     */
+    private void rejoinCard() {
+        NetSession.RejoinNote n = NetSession.loadRejoin(this);
+        if (n == null) return;
+        String code = NetSession.rejoinRefusal;
+        LinearLayout card = ui.card();
+        card.addView(ui.heading("Rejoin your game"));
+        card.addView(ui.text("You were playing as " + n.name + " on " + n.host + ":" + n.port + ".", 16, Color.WHITE));
+        if (code.equals("rejoin-late")) {
+            card.addView(coloured(Relay.GAVE_UP_TEXT, Ui.ACCENT));
+        } else if (code.equals("rejoin-alone")) {
+            card.addView(coloured("Nobody else is playing at the moment, so your teams cannot come back. You can watch.", Ui.ACCENT));
+        } else {
+            card.addView(ui.hint("If that game is still running and you left less than " + BackConfirm.REJOIN_TIME
+                    + " ago, you go back into it and your teams play on. The game keeps going without you meanwhile."));
+        }
+        LinearLayout row = ui.row();
+        if (!code.equals("rejoin-late") && !code.equals("rejoin-alone")) {
+            Button rb = ui.button(connecting ? "Rejoining..." : "Rejoin the game", true, v -> rejoinFromNote());
+            rb.setEnabled(!connecting);
+            row.addView(rb, ui.weight(1f));
+        } else {
+            row.addView(ui.button("Try again", false, v -> rejoinFromNote()), ui.weight(1f));
+        }
+        row.addView(ui.button("Join to watch", false, v -> connectTo(n.host, n.port, true)), ui.margins(Ui.lp(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f), 8, 0, 0, 0));
+        row.addView(ui.button("Forget it", false, v -> { NetSession.clearRejoin(this); NetSession.rejoinRefusal = ""; render(); }),
+                ui.margins(Ui.lp(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT), 8, 0, 0, 0));
+        card.addView(row, ui.margins(full(), 8, 0, 0, 0));
+        content.addView(card, ui.margins(full(), 0, 6, 0, 0));
+    }
+
+    private void rejoinFromNote() {
+        final NetSession.RejoinNote n = NetSession.loadRejoin(this);
+        if (n == null || connecting) return;
+        connecting = true;
+        problem = "";
+        stopSearch();
+        final int seq = ++joinSeq;
+        render();
+        new Thread(() -> {
+            try {
+                NetSession.connectRejoin(getApplicationContext(), n);
+            } catch (NetSession.Cancelled e) {
+                // given up on purpose
+            } catch (Exception e) {
+                if (seq == joinSeq) problem = "Could not reach " + n.host + ":" + n.port + " (" + e.getMessage() + "). Is the host still hosting?";
+            } finally {
+                if (seq == joinSeq) connecting = false;
+                changed();
+                NetSession.ping();
+            }
+        }, "rejoin").start();
     }
 
     private static LinearLayout.LayoutParams full() {
@@ -634,10 +692,15 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
         long watchingN = st == null ? 0 : Json.num(st, "watching", 0);
         if (host) card.addView(ui.hint("Phones watching: " + watchingN));
         card.addView(ui.heading("Phones and teams"));
+        boolean iAmAway = false, iGaveUp = NetSession.gaveUp;
         if (st != null) {
             long you = Json.num(st, "you", -1);
             for (Object o : Json.list(st, "players")) {
                 Map<String, Object> p = (Map<String, Object>) o;
+                if (Json.num(p, "id", 0) == you) {
+                    iAmAway = Json.bool(p, "away", false);
+                    iGaveUp |= Json.bool(p, "gaveUp", false);
+                }
                 StringBuilder teams = new StringBuilder();
                 for (Object to : Json.list(p, "teams")) {
                     Map<String, Object> t = (Map<String, Object>) to;
@@ -647,17 +710,35 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
                 }
                 boolean me = Json.num(p, "id", 0) == you;
                 boolean watcher = Json.bool(p, "watching", false);
+                boolean away = Json.bool(p, "away", false), gone = Json.bool(p, "gaveUp", false);
                 String line = Json.str(p, "name", "?") + (me ? " (you)" : "") + (Json.bool(p, "host", false) ? " [host]" : "")
-                        + (watcher ? "   Watching" : Json.bool(p, "ready", false) ? "   ready" : "   not ready");
+                        + (watcher ? "   Watching" : away ? "   away" : gone ? "   did not come back" : playing ? "   playing" : Json.bool(p, "ready", false) ? "   ready" : "   not ready");
                 LinearLayout row = ui.card();
                 row.setBackground(ui.round(Ui.PANEL_HI, 10));
                 row.addView(ui.text(line, 16, Color.WHITE));
-                row.addView(ui.hint(watcher ? "watching only, no teams" : teams.length() == 0 ? "no teams" : teams.toString()));
+                row.addView(ui.hint(watcher ? "watching only, no teams" : teams.length() == 0 ? "no teams" : teams.toString()
+                        + (away ? "  (sitting out; can rejoin for about " + (Json.num(p, "awayLeftMs", 0) + 999) / 1000 + " s)" : gone ? "  (sitting out)" : "")));
                 card.addView(row, ui.margins(Ui.lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT), 0, 4, 0, 0));
             }
         }
         if (!NetSession.notice.isEmpty()) card.addView(coloured(NetSession.notice, Ui.ACCENT));
         LinearLayout buttons = ui.row();
+        if (playing && iAmAway && !iGaveUp) {
+            // This phone left the game screen (or its engine stopped) but is still connected: the seat is kept for a while.
+            card.addView(coloured("You are away from the game. Your teams sit out while the others play on.", Ui.ACCENT));
+            card.addView(ui.button("Rejoin the game", true, v -> {
+                RelayClient c = NetSession.client;
+                if (c != null) c.rejoinNow();
+            }), ui.margins(full(), 6, 0, 0, 4));
+        } else if (playing && iGaveUp && !NetSession.watching && !host) {
+            card.addView(coloured(Relay.GAVE_UP_TEXT, Ui.ACCENT));
+            card.addView(ui.button("Watch the game", true, v -> {
+                final String h = NetSession.lastHostName;
+                final int pt = NetSession.lastPort;
+                leaveOrStop();
+                if (!h.isEmpty()) connectTo(h, pt, true);
+            }), ui.margins(full(), 6, 0, 0, 4));
+        }
         if (host) {
             boolean can = st != null && Json.bool(st, "canStart", false) && !playing;
             Button start = ui.button("Start game", true, v -> {
@@ -876,6 +957,9 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
         if (NetSession.hosting) {
             startService(new Intent(this, HostService.class).setAction(HostService.ACTION_STOP));
         }
+        // Leaving the lobby of a game that is not running leaves nothing to come back to; during a game the seat is kept for the window.
+        Map<String, Object> st0 = NetSession.state;
+        if (!NetSession.inGame && (st0 == null || !"playing".equals(Json.str(st0, "state", "")))) NetSession.clearRejoin(this);
         NetSession.leave();
         NetSession.hosting = false;
         NetSession.closedReason = "";

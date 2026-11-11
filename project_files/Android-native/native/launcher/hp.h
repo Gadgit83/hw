@@ -20,6 +20,8 @@ void hp_ipc_set_error_handler(void (*handler)(const char *message));
 /* The player confirmed leaving the game: tells the relay (control frame Q) and makes the engine quit whatever its UI state.
  * Returns 0 when the engine was asked to quit. */
 int hp_ipc_user_quit(void);
+/* The host phone only: ends the game for everyone (control frame Z), then quits the engine. */
+int hp_ipc_end_for_everyone(void);
 
 #ifdef HP_HOST_TEST
 /* Test hook for the host test: send one message to the engine, e.g. "Fteamname". Returns 0 when sent. */
@@ -33,3 +35,5 @@ int hp_ipc_send_relay(const char *payload);
 int hp_ipc_net_config(const char *path);
 /* The player name from that file (for --nick), or NULL in a local game. */
 const char *hp_ipc_net_nick(void);
+/* The same name in base64, which is how the engine started with --internal wants --nick; NULL in a local game. */
+const char *hp_ipc_net_nick_arg(void);

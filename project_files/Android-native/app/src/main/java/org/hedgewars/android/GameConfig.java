@@ -156,6 +156,28 @@ public final class GameConfig {
         return out;
     }
 
+    /**
+     * The lines of a phone that comes back into a running game. Every team is driven from outside, as for a watcher, so the engine
+     * replays the game so far from the relay's log, the phone's own teams included (their moves are in the log). The phone's own
+     * teams also get {@code eowner <nick>}: when the relay later sends the unsynced team-back message, the engine hands such a team
+     * back to this phone only if its owner equals the engine's own nick (uTeams.pas, chTeamBack). The other phones' engines never
+     * get an owner line, so the team stays driven from outside on their side. The caller adds {@code e$spectate 1}.
+     */
+    public static List<String> forRejoin(List<String> canonical, boolean[] owned, String nick) {
+        List<String> out = new ArrayList<>();
+        int team = 0;
+        for (String line : canonical) {
+            if (line.equals("TL")) { out.add("TN"); continue; }
+            out.add(line);
+            if (line.startsWith("eaddteam ")) {
+                out.add("erdriven");
+                if (team < owned.length && owned[team]) out.add("eowner " + nick);
+                team++;
+            }
+        }
+        return out;
+    }
+
     public static void write(File target, List<String> lines) throws IOException {
         try (Writer w = new OutputStreamWriter(new FileOutputStream(target), StandardCharsets.UTF_8)) {
             for (String s : lines) w.write(s + "\n");

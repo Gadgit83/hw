@@ -120,6 +120,14 @@ JNIEXPORT jint JNICALL Java_org_hedgewars_android_GameActivity_nativeUserQuit(JN
     return hp_ipc_user_quit();
 }
 
+/* GameActivity.nativeEndForEveryone(): the host chose "End the game for everyone". */
+JNIEXPORT jint JNICALL Java_org_hedgewars_android_GameActivity_nativeEndForEveryone(JNIEnv *env, jclass cls)
+{
+    (void)env;
+    (void)cls;
+    return hp_ipc_end_for_everyone();
+}
+
 /* Asks GameActivity.engineDisplayInfo() (see there) for the HUD scale, the weapon menu scale and the
  * safe area insets. On any failure the defaults stay (scale 100 %, no insets, which is the desktop layout). */
 static void query_display(int out[15])
@@ -274,7 +282,7 @@ int SDL_main(int argc, char **argv)
         "--prefix", data, "--user-prefix", user,
         "--width", w, "--height", h,
         "--fullscreen-width", w, "--fullscreen-height", h, "--fullscreen",
-        "--locale", "en.txt", "--nodampen", "--nick", (char *)(hp_ipc_net_nick() ? hp_ipc_net_nick() : "Player"),
+        "--locale", "en.txt", "--nodampen", "--nick", (char *)(hp_ipc_net_nick_arg() ? hp_ipc_net_nick_arg() : "UGxheWVy" /* Player */),
         "--ui-scale", ui, "--menu-scale", menu,
         "--inset-left", il, "--inset-top", it, "--inset-right", ir, "--inset-bottom", ib,
         "--screen-shape", shape,

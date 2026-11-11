@@ -47,6 +47,7 @@ static void *restore_thread(void *arg)
  *   key:esc  key:y                                     (a key press and release, as GameActivity sends for Back and the confirm in a network game)
  *   key:enter  text:<chars>                            (opens the chat, types into it)
  *   userquit                                           (what GameActivity does when the player confirms leaving: hp_ipc_user_quit)
+ *   endall                                             (the host confirms "End the game for everyone": hp_ipc_end_for_everyone)
  *   log:<text>                                         (marks the engine log, for the shell driver) */
 static void push_key(SDL_Keycode sym, SDL_Scancode sc)
 {
@@ -116,6 +117,7 @@ static void *script_thread(void *arg)
         else if (!strcmp(act, "key:enter")) push_key(SDLK_RETURN, SDL_SCANCODE_RETURN);
         else if (!strncmp(act, "text:", 5)) { SDL_Event e; memset(&e, 0, sizeof e); e.type = SDL_TEXTINPUT; e.text.windowID = 1; snprintf(e.text.text, sizeof e.text.text, "%s", act + 5); SDL_PushEvent(&e); }
         else if (!strcmp(act, "userquit")) fprintf(stderr, "[hosttest] user quit -> %d\n", hp_ipc_user_quit());
+        else if (!strcmp(act, "endall")) fprintf(stderr, "[hosttest] end for everyone -> %d\n", hp_ipc_end_for_everyone());
         else if (!strcmp(act, "focuslost")) push_window(SDL_WINDOWEVENT_FOCUS_LOST);
         else if (!strcmp(act, "focusgained")) push_window(SDL_WINDOWEVENT_FOCUS_GAINED);
         else if (!strcmp(act, "minimized")) push_window(SDL_WINDOWEVENT_MINIMIZED);
@@ -154,7 +156,7 @@ int main(int argc, char **argv)
         "--locale", "en.txt", "--nodampen", "--nosound", "--nomusic",
     };
     int nargs = 16;
-    if (hp_ipc_net_nick()) { args[nargs++] = "--nick"; args[nargs++] = (char *)hp_ipc_net_nick(); }
+    if (hp_ipc_net_nick()) { args[nargs++] = "--nick"; args[nargs++] = (char *)hp_ipc_net_nick_arg(); }
     /* HP_TEST_SOUND=1 runs with the SDL dummy audio driver and sound on (the default test has it off). */
     if (getenv("HP_TEST_SOUND")) { for (int i = 15; i + 1 < nargs; i++) args[i] = args[i + 1]; nargs--; }
     /* HP_TEST_ARGS: extra engine options, e.g. "--ui-scale 240 --inset-left 80". */

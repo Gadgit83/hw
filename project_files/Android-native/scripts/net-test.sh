@@ -16,8 +16,16 @@
 #               the viewer and its spectator engine must see the game over, no desync, a round trip measured for the viewer
 #   viewerflap  the viewer connects, is killed, reconnects, is killed, reconnects (three sessions, backlog each time); the
 #               last must see the game over; the two kills must be logged as lost connections, never as "too slow"
-#   hostquit    two phones; the host's engine gets Escape then Y (what the app's Back confirmation sends) after a few turns:
-#               clean engine exit, the relay ends the game for everyone with "The host ended the game"
+#   hostquit    two phones; the host's engine gets Escape then Y (the engine's own quit) after a few turns: clean engine exit; the host
+#               LEAVES (its teams sit out) and the game goes on for phone B to a normal end, "The host ended the game" is never said
+#   hostleave   the same through the launcher's explicit user quit (Back > "Leave the game"); a TV probe must see 4002, not 4001
+#   hostend     the host confirms "End the game for everyone" (control frame Z): the relay ends the game for everyone with
+#               "The host ended the game", the other phone is told, the TV probe sees 4001
+#   rejoin      two phones; phone B's engine and lobby link are killed after a few turns, a wrong token and another name are refused,
+#               B comes back with its rejoin token 8 s later (NET_REJOIN_AFTER_S), replays the game from the relay's log, gets its teams
+#               back and plays on: 0 desync and identical turn checksums on all phones, also for the turns after the rejoin
+#   rejoinlate  the same with a short window (NET_REJOIN_MS, default 15000): the attempt after it is refused (rejoin-late), the teams
+#               stay gone, the game goes to a normal end with no desync
 #   joinerquit  the same on phone B: clean exit, the relay says B quit, B is told "You left the game."
 #   hostquitchat, joinerquitchat   the same with the chat open and half a message typed: the app's launcher sends the relay an
 #               explicit user quit (control frame Q) and the engine a forcequit, so the wording is still right
@@ -25,7 +33,7 @@
 #               limit) resumes, then a second short pause (Phone B's launcher applies pause and resume 700 ms late, and it has
 #               scripted touch input that must be ignored while paused); no desync, nobody dropped, the turn count frozen during
 #               the pause, the game plays on to a normal end, the viewer sees the game over
-#   hostpausequit  the host pauses, then leaves while paused: everyone gets "The host ended the game"
+#   hostpausequit  the host pauses, then ends the game for everyone while paused (End the game for everyone): everyone gets "The host ended the game"
 #   joinerpause two phones: Phone B's launcher sends pause and resume control frames; the relay ignores them (logged), nobody pauses
 #   pausecap    the host pauses and never resumes: the relay resumes everyone after the cap (NET_PAUSE_MAX_MS, 15 s here; 10 min in the app)
 #   injecte     two phones; the relay link to phone B also carries an 'e' frame (a local engine command) and an unknown 'X' frame: B's
@@ -56,7 +64,7 @@
 SCEN="${1:-basic}"
 if [ "$SCEN" = all ]; then
   rc=0; summary=""
-  for s in malformed basic basic3 dropout dropout3 stall slowstart negcontrol solo viewer1 viewer2 viewer3 viewerflap hostquit joinerquit hostquitchat joinerquitchat injecte watch1 watchlate watchflap watchsend watchpause hostpause hostpausequit joinerpause pausecap; do
+  for s in malformed basic basic3 dropout dropout3 stall slowstart negcontrol solo viewer1 viewer2 viewer3 viewerflap hostquit hostleave hostend rejoin rejoinlate joinerquit hostquitchat joinerquitchat injecte watch1 watchlate watchflap watchsend watchpause hostpause hostpausequit joinerpause pausecap; do
     "$0" "$s" > "$BUILD_DIR/host-test-net-$s.log" 2>&1; r=$?
     res="$(grep '^RESULT:' "$BUILD_DIR/host-test-net-$s.log" | tail -1)"
     summary+="$(printf '%-11s exit %d  %s' "$s" "$r" "${res:-(no result line)}")"$'\n'

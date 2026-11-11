@@ -23,18 +23,27 @@ final class BackConfirm {
 
     private static final String RUNNING = " Unless the host has paused, the game keeps running while you decide.";
 
-    static String title(boolean host) {
-        return host ? "End the game for everyone?" : "Leave the game?";
+    /** How long a phone that left (or lost its connection) can come back; the relay's default ({@code Relay.Config.rejoinMs}). */
+    static final String REJOIN_TIME = "2 minutes";
+
+    static String title() {
+        return "Leave the game?";
     }
 
     static String message(boolean host) {
         return host
-                ? "The game stops on every phone and on every TV watching." + RUNNING
-                : "Your teams leave the game and the other players carry on." + RUNNING;
+                ? "The game goes on for the others without your teams, which sit out. You can rejoin from the Network screen within "
+                        + REJOIN_TIME + ". Or end the game for every phone and every TV watching." + RUNNING
+                : "Your teams sit out and the other players carry on. You can rejoin from the Network screen within " + REJOIN_TIME + "." + RUNNING;
     }
 
-    static String yes(boolean host) {
-        return host ? "End the game" : "Leave";
+    static String leave() {
+        return "Leave the game";
+    }
+
+    /** The host's third answer: today's behaviour, the game stops on every phone and the TV is told (close code 4001). */
+    static String endAll() {
+        return "End the game for everyone";
     }
 
     static String no() {
@@ -77,27 +86,31 @@ final class BackConfirm {
         return role;
     }
 
-    /** As {@link #show(Activity, boolean, Runnable)} for any role: a watching phone gets "Stop watching?". */
-    static AlertDialog show(Activity a, int role, Runnable onYes) {
-        if (role != WATCH) return show(a, role == HOST, onYes);
+    /**
+     * The question for any role. A watching phone gets "Stop watching?"; a joining phone "Leave the game" or "Keep playing"; the host
+     * also "End the game for everyone". {@code onLeave} runs for Leave (and for Stop watching), {@code onEndAll} for the host's end.
+     */
+    static AlertDialog show(Activity a, int role, Runnable onLeave, Runnable onEndAll) {
+        if (role != WATCH) return show(a, role == HOST, onLeave, onEndAll);
         AlertDialog d = Ui.dialog(a)
                 .setTitle(WATCH_TITLE)
                 .setMessage(WATCH_MESSAGE)
-                .setPositiveButton(WATCH_YES, (dlg, w) -> onYes.run())
+                .setPositiveButton(WATCH_YES, (dlg, w) -> onLeave.run())
                 .setNegativeButton(WATCH_NO, null)
                 .create();
         d.show();
         return d;
     }
 
-    /** Shows the question; {@code onYes} runs when the player confirms. */
-    static AlertDialog show(Activity a, boolean host, Runnable onYes) {
-        AlertDialog d = Ui.dialog(a)
-                .setTitle(title(host))
+    /** Shows the question for a playing phone: Leave the game, (host only) End the game for everyone, Keep playing. */
+    static AlertDialog show(Activity a, boolean host, Runnable onLeave, Runnable onEndAll) {
+        AlertDialog.Builder b = Ui.dialog(a)
+                .setTitle(title())
                 .setMessage(message(host))
-                .setPositiveButton(yes(host), (dlg, w) -> onYes.run())
-                .setNegativeButton(no(), null)
-                .create();
+                .setPositiveButton(leave(), (dlg, w) -> onLeave.run())
+                .setNegativeButton(no(), null);
+        if (host) b.setNeutralButton(endAll(), (dlg, w) -> onEndAll.run());
+        AlertDialog d = b.create();
         d.show();
         return d;
     }

@@ -33,6 +33,8 @@ public final class RelayClient {
         public boolean asHost;
         /** This phone only watches (it owns no team): its launcher sends the relay nothing and its screen has no playing controls. */
         public boolean asWatcher;
+        /** This phone comes back into a running game: its engine replays the game so far and gets its teams back afterwards. */
+        public boolean rejoin;
     }
 
     public interface Handler {
@@ -48,8 +50,14 @@ public final class RelayClient {
         /** The connection ended: refused, closed by the host, or lost. */
         void onClosed(String reason);
 
-        /** The host refused the join with a machine-readable code ("password", "password-locked"); called just before {@link #onClosed}. */
+        /** The host refused the join with a machine-readable code ("password", "password-locked", "rejoin-late", ...); called just before {@link #onClosed}. */
         default void onRefused(String code, String reason) { }
+
+        /** The host has let this phone in: its id, its (unique) name and the token it must keep to come back into a running game after a lost connection. */
+        default void onJoined(int you, String name, String rejoinToken) { }
+
+        /** The window for coming back ran out while this phone was away: the game went on without its teams. */
+        default void onGaveUp(String reason) { }
     }
 
     private final String host;
@@ -60,6 +68,7 @@ public final class RelayClient {
     private boolean watch;
     private String compat = Compat.VALUE, digest = "";
     private String pin = "";
+    private String rejoinToken = "";
     private final Handler handler;
     private volatile Socket socket;
     private OutputStream out;
@@ -94,6 +103,12 @@ public final class RelayClient {
     /** The game password to send in the hello (4 digits); "" or null sends none. Call before connect(). */
     public RelayClient pin(String p) {
         pin = p == null ? "" : p;
+        return this;
+    }
+
+    /** Comes back into a running game with the token the relay gave at the first join ({@code onJoined}); the name must be the same. Call before connect(). */
+    public RelayClient rejoin(String token) {
+        rejoinToken = token == null ? "" : token;
         return this;
     }
 
@@ -169,7 +184,7 @@ public final class RelayClient {
         socket.setKeepAlive(true);
         out = socket.getOutputStream();
         send(Json.obj("t", "hello", "role", "lobby", "proto", (long) Relay.PROTO, "name", name, "build", build,
-                "compat", compat, "digest", digest, "host", isHost, "secret", hostSecret, "pin", pin, "watch", watch, "teams", NetTeams.listToJson(watch ? new ArrayList<SetupModel.Team>() : teams)));
+                "compat", compat, "digest", digest, "host", isHost, "secret", hostSecret, "pin", pin, "watch", watch, "rejoin", rejoinToken, "teams", NetTeams.listToJson(watch ? new ArrayList<SetupModel.Team>() : teams)));
         Thread t = new Thread(this::readLoop, "relay-client");
         t.setDaemon(true);
         t.start();
@@ -241,6 +256,11 @@ public final class RelayClient {
         trySend(Json.obj("t", "start"));
     }
 
+    /** This phone left the game (Back) but its lobby link is still up: asks the relay for its seat back; the answer is a start message or a notice. */
+    public void rejoinNow() {
+        trySend(Json.obj("t", "rejoin"));
+    }
+
     /** A watching phone asks for the running game again (after it stopped watching): the relay answers with a new start. */
     public void watchAgain() {
         trySend(Json.obj("t", "watch"));
@@ -289,7 +309,16 @@ public final class RelayClient {
                         s.port = port;
                         s.asHost = isHost;
                         s.asWatcher = watch;
+                        s.rejoin = Json.bool(m, "rejoin", false);
                         handler.onStart(s);
+                        break;
+                    }
+                    case "joined": handler.onJoined((int) Json.num(m, "you", 0), Json.str(m, "name", name), Json.str(m, "rejoin", "")); break;
+                    case "gaveup": handler.onGaveUp(Json.str(m, "reason", "")); break;
+                    case "rejoin-refused": {
+                        String reason = Json.str(m, "reason", "You cannot come back to this game.");
+                        handler.onRefused(Json.str(m, "code", "rejoin-none"), reason);
+                        handler.onNotice(reason);
                         break;
                     }
                     case "summary": handler.onSummary(m); break;

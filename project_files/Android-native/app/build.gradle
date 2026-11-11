@@ -61,8 +61,8 @@ android {
         applicationId appId
         minSdk 24
         targetSdk 34
-        versionCode 117
-        versionName testProfile ? '0.3.0-tv13-test' : '0.3.0-tv13'
+        versionCode 118
+        versionName testProfile ? '0.3.0-tv14-test' : '0.3.0-tv14'
         resValue 'string', 'app_name', appName
         buildConfigField 'String', 'APP_NAME', "\"${appName}\""
         buildConfigField 'String', 'PROFILE', "\"${profile}\""

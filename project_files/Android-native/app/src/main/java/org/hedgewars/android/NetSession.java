@@ -40,6 +40,8 @@ final class NetSession {
     static volatile boolean watching;
     static volatile String target = "";
     static volatile Map<String, Object> state;
+    /** Why the relay ended the last game (from its summary), so a normal end is not shown as an engine error. */
+    static volatile String lastEndReason = "";
     static volatile String closedReason = "", notice = "";
     static volatile String relaySummary = "", toYouHash = "", relayLogHash = "";
     static volatile long toYouMsgs;
@@ -255,6 +257,7 @@ final class NetSession {
             Context rc = HpApp.appContext;
             if (rc != null) clearRejoin(rc);            // the game is over: there is nothing to come back to
             relaySummary = org.hedgewars.android.net.Json.str(m, "text", "");
+            lastEndReason = org.hedgewars.android.net.Json.str(m, "reason", "");
             toYouHash = org.hedgewars.android.net.Json.str(m, "toYouHash", "");
             toYouMsgs = org.hedgewars.android.net.Json.num(m, "toYouMsgs", 0);
             relayLogHash = org.hedgewars.android.net.Json.str(m, "logHash", "");
@@ -417,6 +420,8 @@ final class NetSession {
                 if (gen == connectGen) pendingIsHost = false;
                 if (gen != connectGen) throw new Cancelled();      // a failure caused by the cancel is not "could not reach"
             }
+            // A rejoin to a host that does not answer at all (after the retries): the host has gone, so the Rejoin card goes too.
+            if (back && RelayClient.unreachable(e)) clearRejoin(c);
             throw e;
         } finally {
             synchronized (NetSession.class) { if (gen == connectGen) connectProgress = ""; }
@@ -473,6 +478,10 @@ final class NetSession {
             client = null;
             joined = false;
             watching = false;
+            inGame = false;                      // a game this phone left (or whose host it stopped) is not running for it any more
+            gaveUp = false;
+            pendingStart = null;
+            state = null;
         }
         if (p != null) p.close();
         if (rc != null) rc.close();

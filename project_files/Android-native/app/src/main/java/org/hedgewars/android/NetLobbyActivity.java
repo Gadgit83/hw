@@ -222,7 +222,11 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
         if (!NetSession.inGame) {
             // Why the last game stopped, if it did not end cleanly (the launcher records it, as for a local game).
             String err = Diag.readTail(new java.io.File(Diag.logsDir(this), Diag.LAST_ERROR), 800);
-            if (err != null && !err.trim().isEmpty()) content.addView(coloured("The last game stopped: " + err.trim(), Ui.DANGER));
+            // The relay ending the game (End the game for everyone, a desync, the host gone) reaches the engine as an error; that is
+            // already said by the notice, so it is not repeated here as a fault.
+            String why = NetSession.lastEndReason;
+            boolean relayEnd = err != null && !why.isEmpty() && err.contains(why);
+            if (err != null && !err.trim().isEmpty() && !relayEnd) content.addView(coloured("The last game stopped: " + err.trim(), Ui.DANGER));
         }
         if (NetSession.joined) lobby(); else choose();
         if (!NetSession.relaySummary.isEmpty()) report();

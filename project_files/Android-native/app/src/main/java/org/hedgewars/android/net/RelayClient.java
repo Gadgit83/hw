@@ -124,7 +124,7 @@ public final class RelayClient {
     }
 
     /** True for a failure to reach the host at all (worth another try), false for anything else. */
-    static boolean unreachable(IOException e) {
+    public static boolean unreachable(IOException e) {
         return e instanceof java.net.NoRouteToHostException || e instanceof java.net.ConnectException
                 || e instanceof java.net.SocketTimeoutException;
     }

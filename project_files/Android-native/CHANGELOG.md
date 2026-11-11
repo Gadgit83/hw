@@ -4,6 +4,17 @@ All notable changes to the native Android app (`project_files/Android-native`), 
 
 Only some builds were put on a phone, so a version below is a build that was made, not necessarily one that was released. Releases are tags on `android-master` with the APK attached; there is none yet.
 
+## 0.3.0-tv15 (119): fixes from the tv14 device test (test build)
+
+`HP_PROFILE=test`, versionName `0.3.0-tv15-test`. From RESULT 23 on the device testing issue (Fairphone 4 host, Fairphone 3, TV).
+
+### Fixed
+
+- The chat lines the relay writes into a game ("X lost connection...", "X is back", "X did not come back...") carried a zero timestamp. The engine ignores it for chat, so the phones were fine, but the TV follows the game time from every message and saw a jump of 65,536 ticks, which led to drift catch-ups and a false desync on the TV. They now carry the time of the latest engine message.
+- After the host left a game, the window ran out and the host stopped hosting, hosting again showed the host's own lobby as "game running" with Start disabled until the app was restarted. Leaving the relay now clears the game state.
+- After "End the game for everyone", the other phone showed the relay's normal end in red as "The last game stopped: Engine error: ...". A game the relay ended is now only reported by its notice.
+- A "Rejoin your game" card for a host that no longer answers goes away after the rejoin attempt cannot reach it.
+
 ## 0.3.0-tv14 (118): rejoining a running game, the host can leave (test build)
 
 `HP_PROFILE=test`, versionName `0.3.0-tv14-test`. A phone that loses its connection or leaves a running network game can come back into it within two minutes, and the host leaving the game screen no longer ends the game. No engine change: the rejoin uses the engine's own team-gone and team-back messages (docs/network.md, Rejoining a running game). `Compat.VALUE` is unchanged (`hwnet-60-sim2`).

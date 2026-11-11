@@ -658,6 +658,8 @@ public final class Relay {
     }
 
     private final class Game {
+        /** The timestamp bytes of the latest timed message from an engine (see appendAndForward). */
+        byte lastStamp0, lastStamp1;
         final int no = ++gameNo;
         long lastLinkPing;
         final List<TeamRef> teams = new ArrayList<>();
@@ -1144,6 +1146,8 @@ public final class Relay {
         byte[] f = new byte[tb.length + 3];
         f[0] = 's';
         System.arraycopy(tb, 0, f, 1, tb.length);
+        f[f.length - 2] = g.lastStamp0;          // the time of the latest engine message (the engine ignores it for s)
+        f[f.length - 1] = g.lastStamp1;
         List<Runnable> after = new ArrayList<>();
         appendAndForward(g, f, null, after);
         for (Runnable r : after) r.run();
@@ -1986,6 +1990,12 @@ public final class Relay {
 
     /** Lock held. Appends to the log and offers to every other live engine. */
     private void appendAndForward(Game g, byte[] msg, Player from, List<Runnable> after) {
+        // The last two bytes of an engine's timed message are the low 16 bits of its game ticks; remember the latest, so a line the
+        // relay writes itself carries a real time (a reader that follows the game time, like the TV, must not see it jump).
+        if (from != null && msg.length >= 3 && msg[0] != 'F' && msg[0] != 'G') {
+            g.lastStamp0 = msg[msg.length - 2];
+            g.lastStamp1 = msg[msg.length - 1];
+        }
         byte[] f = Frames.frame(msg);
         g.log.write(f, 0, f.length);
         g.logHash.add(f);

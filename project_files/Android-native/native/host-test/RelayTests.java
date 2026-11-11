@@ -889,6 +889,10 @@ public class RelayTests {
             check(waitFor(() -> has(g.ph.notices, "PhoneB lost connection; waiting up to 1 minute for them to rejoin"), 2000),
                     "the host is told 'PhoneB lost connection; waiting up to 1 minute for them to rejoin' (" + g.ph.notices + ")");
             check(waitFor(() -> has(g.ea.received, "s* PhoneB lost connection; waiting up to 1 minute"), 2000), "the same line is written into the game as chat");
+            String chat = null;
+            for (String m : g.ea.received) if (m.startsWith("s* PhoneB lost connection")) chat = m;
+            check(chat != null && chat.endsWith("xx"),
+                    "the chat line carries the time of the latest engine message (here B's Lxx), not 0 (" + (chat == null ? null : chat.substring(chat.length() - 2).chars().boxed().toList()) + ")");
             check(statusBody(g.f).contains("\"away\":true"), "the TV status GET marks the away player");
             // Wrong token, and the right token with another name: both refused alike.
             P bad1 = new P();

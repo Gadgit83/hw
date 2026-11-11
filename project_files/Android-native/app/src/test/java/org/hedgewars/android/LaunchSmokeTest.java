@@ -606,6 +606,27 @@ public class LaunchSmokeTest {
         System.out.println("SDK " + android.os.Build.VERSION.SDK_INT + ": default name and dice ok");
     }
 
+    @Test
+    public void netLobbyActivity_upgraderWithStoredDeviceModelGetsARandomName_andTypingIsSavedAtOnce() throws Exception {
+        TestSupport.installData(app());
+        java.util.List<String> names = PlayerNames.load(app());
+        android.content.SharedPreferences sp = app().getSharedPreferences(Store.PREFS_NAME, Context.MODE_PRIVATE);
+        sp.edit().remove("netname_chosen").putString("netname", android.os.Build.MODEL).apply();    // tv12 saved this on pause
+        Activity a = Robolectric.buildActivity(NetLobbyActivity.class, null).create().start().postCreate(null).resume().visible().get();
+        android.widget.EditText f = nameField(a.getWindow().getDecorView());
+        assertTrue("a stored device model is replaced by a name from the list: " + f.getText(), names.contains(f.getText().toString()));
+        assertTrue("and it is not marked as chosen", !sp.getBoolean("netname_chosen", true));
+        f.setText("Typed Name");
+        assertTrue("a typed name is saved on the change, without a pause", "Typed Name".equals(sp.getString("netname", "")));
+        assertTrue("and marked as the player's own", sp.getBoolean("netname_chosen", false));
+        f.setText("Typed Name 2");
+        android.view.View dice = TestSupport.find(a.getWindow().getDecorView(), "Pick another name");
+        dice.performClick();
+        assertTrue("the dice result is saved as chosen", names.contains(sp.getString("netname", "")) && sp.getBoolean("netname_chosen", false));
+        a.finish();
+        System.out.println("SDK " + android.os.Build.VERSION.SDK_INT + ": upgrader name and typed-name save ok");
+    }
+
     private static void numericFields(android.view.View v, java.util.List<android.widget.EditText> out) {
         if (v instanceof android.widget.EditText && (((android.widget.EditText) v).getInputType() & android.text.InputType.TYPE_MASK_CLASS) == android.text.InputType.TYPE_CLASS_NUMBER)
             out.add((android.widget.EditText) v);

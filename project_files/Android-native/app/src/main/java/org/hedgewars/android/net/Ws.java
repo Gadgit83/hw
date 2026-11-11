@@ -51,7 +51,12 @@ final class Ws {
         }
     }
 
-    /** One unfragmented server frame (opcode 2 binary, 8 close, 10 pong). */
+    /** One unfragmented server text frame (opcode 1, UTF-8 JSON). */
+    static byte[] text(String json) {
+        return frame(1, json.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    }
+
+    /** One unfragmented server frame (opcode 1 text, 2 binary, 8 close, 10 pong). */
     static byte[] frame(int op, byte[] p) {
         ByteArrayOutputStream b = new ByteArrayOutputStream(p.length + 10);
         b.write(0x80 | op);

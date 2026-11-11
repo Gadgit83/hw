@@ -627,6 +627,31 @@ public class LaunchSmokeTest {
         System.out.println("SDK " + android.os.Build.VERSION.SDK_INT + ": upgrader name and typed-name save ok");
     }
 
+    @Test
+    public void netLobbyActivity_refusedRememberedPasswordSaysItChanged_typedOneSaysWrong() throws Exception {
+        TestSupport.installData(app());
+        for (boolean remembered : new boolean[] { true, false }) {
+            NetSession.lastHostName = "192.0.2.7";
+            NetSession.lastPort = 46633;
+            NetSession.sentPin = "1234";
+            NetSession.sentPinKey = "192.0.2.7:46633";
+            NetSession.sentPinRemembered = remembered;
+            NetSession.refusedCode = "password";
+            Activity a = Robolectric.buildActivity(NetLobbyActivity.class, null).create().start().postCreate(null).resume().visible().get();
+            TestSupport.layout(a);
+            String text = TestSupport.texts(a.getWindow().getDecorView());
+            java.util.List<android.widget.EditText> nums = new java.util.ArrayList<>();
+            numericFields(a.getWindow().getDecorView(), nums);
+            if (remembered) assertTrue("a refused remembered password: " + text, text.contains("The game password has changed. Ask the host for the new one.") && !text.contains("Wrong password"));
+            else assertTrue("a refused typed password: " + text, text.contains("Wrong password. Try again.") && !text.contains("has changed"));
+            assertTrue("the entry is empty", nums.size() == 1 && nums.get(0).getText().length() == 0);
+            a.finish();
+        }
+        NetSession.sentPin = "";
+        NetSession.sentPinRemembered = false;
+        System.out.println("SDK " + android.os.Build.VERSION.SDK_INT + ": remembered password refusal ok");
+    }
+
     private static void numericFields(android.view.View v, java.util.List<android.widget.EditText> out) {
         if (v instanceof android.widget.EditText && (((android.widget.EditText) v).getInputType() & android.text.InputType.TYPE_MASK_CLASS) == android.text.InputType.TYPE_CLASS_NUMBER)
             out.add((android.widget.EditText) v);

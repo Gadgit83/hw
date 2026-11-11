@@ -211,7 +211,8 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
         // A join the host refused for its game password: ask for the password and join again. ("password-locked" is just shown, below.)
         if ("password".equals(NetSession.takeRefusal()) && !NetSession.joined) {
             setPinPrompt(NetSession.lastHostName, NetSession.lastPort, NetSession.lastWatch,
-                    NetSession.sentPin.isEmpty() ? "This host asks for a game password." : "Wrong password. Try again.");
+                    NetSession.sentPin.isEmpty() ? "This host asks for a game password."
+                            : NetSession.sentPinRemembered ? "The game password has changed. Ask the host for the new one." : "Wrong password. Try again.");
         }
         if (NetSession.joined || NetSession.hosting) pinMsg = null;
         if (!problem.isEmpty()) content.addView(coloured(problem, Ui.DANGER));

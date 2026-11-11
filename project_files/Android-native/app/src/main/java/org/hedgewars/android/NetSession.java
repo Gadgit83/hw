@@ -129,6 +129,8 @@ final class NetSession {
     static volatile String hostPin;
     /** The password the last join sent, and the host it was for (host:port); the password is remembered once the host lets us in. */
     static volatile String sentPin = "", sentPinKey;
+    /** True when the password of the last join was sent from memory (a known one for this host), not typed just now. */
+    static volatile boolean sentPinRemembered;
     /** Last password per host:port that was accepted, in memory only (gone when the app process ends). */
     static final Map<String, String> knownPins = new java.util.concurrent.ConcurrentHashMap<>();
     /** "password" or "password-locked" when the last join was refused for the password; the Network screen takes it ({@link #takeRefusal}). */
@@ -382,6 +384,7 @@ final class NetSession {
         lastWatch = watch;
         sentPin = isHost || pin == null ? "" : pin;
         sentPinKey = isHost ? null : host + ":" + port;
+        sentPinRemembered = !isHost && !sentPin.isEmpty() && sentPin.equals(knownPins.get(sentPinKey));
         final int gen;
         synchronized (NetSession.class) { gen = ++connectGen; pendingIsHost = isHost; }
         closedReason = "";

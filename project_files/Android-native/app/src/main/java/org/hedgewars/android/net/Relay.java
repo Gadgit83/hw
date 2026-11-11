@@ -1120,6 +1120,7 @@ public final class Relay {
         log(p.name + " did not come back within " + windowText());
         tellOthers(p, p.name + " did not come back; their teams sit out");
         sendLobby(p, Json.obj("t", "gaveup", "reason", GAVE_UP_TEXT));
+        tvOverlay(Json.obj("t", "gaveup", "name", p.name));
         broadcastStateLocked();
     }
 
@@ -1715,6 +1716,7 @@ public final class Relay {
         me.backPending.clear();
         me.backPending.addAll(me.teamNames);
         me.catchUp = !me.backPending.isEmpty();
+        if (!me.catchUp) tvOverlay(Json.obj("t", "back", "name", me.name));      // no team to wait for
         me.lastBackSent = 0;
         g.events.add(me.name + " rejoined after " + awayFor / 1000 + " s; its engine replays " + g.logMsgs + " messages");
         log("engine link up (rejoin): " + me.name + ", backlog " + g.log.size() + " bytes, away for " + awayFor / 1000 + " s");
@@ -1747,6 +1749,7 @@ public final class Relay {
                 continue;
             }
             if (q.lastBackSent != 0 && now - q.lastBackSent < cfg.backResendMs) continue;
+            // backPending holds only the teams for which no synced g has been seen, so a team that is back is never asked for again.
             boolean first = q.lastBackSent == 0;
             q.lastBackSent = now;
             for (String team : q.backPending) {
@@ -1769,6 +1772,7 @@ public final class Relay {
             if (q.backPending.isEmpty()) {
                 q.catchUp = false;
                 log(q.name + "'s teams are back in the game");
+                tvOverlay(Json.obj("t", "back", "name", q.name));
             }
         }
     }
@@ -1854,6 +1858,9 @@ public final class Relay {
                         g.events.add(p.name + "'s map digest after rejoining (" + d + ") differs from the game's (" + g.mapDigest + ")");
                         dropPlayer(p, "its map digest after rejoining differs from the game's", "Your phone made a different map; it cannot rejoin this game.", false, false);
                         checkEnd();
+                    } else {
+                        g.mSeen.add(p.id);      // a rejoiner must not hold back arming of the silence rule
+                        updateArmed(g, System.currentTimeMillis());
                     }
                 } else {
                     p.fromDropped++;
@@ -1891,13 +1898,18 @@ public final class Relay {
             if (type == 'g' && msg.length > 3) confirmBack(g, new String(msg, 1, msg.length - 3, StandardCharsets.UTF_8));
             appendAndForward(g, msg, p, after);
             if (type == 'M') updateArmed(g, p.lastMsg);
-            if (type != 'N' && type != 'M' && type != '#' && type != 'f' && type != 'g') {
+            if (impliesOwnTurn(type)) {
                 g.midTurnAt = p.lastMsg;
                 g.midTurnSender = p.id;
                 tryInjectBack(g, p.lastMsg, after);
             }
         }
         for (Runnable r : after) r.run();
+    }
+
+    /** Message types only the phone that has the current turn sends: movement, aim, weapon, timer and attack (not chat, turn end or digests). */
+    private static boolean impliesOwnTurn(char type) {
+        return "LlRrUuDdAaSjJ,pwt12345".indexOf(type) >= 0;
     }
 
     /**
@@ -2096,6 +2108,7 @@ public final class Relay {
             p.awayOnPurpose = onPurpose;
             g.events.add(p.name + (onPurpose ? " left the game" : " lost connection") + "; waiting up to " + windowText() + " for them to rejoin");
             tellOthers(p, p.name + (onPurpose ? " left the game" : " lost connection") + "; waiting up to " + windowText() + " for them to rejoin");
+            tvOverlay(awayMsg(p, cfg.rejoinMs));
         }
         if (toPlayer != null) sendLobby(p, Json.obj("t", "dropped", "reason", toPlayer));
         if (state == S_STARTING) maybeOpenGate();
@@ -2141,8 +2154,9 @@ public final class Relay {
             if (!q.finished) liveAllFinished = false;
         }
         boolean over = !anyDropped || (anyLive && liveAllFinished);
-        // Nobody is connected, but a phone may still come back inside its window: the game waits for it (nothing can happen meanwhile).
-        // When the last window has run out, or the phones that were left finished, the game ends.
+        // Nobody is connected but a window is still open: the game is kept until the windows run out. A phone cannot actually rejoin meanwhile
+        // (rejoinRefusal says rejoin-alone while no other phone plays: no engine could hand its teams back), so this only gives a phone
+        // that is merely slow to notice its own loss a moment. When the last window has run out, or the phones that were left finished, the game ends.
         if (!over && anyAway && state == S_PLAYING) return;
         endGame(over ? "every engine finished" : anyGaveUp || anyAway ? NOBODY_LEFT : "every engine is gone");
     }
@@ -2393,7 +2407,8 @@ public final class Relay {
                             g.events.add(q.name + "'s engine did not connect after the rejoin in " + cfg.linkWaitMs / 1000 + " s; still away");
                             log(q.name + " rejoin: its engine did not connect");
                         }
-                        if (q.away && now - q.awayAt > cfg.rejoinMs) giveUp(q);
+                        // The window is judged by when the rejoin request arrived: an accepted rejoin keeps its seat for the engine link wait.
+                        if (q.away && now - q.awayAt > cfg.rejoinMs && !(q.rejoinPending && now - q.rejoinAt <= cfg.linkWaitMs)) giveUp(q);
                     }
                     checkEnd();
                     if (g != game) return lastPing;
@@ -2493,6 +2508,20 @@ public final class Relay {
 
 
     // TV viewers (WebSocket) -------------------------------------------------------------------
+
+    /**
+     * Lock held. Sends an overlay message to every TV as a WebSocket text frame (opcode 1, JSON), through the viewer's own queue so it arrives
+     * in stream order. Never to phones' engine links and never into the game log.
+     */
+    private void tvOverlay(Map<String, Object> msg) {
+        if (viewers.isEmpty()) return;
+        byte[] wf = Ws.text(Json.write(msg));
+        for (Viewer v : new ArrayList<>(viewers)) if (!v.out.offer(wf)) dropViewer(v, whyRefused(v));
+    }
+
+    private static Map<String, Object> awayMsg(Player p, long leftMs) {
+        return Json.obj("t", "away", "name", p.name, "leftMs", leftMs, "onPurpose", p.awayOnPurpose);
+    }
 
     private final class Viewer {
         Socket sock;
@@ -2631,6 +2660,9 @@ public final class Relay {
                 me.out.attach(os);
                 byte[] first = viewerBacklog();
                 me.out.offer(Ws.frame(2, first));
+                long nowMs = System.currentTimeMillis();
+                for (Player q : players.values())
+                    if (q.away) me.out.offer(Ws.text(Json.write(awayMsg(q, Math.max(0L, cfg.rejoinMs - (nowMs - q.awayAt))))));
                 viewers.add(me);
                 viewersEver++;
                 addViewerEvent(game, "TV viewer joined from " + me.from + " (first message " + first.length + " bytes)");

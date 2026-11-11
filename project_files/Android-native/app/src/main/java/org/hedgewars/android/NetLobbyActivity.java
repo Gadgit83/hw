@@ -167,7 +167,7 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
     private void saveFields() {
         if (nameField != null) name = nameField.getText().toString().trim();
         if (addressField != null) address = addressField.getText().toString().trim();
-        getSharedPreferences(Store.PREFS_NAME, MODE_PRIVATE).edit().putString("netname", name).putString("netaddr", address).apply();
+        getSharedPreferences(Store.PREFS_NAME, MODE_PRIVATE).edit().putString("netaddr", address).apply();
     }
 
     // NetSession.Listener -----------------------------------------------------------------------
@@ -244,6 +244,12 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
                 + "setup screen first. The host's Map and Rules tabs decide the game."));
         start.addView(ui.heading("Your name"));
         nameField = ui.field(name, "Player name");
+        // Saved as it is typed (and marked as the player's own), so a crash or a killed app keeps the edit.
+        nameField.addTextChangedListener(new android.text.TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int a, int b, int c) { }
+            @Override public void onTextChanged(CharSequence s, int a, int b, int c) { }
+            @Override public void afterTextChanged(android.text.Editable e) { PlayerNames.typed(NetLobbyActivity.this, e.toString()); }
+        });
         LinearLayout nameRow = new LinearLayout(this);
         nameRow.setOrientation(LinearLayout.HORIZONTAL);
         nameRow.setGravity(android.view.Gravity.CENTER_VERTICAL);

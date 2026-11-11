@@ -93,7 +93,7 @@ static int write_full(int fd, const void *buf, size_t n)
  * ------------------------------------------------------------------------------------------- */
 #define HP_NET_FLUSH_DEFAULT_MS 100   /* see net_flush note in CHANGELOG 0.3.0-tv5b; the env var HP_NET_FLUSH_MS overrides it (harness) */
 static int g_net;
-static char g_net_host[128], g_net_token[160], g_net_nick[64] = "Player", g_net_diag[1024];
+static char g_net_host[128], g_net_token[160], g_net_nick[160] = "Player", g_net_diag[1024];
 static int g_net_port;
 static int g_net_is_host;                 /* net.cfg says role=host: this phone's engine may ask for a pause (see net_pause_request) */
 static int g_net_is_watch;                /* net.cfg says role=watch: this phone only watches; nothing from its engine goes to the relay (see net_tap) */

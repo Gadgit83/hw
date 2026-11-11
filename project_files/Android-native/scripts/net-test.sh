@@ -100,6 +100,8 @@ if [[ "$SCEN" == viewer* || "$SCEN" == hostpause ]]; then
   { git -C "$PARTY" show origin/main:tv/e2e-host/src/pc_host.c; echo 'void hw_device_rumble(int ms) { (void)ms; }   /* the engine now calls this hook */'; } > "$PC/src/pc_host.c"
   git -C "$PARTY" show origin/main:tv/e2e-host/src/CMakeLists.txt | sed "s/HP_GLES1=0/HW_GLES1=0/" > "$PC/src/CMakeLists.txt"   # the app renamed this define
   git -C "$PARTY" show origin/main:tv/e2e-host/tools/viewer-sim.js > "$PC/viewer-sim.js"
+  # The relay also sends WebSocket text frames (the away/back/gaveup overlay): the stand-in keeps them apart from the game stream.
+  sed -i "s|^  const buf = Buffer.from(ev.data);|  if (typeof ev.data === 'string') { (res.overlay = res.overlay \|\| []).push(ev.data); return; }\n  const buf = Buffer.from(ev.data);|" "$PC/viewer-sim.js"
   cmake -S "$PC/src" -B "$PC/build" -G Ninja -DCMAKE_BUILD_TYPE=Release -DHP_ENGINE_SRC="$REPO_DIR" -DHP_ENGINE_C="$BUILD_DIR/engine-c-host" \
     -DHP_RUST_LIB="$BUILD_DIR/rust-host/libhwengine_future.so" >/dev/null && ninja -C "$PC/build" | tail -1
   export NET_PCHOST="$PC/build/pc_host" NET_VIEWER_SIM="$PC/viewer-sim.js"

@@ -1130,6 +1130,149 @@ public class RelayTests {
         }
     }
 
+    /** Review fixes: a rejoin accepted just before the window ends survives a late engine link; a rejoiner's map digest arms the silence rule; chat does not ask for the team back. */
+    static void testRejoinEdges() throws Exception {
+        System.out.println("rejoin: a late engine link, the silence rule and the trigger for team-back");
+        Fix.rejoinMs = 1500;
+        try {
+            Game g = new Game(60000, 1000);
+            g.ea.send("Mdig");
+            g.eb.send("Mdig");
+            g.eb.close();                                                 // B's engine dies; its lobby link stays
+            check(waitFor(() -> Json.bool(me(g.f, "PhoneB"), "away", false), 3000), "B is away");
+            Thread.sleep(900);
+            g.pb.start = null;
+            g.b.rejoinNow();                                              // asked just before the 1.5 s window ends
+            check(waitFor(() -> g.pb.start != null && g.pb.start.rejoin, 3000), "a rejoin just inside the window is accepted");
+            Thread.sleep(1800);                                           // the window is over; the engine link has not come yet
+            check(!Json.bool(me(g.f, "PhoneB"), "gaveUp", false) && Json.bool(me(g.f, "PhoneB"), "away", false), "the seat is not given up while the accepted rejoin waits for its engine link");
+            Eng eb2 = new Eng(g.f.port(), g.pb.start.token);
+            check(waitFor(() -> !Json.bool(me(g.f, "PhoneB"), "away", true) && eb2.received.contains("Mdig"), 3000), "the late engine link is accepted and replays the game");
+            g.ea.send("bchat");                                           // team chat: the current team's phone did not send it
+            Thread.sleep(400);
+            check(!g.ea.received.contains("GBravo"), "chat does not ask for the team back");
+            g.ea.send("Axx");
+            check(waitFor(() -> g.ea.received.contains("GBravo"), 2000), "a move from inside the turn does");
+            g.ea.send(G_BACK);
+            check(waitFor(() -> g.f.logged("teams are back"), 2000), "the teams come back after the window had ended");
+            check(!Json.bool(me(g.f, "PhoneB"), "gaveUp", false), "and the seat was never given up");
+            eb2.close();
+            g.end();
+        } finally {
+            Fix.rejoinMs = 120000;
+        }
+        Fix.rejoinMs = 60000;
+        try {
+            Game g = new Game(60000, 1000);
+            g.eb.close();                                                 // B is gone before any map digest
+            check(waitFor(() -> Json.bool(me(g.f, "PhoneB"), "away", false), 3000), "B is away before the silence rule is armed");
+            g.pb.start = null;
+            g.b.rejoinNow();
+            check(waitFor(() -> g.pb.start != null && g.pb.start.rejoin, 3000), "B rejoins");
+            Eng eb2 = new Eng(g.f.port(), g.pb.start.token);
+            g.ea.send("Mdig");
+            Thread.sleep(300);
+            check(!g.f.logged("the silence rule is armed"), "A's digest alone does not arm it (B is back and has not sent one)");
+            eb2.send("Mdig");
+            check(waitFor(() -> g.f.logged("the silence rule is armed"), 2000), "the rejoiner's digest while replaying arms the silence rule");
+            eb2.close();
+            g.end();
+        } finally {
+            Fix.rejoinMs = 120000;
+        }
+    }
+
+    /** Reads frames until a text frame (opcode 1) arrives; null when none comes within the socket timeout. */
+    static String readTextFrame(Socket s) { return readTextFrame(s, 8000); }
+
+    static String readTextFrame(Socket s, long maxMs) {
+        try {
+            s.setSoTimeout(6000);
+            int[] op = new int[1];
+            long end = System.currentTimeMillis() + maxMs;
+            while (System.currentTimeMillis() < end) {
+                byte[] fr = readWsFrame(s.getInputStream(), op);
+                if (fr == null) return null;
+                if (op[0] == 1) return new String(fr, StandardCharsets.UTF_8);
+            }
+        } catch (Exception e) { /* no frame in time */ }
+        return null;
+    }
+
+    /** A TV that connects; returns the socket after the handshake with the opcode of its first frame in op[0] and the first frame in first[0]. */
+    static Socket viewerRaw(Fix f, int[] op, byte[][] first) throws Exception {
+        Socket s = new Socket("127.0.0.1", f.relay.viewerPort());
+        s.setSoTimeout(8000);
+        s.getOutputStream().write(("GET / HTTP/1.1\r\nHost: x\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n").getBytes(StandardCharsets.ISO_8859_1));
+        readUntilBlank(s.getInputStream());
+        first[0] = readWsFrame(s.getInputStream(), op);
+        return s;
+    }
+
+    /** The TV overlay: away, back and gaveup arrive as WebSocket text frames (opcode 1), a late TV gets the remaining time, nothing reaches the game log. */
+    static void testTvOverlay() throws Exception {
+        System.out.println("TV overlay: away, back and gaveup as text frames");
+        Fix.rejoinMs = 60000;
+        try {
+            Game g = new Game(60000, 1000);
+            g.ea.send("Mdig");
+            g.eb.send("Mdig");
+            Socket tv = viewerOn(g.f);
+            g.eb.close();
+            String away = readTextFrame(tv);
+            check(away != null, "a TV gets a text frame (opcode 1) when a phone drops: " + away);
+            Map<String, Object> m = away == null ? new java.util.HashMap<>() : Json.parseObject(away);
+            check(Json.str(m, "t", "").equals("away") && Json.str(m, "name", "").equals("PhoneB") && !Json.bool(m, "onPurpose", true)
+                    && Json.num(m, "leftMs", 0) > 55000 && Json.num(m, "leftMs", 0) <= 60000, "  it says away, the name, onPurpose false and the window left: " + away);
+            Thread.sleep(700);
+            int[] op = new int[1];
+            byte[][] first = new byte[1][];
+            Socket late = viewerRaw(g.f, op, first);
+            check(op[0] == 2, "a TV that connects mid-window gets the binary backlog first (opcode " + op[0] + ")");
+            check(new String(first[0], StandardCharsets.ISO_8859_1).indexOf("\"t\"") < 0, "  and no JSON is in the backlog");
+            String lateAway = readTextFrame(late);
+            long lm = lateAway == null ? -1 : Json.num(Json.parseObject(lateAway), "leftMs", -1);
+            check(lateAway != null && lateAway.contains("\"away\"") && lateAway.contains("PhoneB") && lm > 0 && lm < 59500, "  then an away frame with the remaining time (" + lateAway + ")");
+            g.pb.start = null;
+            g.b.rejoinNow();
+            check(waitFor(() -> g.pb.start != null && g.pb.start.rejoin, 3000), "B rejoins");
+            Eng eb2 = new Eng(g.f.port(), g.pb.start.token);
+            check(waitFor(() -> eb2.received.contains("Mdig"), 2000), "B's engine replays the log");
+            g.ea.send("Axx");
+            check(waitFor(() -> g.ea.received.contains("GBravo"), 2000), "team back asked for");
+            g.ea.send(G_BACK);
+            String back = readTextFrame(tv);
+            check(back != null && Json.str(Json.parseObject(back), "t", "").equals("back") && back.contains("PhoneB"), "when the teams are back the TV gets back: " + back);
+            check(!has(g.ea.received, "\"t\":\"away\"") && !has(eb2.received, "\"t\":\"away\"") && !has(eb2.received, "\"t\":\"back\""), "no overlay text reaches the phones' engine links");
+            Socket again = viewerOn(g.f);
+            String stray = readTextFrame(again, 1500);
+            check(stray == null, "a TV that connects after the teams are back gets no away frame (" + stray + ") " + (stray == null ? "" : g.f.log.subList(Math.max(0, g.f.log.size() - 8), g.f.log.size())));
+            again.close();
+            tv.close();
+            late.close();
+            eb2.close();
+            g.end();
+        } finally {
+            Fix.rejoinMs = 120000;
+        }
+        Fix.rejoinMs = 1500;
+        try {
+            Game g = new Game(60000, 1000);
+            g.ea.send("Mdig");
+            g.eb.send("Mdig");
+            Socket tv = viewerOn(g.f);
+            g.eb.close();
+            String away = readTextFrame(tv);
+            check(away != null && away.contains("\"away\""), "second game: away frame");
+            String gave = readTextFrame(tv);
+            check(gave != null && Json.str(Json.parseObject(gave), "t", "").equals("gaveup") && gave.contains("PhoneB"), "after the window the TV gets gaveup: " + gave);
+            tv.close();
+            g.end();
+        } finally {
+            Fix.rejoinMs = 120000;
+        }
+    }
+
     static byte[] maskedFrame(int op, byte[] p, byte[] mask) {
         ByteArrayOutputStream b = new ByteArrayOutputStream();
         b.write(0x80 | op);
@@ -2089,6 +2232,8 @@ public class RelayTests {
         testQuitWording();
         testRejoin();
         testRejoinWindow();
+        testRejoinEdges();
+        testTvOverlay();
         testClientClose();
         testConnectRetry();
         testNoSocketWriteOnCallerThread();

@@ -32,9 +32,9 @@ final class BackConfirm {
 
     static String message(boolean host) {
         return host
-                ? "The game goes on for the others without your teams, which sit out. You can rejoin from the Network screen within "
-                        + REJOIN_TIME + ". Or end the game for every phone and every TV watching." + RUNNING
-                : "Your teams sit out and the other players carry on. You can rejoin from the Network screen within " + REJOIN_TIME + "." + RUNNING;
+                ? "The game goes on for the others without your teams, which sit out. You can rejoin within "
+                        + REJOIN_TIME + " while another player is still in the game. Or end the game for every phone and every TV watching." + RUNNING
+                : "Your teams sit out and the other players carry on. You can rejoin within " + REJOIN_TIME + " while another player is still in the game." + RUNNING;
     }
 
     static String leave() {

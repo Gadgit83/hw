@@ -3,7 +3,8 @@
 #   sync-player-names.sh                 uses origin/main of /home/user/hedgewars-party (shared/player-names.txt)
 #   sync-player-names.sh /path/to/repo   uses origin/main of that checkout
 #   sync-player-names.sh /path/file.txt  uses that file as it is
-# Rules checked: one name per line, at most 20 characters, plain ASCII; blank lines and lines starting with # are skipped.
+# Rules checked: one name per line, at most 20 characters, plain ASCII (no tabs), no leading or trailing spaces, no duplicates (ignoring case);
+# blank lines and lines starting with # are skipped. Any broken line is an error and nothing is written.
 # Output: app/src/main/assets/player-names.txt (packaged in both the test and the full profile). Re-run when the list changes.
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -22,9 +23,12 @@ fi
 LC_ALL=C awk '
     { sub(/\r$/, "") }
     /^[ \t]*$/ || /^#/ { next }
+    /\t/ { printf "error: line %d contains a tab character (use plain spaces): %s\n", NR, $0 > "/dev/stderr"; bad = 1; next }
     /[^\x20-\x7e]/ { printf "error: line %d is not plain ASCII: %s\n", NR, $0 > "/dev/stderr"; bad = 1; next }
+    /^ / || / $/ { printf "error: line %d has leading or trailing spaces: [%s]\n", NR, $0 > "/dev/stderr"; bad = 1; next }
     length($0) > 20 { printf "error: line %d is %d characters (max 20): %s\n", NR, length($0), $0 > "/dev/stderr"; bad = 1; next }
-    { n++; print > OUTF }
+    { k = tolower($0); if (k in seen) { printf "error: line %d duplicates line %d (names are compared ignoring case): %s\n", NR, seen[k], $0 > "/dev/stderr"; bad = 1; next }
+      seen[k] = NR; n++; print > OUTF }
     END { if (bad) exit 1; if (n == 0) { print "error: no names found" > "/dev/stderr"; exit 1 } printf "%d names\n", n > "/dev/stderr" }
 ' OUTF="$TMP.out" "$TMP"
 mkdir -p "$(dirname "$OUT")"

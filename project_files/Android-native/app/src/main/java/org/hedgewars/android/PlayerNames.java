@@ -38,9 +38,8 @@ final class PlayerNames {
         java.util.Set<String> seen = new java.util.HashSet<>();
         for (String raw : text.split("\n")) {
             String line = raw.endsWith("\r") ? raw.substring(0, raw.length() - 1) : raw;
-            if (line.startsWith("#")) continue;
             line = line.trim();
-            if (line.isEmpty()) continue;
+            if (line.isEmpty() || line.startsWith("#")) continue;
             if (line.length() > MAX_LENGTH || !isPlainAscii(line)) continue;
             if (!seen.add(line.toLowerCase(java.util.Locale.ROOT))) continue;
             out.add(line);

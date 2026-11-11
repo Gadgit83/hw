@@ -1736,18 +1736,20 @@ public final class Relay {
      * right after a live phone sent something from inside its own turn, and asked again after {@link Config#backResendMs} if no {@code g} came.
      */
     private void tryInjectBack(Game g, long now, List<Runnable> after) {
+        // The give-up check runs on every call, not only when a turn message arrived, so a TV is never left showing "away".
+        for (Player q : new ArrayList<>(players.values())) {
+            if (!q.linkOpen || q.dropped || q.backPending.isEmpty() || now - q.linkUpAt <= cfg.backWaitMs) continue;
+            g.events.add(q.name + "'s teams did not come back within " + cfg.backWaitMs / 1000 + " s; the relay stopped asking");
+            log(q.name + "'s teams did not come back; giving up asking");
+            q.backPending.clear();
+            q.catchUp = false;
+            tvOverlay(Json.obj("t", "gaveup", "name", q.name));
+        }
         if (state != S_PLAYING || g.paused || now - g.midTurnAt > 700) return;
         Player s = players.get(g.midTurnSender);
         if (s == null || !s.linkOpen || s.dropped || s.finished || s.catchUp) return;
         for (Player q : new ArrayList<>(players.values())) {
             if (q == s || !q.linkOpen || q.dropped || q.backPending.isEmpty()) continue;
-            if (now - q.linkUpAt > cfg.backWaitMs) {
-                g.events.add(q.name + "'s teams did not come back within " + cfg.backWaitMs / 1000 + " s; the relay stopped asking");
-                log(q.name + "'s teams did not come back; giving up asking");
-                q.backPending.clear();
-                q.catchUp = false;
-                continue;
-            }
             if (q.lastBackSent != 0 && now - q.lastBackSent < cfg.backResendMs) continue;
             // backPending holds only the teams for which no synced g has been seen, so a team that is back is never asked for again.
             boolean first = q.lastBackSent == 0;
@@ -1907,9 +1909,12 @@ public final class Relay {
         for (Runnable r : after) r.run();
     }
 
-    /** Message types only the phone that has the current turn sends: movement, aim, weapon, timer and attack (not chat, turn end or digests). */
+    /**
+     * Message types only the phone that has the current turn sends: movement, aim, precise aim and attack. Not chat, turn end or
+     * digests, and not taunt (t), weapon (w) or timer (1 to 5), which the engine also sends from chat commands on any phone.
+     */
     private static boolean impliesOwnTurn(char type) {
-        return "LlRrUuDdAaSjJ,pwt12345".indexOf(type) >= 0;
+        return "LlRrUuDdAaSjJ,pZz".indexOf(type) >= 0;
     }
 
     /**

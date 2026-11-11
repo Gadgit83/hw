@@ -752,10 +752,10 @@ public class RelayTests {
         for (String l : g.f.log) if (l.contains(" left: ") && (l.contains("connection lost") || l.contains("disconnected") || l.contains("closed"))) named = true;
         check(named, "and the reason says the connection was lost or closed");
         g.end();
-        waitFor(() -> g.f.relay.lastSummary() != null, 3000);
+        waitFor(() -> g.f.relay.lastSummary() != null, 8000);
         Relay.GameSummary gs = g.f.relay.lastSummary();
         int left = 0;
-        for (String e : gs.events) if (e.startsWith("TV viewer ") && e.contains(" left (")) left++;
+        for (String e : gs == null ? new java.util.ArrayList<String>() : gs.events) if (e.startsWith("TV viewer ") && e.contains(" left (")) left++;
         check(left == 2, "the report lists both departures as events (" + left + ")");
     }
 

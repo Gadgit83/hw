@@ -4,6 +4,25 @@ All notable changes to the native Android app (`project_files/Android-native`), 
 
 Only some builds were put on a phone, so a version below is a build that was made, not necessarily one that was released. Releases are tags on `android-master` with the APK attached; there is none yet.
 
+## 0.3.0-tv14 (118): rejoining a running game, the host can leave (test build)
+
+`HP_PROFILE=test`, versionName `0.3.0-tv14-test`. A phone that loses its connection or leaves a running network game can come back into it within two minutes, and the host leaving the game screen no longer ends the game. No engine change: the rejoin uses the engine's own team-gone and team-back messages (docs/network.md, Rejoining a running game). `Compat.VALUE` is unchanged (`hwnet-60-sim2`).
+
+### Changed
+
+- The host's Back dialog has three answers: "Leave the game" (the game goes on for the others, the host's teams sit out, the host can rejoin from the Network screen within 2 minutes), "End the game for everyone" (as before: every phone is told "The host ended the game.", the TV gets close code 4001) and "Keep playing". A joining phone's Back dialog has "Leave the game" (same rule) and "Keep playing". The host's engine quitting by itself (Escape then Y, or the chat quit) is also a leave. Only the new control frame `\0Z` (sent by "End the game for everyone", accepted from the host's link only) ends the game for everyone.
+- A player whose connection is lost in a running game (lobby or engine link closed, the half-open link check, the silence rule, a full queue) or who leaves is not dropped for good: the seat stays "away" for 2 minutes (`Relay.Config.rejoinMs`, 120000). Its teams are marked gone as before (`F<team>` injected, turns skipped). The other phones and the host are told in the lobby and as a chat line in the game: "<name> lost connection; waiting up to 2 minutes for them to rejoin" (or "<name> left the game; ..."), later "<name> is back" or "<name> did not come back; their teams sit out". A desync, a map that differs and a phone that never linked are still dropped for good.
+- If every phone left in the game is away, nothing can happen, so the game waits inside the windows and ends when the last window has run out ("Every player left the game and nobody came back", TV close code 4005); it ends at once when the phones that are still in it have all seen the game over. A phone is not let back when nobody else is playing (`rejoin-alone`): no engine could hand its teams back.
+- After the window the seat is given up: the teams stay gone for the rest of the game, the phone is told "You were away too long; the game went on without your teams. You can watch." and a later rejoin is refused with code `rejoin-late`; the Network screen offers "Join to watch".
+- The Network screen lists a phone that is away ("away", "sitting out; can rejoin for about N s") and offers the away phone "Rejoin the game". A phone whose connection was lost or whose app was restarted finds "Rejoin your game" at the top of the chooser, made from a note in `files/rejoin.txt` (host, port, name, rejoin token).
+- The engine is now started with its `--nick` in base64, as `--internal` makes it read it (the name was garbled before). The setup lines of a phone that comes back give its own teams `eowner <name>`: the engine hands a team back (unsynced `G<team>`, then the synced `g`) only to the phone whose nick is the team's owner.
+
+### Added
+
+- Lobby protocol: `{"t":"joined","you","name","rejoin"}` after a join (the rejoin token, kept in `files/rejoin.txt`); `{"t":"hello",...,"rejoin":"<token>"}` brings a phone back on a new lobby link; `{"t":"rejoin"}` over a lobby link that is still up; start messages for it carry `"rejoin":true` (all teams `erdriven`, the phone's own with `eowner`, ending with `e$spectate 1`); `{"t":"gaveup"}`; `{"t":"rejoin-refused","code","reason"}` and the hello refusals `rejoin-unknown` (wrong token or other name, one answer for both), `rejoin-late`, `rejoin-alone`, `rejoin-none`. The status of each player has `away`, `gaveUp` and `awayLeftMs`; the viewer status GET lists `away` per player.
+- The launcher lets `G` (team back) and `s` (a chat line the relay writes into the game) through from the relay, and has a second quit, `hp_ipc_end_for_everyone` (control frame `Z`).
+- Host tests: `RelayTests` (the away seat and the window, the token check, the rejoin flow, host leave and end for everyone, all away) and the net-test scenarios `rejoin`, `rejoinlate`, `hostleave` and `hostend`; `hostquit` now expects the host to leave and the game to go on.
+
 ## 0.3.0-tv13 (117): password off by default and never for TVs, default player names (test build)
 
 `HP_PROFILE=test`, versionName `0.3.0-tv13-test`.

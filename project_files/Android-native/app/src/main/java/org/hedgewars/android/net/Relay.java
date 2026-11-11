@@ -38,7 +38,8 @@ import java.util.function.Supplier;
  * <li>{@code {"t":"hello","role":"engine","token":...}}: an engine link. The relay answers {@code {"t":"ok"}}
  *     and from then on both sides speak the engine's IPC framing (one length byte, then that many bytes).
  *     A frame whose first byte is 0 is a control frame ({@code \0E<text>} engine error from the phone,
- *     {@code \0X<text>} the relay ends the game, {@code \0Q} the player confirmed leaving: same as the engine's Q;
+ *     {@code \0X<text>} the relay ends the game, {@code \0Q} the player confirmed leaving: same as the engine's Q (the seat stays away for
+ *     {@link Config#rejoinMs}, the host's too), {@code \0Z} the host chose "End the game for everyone" (host's link only);
  *     {@code \0P} / {@code \0R} from the host's launcher: pause / resume the game, which the relay answers by sending
  *     {@code \0P} / {@code \0R} to every engine link. Accepted only from the host's link while the game runs; never forwarded
  *     as an engine message, never in the game log or the viewers' stream).</li>
@@ -56,6 +57,12 @@ import java.util.function.Supplier;
  * every other engine and is appended to the log; the sender does not get its own messages back. When a phone
  * is lost the relay injects the unsynced team-gone message {@code F<team>} (never {@code f}) for each of its
  * teams to the others and into the log (plan section 2.8).
+ *
+ * Rejoining (0.3.0-tv14, docs/network.md): such a phone's seat stays "away" for {@link Config#rejoinMs}. The same phone (the rejoin token the relay gave
+ * it at join, and its name) may come back: it is sent the setup again with every team driven from outside and {@code e$spectate 1}, then the whole log,
+ * and its teams are handed back with the engine's own messages: the relay puts the unsynced {@code G<team>} into the log right after a live phone has
+ * sent something from inside its turn, that phone's engine answers with the synced {@code g<team>}, and the rejoining engine (whose team has
+ * {@code eowner <its nick>}) takes the team back. After the window the seat is given up. The host leaving does not end the game; only {@code \0Z} does.
  */
 public final class Relay {
     public static final int PROTO = 1;
@@ -69,6 +76,10 @@ public final class Relay {
     /** The most TV viewer report lines and viewer events kept per game; older ones are only counted. */
     private static final int MAX_VIEWER_LINES = 50;
     public static final String HOST_ENDED = "The host ended the game";
+    /** The end reason when every player is away and the last window has run out: nobody is left to play (docs/network.md, Rejoining). */
+    public static final String NOBODY_LEFT = "Every player left the game and nobody came back";
+    /** What a phone is told when it asks to come back after its window ran out. */
+    public static final String GAVE_UP_TEXT = "You were away too long; the game went on without your teams. You can watch.";
     public static final int MAX_PLAYERS = 8, MAX_CONNECTIONS = 32, MAX_VIEWERS = 16;
     /** Phones that only watch (they play no team, so they are not players): their own cap, apart from MAX_PLAYERS. */
     public static final int MAX_SPECTATORS = 8;
@@ -130,6 +141,17 @@ public final class Relay {
         public long mapWaitMs = 180000;
         /** The longest the host's pause may last: after this the relay resumes everyone itself (the silence rule is off while paused). */
         public long pauseMaxMs = 600000;
+        /**
+         * How long a player's seat stays "away" after the connection was lost or the player left (the Back dialog's "Leave the game"):
+         * its teams are gone (turns skipped) and the same phone may rejoin inside this time. After it the seat is given up. 0 turns rejoining off.
+         */
+        public long rejoinMs = 120000;
+        /** A phone that has rejoined has this long to get its teams back (the relay asks the other engines for it) before the relay stops trying. */
+        public long backWaitMs = 90000;
+        /** How soon the relay asks again for a team to come back when the first ask did not take (no engine had a local team to play at that moment). */
+        public long backResendMs = 2500;
+        /** Write the away and back notices into the game as chat lines (the phones' engines show them); the lobby notices are always sent. */
+        public boolean chatNotices = true;
         /** Test hook, never set by the app: called for each frame about to go to a phone; returns the frame to send or null to lose it. */
         public BiFunction<Integer, byte[], byte[]> fault;
     }
@@ -294,7 +316,7 @@ public final class Relay {
         }
         synchronized (lock) {
             List<Object> pl = new ArrayList<>();
-            for (Player p : players.values()) pl.add(Json.obj("name", p.name, "teams", (long) p.teams.size(), "host", p.host));
+            for (Player p : players.values()) pl.add(Json.obj("name", p.name, "teams", (long) p.teams.size(), "host", p.host, "away", p.away));
             Map<String, Object> out = Json.obj("state", state == S_SETUP ? "setup" : "playing", "game", game == null ? 0L : (long) game.no,
                     "viewers", (long) viewers.size(), "viewersEver", (long) viewersEver, "watching", (long) spectators.size(),
                     "host", cfg.hostName, "players", pl, "compatible", reason.isEmpty(), "reason", reason,
@@ -479,8 +501,20 @@ public final class Relay {
     private final class Player {
         final int id;
         String name;
-        final String token = newToken();
+        /** The engine link's token; a new one is made for each rejoin. */
+        String token = newToken();
+        /** Issued at join, sent to the phone, which keeps it: with the name it proves this is the same phone coming back (see {@link #rejoinRefusal}). */
+        final String rejoinToken = newToken();
         boolean host, ready;
+        /** Seat state in a running game (all under the lock): away = connection lost or left, inside the window; gaveUp = the window ran out. */
+        boolean away, gaveUp, awayOnPurpose, rejoinPending, endAll;
+        long awayAt, rejoinAt, linkUpAt;
+        /** Set from the moment the engine link of a rejoining phone is up until its teams are back: what it sends is not forwarded. */
+        boolean catchUp;
+        /** Teams of this phone the relay still has to get back (it has not yet seen the synced team-back message for them), and when it last asked. */
+        final List<String> backPending = new ArrayList<>();
+        long lastBackSent;
+        int rejoins;
         /** The phone says it is showing its Network screen (a joiner elsewhere may miss the start). */
         boolean fg = true;
         final List<SetupModel.Team> teams = new ArrayList<>();
@@ -498,7 +532,7 @@ public final class Relay {
         /** When anything last arrived on the engine link (a game message or a control frame, the pong included). */
         long lastRx = System.currentTimeMillis();
         // game statistics
-        final Fnv toHash = new Fnv();
+        Fnv toHash = new Fnv();
         long toMsgs, fromRaw, fromKept, fromDropped;
         final Map<Character, Integer> keptByType = new LinkedHashMap<>();
         boolean[] ownedIdx = new boolean[0];
@@ -651,6 +685,9 @@ public final class Relay {
         final Set<Integer> mSeen = new HashSet<>();
         long maxGapMs;
         String endReason = "";
+        /** When a live phone last sent a message from inside its own turn (not a turn end or a map digest) and which one: team-back is asked for only then. */
+        long midTurnAt;
+        int midTurnSender;
         /** The host's pause: while it lasts the silence and map-wait rules are off (nobody is sending anything, by design). */
         boolean paused;
         long pausedAt, pausedTotalMs;
@@ -783,6 +820,7 @@ public final class Relay {
 
     private void lobbyConnection(Socket s, InputStream in, Map<String, Object> hello) throws IOException {
         if (Json.bool(hello, "watch", false)) { spectatorLobby(s, in, hello); return; }
+        if (!Json.str(hello, "rejoin", "").isEmpty()) { rejoinLobby(s, in, hello); return; }
         Player p;
         synchronized (lock) {
             if (Json.num(hello, "proto", 0) != PROTO) {
@@ -824,11 +862,17 @@ public final class Relay {
         }
         s.setSoTimeout(0);
         final Player me = p;
-        me.lobbyOut = new Outbox("relay-lobby-out-" + me.id, 200, 1 << 20, false, () -> lobbyLost(me));
+        me.lobbyOut = new Outbox("relay-lobby-out-" + me.id, 200, 1 << 20, false, () -> lobbyLost(me, s));
         me.lobbyOut.attach(s.getOutputStream());
         log("lobby: " + me.name + " joined (id " + me.id + (me.host ? ", host" : "") + ", " + me.teams.size() + " teams) from "
                 + s.getRemoteSocketAddress() + ", build " + me.build);
+        // The phone keeps this (with its name) so that it can come back into a running game after a lost connection or a restart.
+        sendLobby(me, Json.obj("t", "joined", "you", (long) me.id, "name", me.name, "rejoin", me.rejoinToken));
         broadcastState();
+        lobbyReadLoop(me, s, in);
+    }
+
+    private void lobbyReadLoop(Player me, Socket s, InputStream in) {
         try {
             for (;;) {
                 String line = Frames.readLine(in, MAX_LOBBY_LINE);
@@ -839,7 +883,7 @@ public final class Relay {
         } catch (Throwable e) {
             log("lobby " + me.name + ": " + e);
         }
-        lobbyLost(me);
+        lobbyLost(me, s);
     }
 
     /** Why a phone with this hello may not join (different game version, app version or game data), or null. Naming both sides. */
@@ -879,10 +923,12 @@ public final class Relay {
         return false;
     }
 
-    private void lobbyLost(Player p) {
+    private void lobbyLost(Player p, Socket which) {
         boolean removed = false;
         synchronized (lock) {
             if (!players.containsKey(p.id)) return;
+            // A phone that came back on a new lobby link: the end of the old link's reader or writer is not the end of the new one.
+            if (p.lobbySock != which) { try { if (which != null) which.close(); } catch (IOException ignored) { } return; }
             p.lobbyOut.close();
             // The reader has ended (the phone closed, or sent something unreadable): close our side too.
             try { if (p.lobbySock != null) p.lobbySock.close(); } catch (IOException ignored) { }
@@ -955,11 +1001,151 @@ public final class Relay {
                 case "leave":
                     // handled by closing
                     return;
+                case "rejoin": {
+                    // A phone whose lobby link is still up (it left the game on purpose with Back) asks for its seat back.
+                    String[] why = rejoinRefusal(p, System.currentTimeMillis());
+                    if (why != null) {
+                        sendLobby(p, Json.obj("t", "rejoin-refused", "code", why[0], "reason", why[1]));
+                        return;
+                    }
+                    startRejoin(p, System.currentTimeMillis());
+                    break;
+                }
                 default:
                     return;
             }
         }
         broadcastState();
+    }
+
+    // Rejoining -------------------------------------------------------------------------------
+
+    /** "2 minutes", "1 minute" or "4 s" for the notices. */
+    private String windowText() {
+        long ms = cfg.rejoinMs;
+        if (ms >= 60000 && ms % 60000 == 0) return (ms / 60000) + (ms == 60000 ? " minute" : " minutes");
+        return Math.max(1, ms / 1000) + " s";
+    }
+
+    /** Lock held. How many other phones are playing right now: they are the ones whose engines can hand a team back. */
+    private int liveOthers(Player p) {
+        int n = 0;
+        for (Player q : players.values()) if (q != p && q.linkOpen && !q.dropped && !q.finished && !q.catchUp) n++;
+        return n;
+    }
+
+    /** Lock held. Why this seat cannot be taken back now as {code, reason}, or null when it can. */
+    private String[] rejoinRefusal(Player p, long now) {
+        if (game == null || state == S_SETUP) return new String[] { "rejoin-none", "There is no game to come back to." };
+        if (state != S_PLAYING || cfg.rejoinMs <= 0) return new String[] { "rejoin-none", "The game has not started playing yet. Try again in a moment." };
+        if (p.away && now - p.awayAt > cfg.rejoinMs) giveUp(p);
+        if (p.gaveUp) return new String[] { "rejoin-late", GAVE_UP_TEXT };
+        if (p.finished) return new String[] { "rejoin-none", "Your game is over." };
+        if (p.dropped && !p.away) return new String[] { "rejoin-none", "You were dropped from this game and cannot come back to it. You can watch." };
+        if (liveOthers(p) == 0)
+            return new String[] { "rejoin-alone", "Nobody else is playing at the moment, so your teams cannot come back. You can watch." };
+        return null;
+    }
+
+    /** A new lobby connection that brings the rejoin token: the same phone coming back after its connection was lost, or the app was restarted. */
+    private void rejoinLobby(Socket s, InputStream in, Map<String, Object> hello) throws IOException {
+        final Player me;
+        synchronized (lock) {
+            if (Json.num(hello, "proto", 0) != PROTO) {
+                refuse(s, "Protocol mismatch: the host speaks " + PROTO + ", this phone " + Json.num(hello, "proto", 0)
+                        + ". Install the same app version on both phones.");
+                return;
+            }
+            String why = joinRefusal(hello);
+            if (why != null) { refuse(s, why); return; }
+            byte[] tok = Json.str(hello, "rejoin", "").getBytes(StandardCharsets.UTF_8);
+            Player p = null;
+            for (Player q : players.values()) if (MessageDigest.isEqual(tok, q.rejoinToken.getBytes(StandardCharsets.UTF_8))) p = q;
+            String nm = GameConfig.clean(Json.str(hello, "name", ""), "Player");
+            if (p == null || p.host || Json.bool(hello, "host", false) || !p.name.equalsIgnoreCase(nm)) {
+                // The same words for a wrong token, another name and a seat that no longer exists: nothing to learn about other seats.
+                refuse(s, "This seat is not yours, or the game it belonged to is over.", "rejoin-unknown");
+                return;
+            }
+            long now = System.currentTimeMillis();
+            String[] no = rejoinRefusal(p, now);
+            if (no != null) { refuse(s, no[1], no[0]); return; }
+            me = p;
+            Socket old = me.lobbySock;
+            Outbox oldOut = me.lobbyOut;
+            me.lobbySock = s;
+            me.lobbyOut = new Outbox("relay-lobby-out-" + me.id, 200, 1 << 20, false, () -> lobbyLost(me, s));
+            me.lobbyOut.attach(s.getOutputStream());
+            me.lobbyRx = now;
+            if (oldOut != null) oldOut.close();
+            try { if (old != null) old.close(); } catch (IOException ignored) { }
+            startRejoin(me, now);
+        }
+        s.setSoTimeout(0);
+        log("lobby: " + me.name + " is back on a new lobby link from " + s.getRemoteSocketAddress());
+        sendLobby(me, Json.obj("t", "joined", "you", (long) me.id, "name", me.name, "rejoin", me.rejoinToken));
+        broadcastState();
+        lobbyReadLoop(me, s, in);
+    }
+
+    /**
+     * Lock held; {@link #rejoinRefusal} said yes. A phone that has not been noticed as gone yet (its old links are half open) is made away
+     * first. Then it gets the start message of the running game: the same setup, every team driven from outside (so the engine replays the
+     * game so far from the log, its own teams included), {@code e$spectate 1} to fast-forward, and a new token for its engine link. Its teams
+     * come back once the engine link is up and an engine with a team of its own in play has answered the team-back message.
+     */
+    private void startRejoin(Player p, long now) {
+        Game g = game;
+        if (!p.away) dropPlayer(p, "it connected again from a new link", null, true, false);
+        p.token = newToken();
+        p.rejoinPending = true;
+        p.rejoinAt = now;
+        List<String> lines = new ArrayList<>(GameConfig.forRejoin(g.canonical, p.ownedIdx, p.name));
+        lines.add("e$spectate 1");
+        List<Object> out = new ArrayList<>(lines);
+        sendLobby(p, Json.obj("t", "start", "you", (long) p.id, "token", p.token, "nick", p.name,
+                "game", (long) g.no, "lines", out, "rejoin", true));
+        g.events.add(p.name + " asked to rejoin (" + (now - p.awayAt) / 1000 + " s after it was lost); sent the game again with " + g.logMsgs + " messages to replay");
+        log(p.name + " rejoining: start message sent, " + g.logMsgs + " messages to replay");
+    }
+
+    /** Lock held. The window ran out: the seat is given up for the rest of the game. */
+    private void giveUp(Player p) {
+        Game g = game;
+        if (g == null || !p.away) return;
+        p.away = false;
+        p.gaveUp = true;
+        p.rejoinPending = false;
+        g.events.add(p.name + " did not come back within " + windowText() + "; their teams sit out");
+        log(p.name + " did not come back within " + windowText());
+        tellOthers(p, p.name + " did not come back; their teams sit out");
+        sendLobby(p, Json.obj("t", "gaveup", "reason", GAVE_UP_TEXT));
+        broadcastStateLocked();
+    }
+
+    /** Lock held. A notice for every other phone and watcher, also as a chat line inside the game. */
+    private void tellOthers(Player except, String text) {
+        for (Player q : players.values()) if (q != except) sendLobby(q, Json.obj("t", "notice", "text", text));
+        for (Spectator q : spectators.values()) sendLobby(q, Json.obj("t", "notice", "text", text));
+        injectChat(text);
+    }
+
+    /**
+     * Lock held. Writes a chat line into the running game (message {@code s} of the engine protocol: text, then the two bytes of a timestamp
+     * the engine cuts off). It goes through the log, so every engine, a TV and a late joiner show it. The launchers let it through (hp_ipc.c).
+     */
+    private void injectChat(String text) {
+        Game g = game;
+        if (g == null || !cfg.chatNotices || state != S_PLAYING) return;
+        String t = "* " + text;
+        if (t.length() > 200) t = t.substring(0, 200);
+        byte[] tb = t.getBytes(StandardCharsets.UTF_8);
+        byte[] f = new byte[tb.length + 3];
+        f[0] = 's';
+        System.arraycopy(tb, 0, f, 1, tb.length);
+        List<Runnable> after = new ArrayList<>();
+        appendAndForward(g, f, null, after);
+        for (Runnable r : after) r.run();
     }
 
     private void sendLobby(Player p, Map<String, Object> m) {
@@ -979,7 +1165,8 @@ public final class Relay {
             for (Player q : players.values()) {
                 pl.add(Json.obj("id", (long) q.id, "name", q.name, "host", q.host, "ready", q.ready,
                         "teams", NetTeams.listToJson(q.teams), "build", q.build, "linked", q.linked, "dropped", q.dropped, "fg", q.fg,
-                        "watching", false));
+                        "watching", false, "away", q.away, "gaveUp", q.gaveUp,
+                        "awayLeftMs", q.away ? Math.max(0L, cfg.rejoinMs - (System.currentTimeMillis() - q.awayAt)) : 0L));
             }
             // Watching phones are listed after the players, marked "watching"; they have no teams and are always "ready".
             for (Spectator q : spectators.values()) {
@@ -1080,8 +1267,13 @@ public final class Relay {
             q.lastMsg = 0;
             q.toMsgs = q.fromRaw = q.fromKept = q.fromDropped = 0;
             q.keptByType.clear();
-            q.engineOut = new Outbox("relay-engine-out-" + q.id, 20000, 8 << 20, true, () -> engineWriteFailed(q));
+            final Outbox[] box = new Outbox[1];
+            box[0] = new Outbox("relay-engine-out-" + q.id, 20000, 8 << 20, true, () -> engineWriteFailed(q, box[0]));
+            q.engineOut = box[0];
             q.ready = q.host;
+            q.away = q.gaveUp = q.rejoinPending = q.catchUp = q.endAll = q.awayOnPurpose = false;
+            q.backPending.clear();
+            q.rejoins = 0;
         }
         log("game " + g.no + " starting: " + g.teams.size() + " teams, " + players.size() + " phones");
         for (Player q : players.values()) {
@@ -1444,43 +1636,148 @@ public final class Relay {
         synchronized (lock) {
             String token = Json.str(hello, "token", "");
             for (Player q : players.values()) if (q.token.equals(token)) p = q;
-            if (p == null || game == null || state == S_SETUP || p.linkOpen || p.dropped) {
+            if (p == null || game == null || state == S_SETUP || p.linkOpen || (p.dropped && !p.rejoinPending)) {
                 refuse(s, "No game is waiting for this engine.");
                 return;
             }
             p.engineSock = s;
         }
+        final Socket sock = s;
         s.setSoTimeout(0);
         OutputStream os = s.getOutputStream();
         os.write((Json.write(Json.obj("t", "ok", "game", (long) game.no)) + "\n").getBytes(StandardCharsets.UTF_8));
         os.flush();
         final Player me = p;
         synchronized (lock) {
-            me.linked = me.linkOpen = true;
-            me.lastMsg = System.currentTimeMillis();
-            me.lastRx = me.lastMsg;
-            me.engineOut.attach(os);
-            log("engine link up: " + me.name);
-            maybeOpenGate();
+            if (me.rejoinPending && me.engineSock == sock) {
+                attachRejoined(me, os);
+            } else if (me.engineSock != sock) {
+                return;                  // overtaken by a newer link while the ok was being written
+            } else {
+                me.linked = me.linkOpen = true;
+                me.lastMsg = System.currentTimeMillis();
+                me.lastRx = me.lastMsg;
+                me.engineOut.attach(os);
+                log("engine link up: " + me.name);
+                maybeOpenGate();
+            }
         }
         broadcastState();
         try {
             for (;;) {
                 byte[] msg = Frames.read(in);
                 if (msg == null) break;
-                onEngineMessage(me, msg);
+                onEngineMessage(me, msg, sock);
             }
         } catch (Throwable e) {
             log("engine link " + me.name + ": " + e);
         }
-        engineClosed(me);
+        engineClosed(me, sock);
     }
 
-    private void engineWriteFailed(Player p) {
+    /**
+     * Lock held. The engine link of a phone that rejoins is up. It gets the whole log so far in one go (as a watcher does; its setup lines
+     * ended with e$spectate 1, so its engine fast-forwards) and then the live stream. What it sends is not forwarded until its teams are back
+     * ({@link #tryInjectBack}, {@link #confirmBack}): until then it is a viewer of its own game. Snapshot and registration happen under the
+     * lock, so nothing is lost or doubled.
+     */
+    private void attachRejoined(Player me, OutputStream os) {
+        Game g = game;
+        long now = System.currentTimeMillis();
+        long awayFor = now - me.awayAt;
+        me.rejoinPending = false;
+        me.away = false;
+        me.gaveUp = false;
+        me.dropped = false;
+        me.linked = me.linkOpen = true;
+        me.finished = me.quit = me.endAll = false;
+        me.fatal = null;
+        me.lastMsg = me.lastRx = now;
+        me.linkUpAt = now;
+        me.rejoins++;
+        me.toHash = new Fnv();
+        me.toMsgs = 0;
+        final Outbox[] box = new Outbox[1];
+        box[0] = new Outbox("relay-engine-out-" + me.id + "-r" + me.rejoins, cfg.viewerQueueItems, 16 << 20, false, () -> engineWriteFailed(me, box[0]));
+        me.engineOut = box[0];
+        me.engineOut.attach(os);
+        boolean ok = true;
+        if (g.log.size() > 0) {
+            byte[] all = g.log.toByteArray();
+            for (int off = 0; ok && off < all.length; off += 32768) {
+                int n = Math.min(32768, all.length - off);
+                ok = me.engineOut.offer(java.util.Arrays.copyOfRange(all, off, off + n));
+            }
+            me.toHash.add(all);
+            me.toMsgs += g.logMsgs;
+        }
+        if (g.paused) me.engineOut.offer(Frames.frame(new byte[] { 0, 'P' }));
+        me.backPending.clear();
+        me.backPending.addAll(me.teamNames);
+        me.catchUp = !me.backPending.isEmpty();
+        me.lastBackSent = 0;
+        g.events.add(me.name + " rejoined after " + awayFor / 1000 + " s; its engine replays " + g.logMsgs + " messages");
+        log("engine link up (rejoin): " + me.name + ", backlog " + g.log.size() + " bytes, away for " + awayFor / 1000 + " s");
+        if (!ok) { dropPlayer(me, "the game so far is too large to send it", "The game so far is too large to send to your phone.", false, false); checkEnd(); return; }
+        tellOthers(me, me.name + " is back");
+        updateArmed(g, now);
+        broadcastStateLocked();
+        List<Runnable> after = new ArrayList<>();
+        tryInjectBack(g, now, after);
+        for (Runnable r : after) r.run();
+    }
+
+    /**
+     * Lock held. Asks for the teams of rejoined phones to come back: the unsynced team-back message {@code G<team>} goes into the log, so every
+     * engine reads it at the same place. The engine that has a team of its own in play answers with the synced {@code g}, which hands the team to
+     * the phone it belongs to (uTeams.pas, chTeamBack). While every team in play is a team that is gone nobody can answer, so this is done only
+     * right after a live phone sent something from inside its own turn, and asked again after {@link Config#backResendMs} if no {@code g} came.
+     */
+    private void tryInjectBack(Game g, long now, List<Runnable> after) {
+        if (state != S_PLAYING || g.paused || now - g.midTurnAt > 700) return;
+        Player s = players.get(g.midTurnSender);
+        if (s == null || !s.linkOpen || s.dropped || s.finished || s.catchUp) return;
+        for (Player q : new ArrayList<>(players.values())) {
+            if (q == s || !q.linkOpen || q.dropped || q.backPending.isEmpty()) continue;
+            if (now - q.linkUpAt > cfg.backWaitMs) {
+                g.events.add(q.name + "'s teams did not come back within " + cfg.backWaitMs / 1000 + " s; the relay stopped asking");
+                log(q.name + "'s teams did not come back; giving up asking");
+                q.backPending.clear();
+                q.catchUp = false;
+                continue;
+            }
+            if (q.lastBackSent != 0 && now - q.lastBackSent < cfg.backResendMs) continue;
+            boolean first = q.lastBackSent == 0;
+            q.lastBackSent = now;
+            for (String team : q.backPending) {
+                byte[] n = team.getBytes(StandardCharsets.UTF_8);
+                byte[] f = new byte[n.length + 1];
+                f[0] = 'G';
+                System.arraycopy(n, 0, f, 1, n.length);
+                if (first) g.events.add("injected G " + team + " (unsynced team back, no timestamp)");
+                appendAndForward(g, f, null, after);
+            }
+            log("asked for " + q.name + "'s teams to come back" + (first ? "" : " (again)"));
+        }
+    }
+
+    /** Lock held. A synced team-back message {@code g<team>} came from an engine: that team is back. */
+    private void confirmBack(Game g, String team) {
+        for (Player q : players.values()) {
+            if (!q.backPending.remove(team)) continue;
+            g.events.add(q.name + "'s team " + team + " is back (synced team-back seen)");
+            if (q.backPending.isEmpty()) {
+                q.catchUp = false;
+                log(q.name + "'s teams are back in the game");
+            }
+        }
+    }
+
+    private void engineWriteFailed(Player p, Outbox which) {
         synchronized (lock) {
-            if (game == null || p.dropped) return;
+            if (game == null || p.dropped || p.engineOut != which) return;
             log("writing to " + p.name + " failed");
-            dropPlayer(p, "the link to it failed");
+            dropPlayer(p, "the link to it failed", "You were dropped from the game: the link to it failed.", true, false);
             checkEnd();
         }
     }
@@ -1507,11 +1804,11 @@ public final class Relay {
 
     // Forwarding ------------------------------------------------------------------------------
 
-    private void onEngineMessage(Player p, byte[] msg) {
+    private void onEngineMessage(Player p, byte[] msg, Socket from) {
         List<Runnable> after = new ArrayList<>();
         synchronized (lock) {
             Game g = game;
-            if (g == null || p.dropped) return;
+            if (g == null || p.dropped || p.engineSock != from) return;
             p.lastRx = System.currentTimeMillis();
             if (msg.length == 0) return;
             if (msg[0] == 0) {
@@ -1526,8 +1823,18 @@ public final class Relay {
                 } else if (msg.length > 1 && msg[1] == 'Q') {
                     // The player confirmed "leave the game" in the app: the same as the engine's own Q, but sent by the
                     // launcher, so it does not depend on the engine's UI state (an open chat swallows Escape and Y).
+                    // The seat stays away for the rejoin window, the host's too: the game goes on.
                     p.quit = true;
                     log(p.name + " confirmed leaving the game (control frame)");
+                } else if (msg.length > 1 && msg[1] == 'Z') {
+                    // The host chose "End the game for everyone" (its engine quits next; engineClosed ends the game then).
+                    if (p.host) {
+                        p.quit = p.endAll = true;
+                        log(p.name + " (the host) confirmed ending the game for everyone (control frame)");
+                    } else {
+                        g.events.add(p.name + " asked to end the game for everyone: ignored (only the host can)");
+                        log(p.name + " asked to end the game for everyone: ignored, only the host can");
+                    }
                 } else if (msg.length == 2 && (msg[1] == 'P' || msg[1] == 'R')) {
                     pauseControl(g, p, msg[1] == 'P', System.currentTimeMillis());
                 }
@@ -1538,6 +1845,21 @@ public final class Relay {
             g.rawByType.merge(type, 1L, Long::sum);
             if (type == 'q') { p.finished = true; return; }
             if (type == 'Q' || type == 'H') { p.quit = true; return; }
+            if (p.catchUp) {
+                // A phone that has rejoined is still replaying the game and its teams are not back: it has nothing to say to the game yet.
+                // Its map digest is checked against the game's (a different map would mean different data), the rest is ignored.
+                if (type == 'M') {
+                    String d = new String(msg, 1, msg.length - 1, StandardCharsets.ISO_8859_1);
+                    if (!g.mapDigest.isEmpty() && !d.equals(g.mapDigest)) {
+                        g.events.add(p.name + "'s map digest after rejoining (" + d + ") differs from the game's (" + g.mapDigest + ")");
+                        dropPlayer(p, "its map digest after rejoining differs from the game's", "Your phone made a different map; it cannot rejoin this game.", false, false);
+                        checkEnd();
+                    }
+                } else {
+                    p.fromDropped++;
+                }
+                return;
+            }
             if (!Frames.valid(msg, p.ownedIdx)) {
                 p.fromDropped++;
                 return;
@@ -1566,8 +1888,14 @@ public final class Relay {
                 }
                 g.mSeen.add(p.id);
             }
+            if (type == 'g' && msg.length > 3) confirmBack(g, new String(msg, 1, msg.length - 3, StandardCharsets.UTF_8));
             appendAndForward(g, msg, p, after);
             if (type == 'M') updateArmed(g, p.lastMsg);
+            if (type != 'N' && type != 'M' && type != '#' && type != 'f' && type != 'g') {
+                g.midTurnAt = p.lastMsg;
+                g.midTurnSender = p.id;
+                tryInjectBack(g, p.lastMsg, after);
+            }
         }
         for (Runnable r : after) r.run();
     }
@@ -1671,7 +1999,7 @@ public final class Relay {
                 after.add(() -> {
                     synchronized (lock) {
                         if (game != null && !q.dropped) {
-                            dropPlayer(q, "too slow: its queue overflowed");
+                            dropPlayer(q, "too slow: its queue overflowed", "You were dropped from the game: too slow: its queue overflowed." + rejoinHint(), true, false);
                             checkEnd();
                         }
                     }
@@ -1682,9 +2010,9 @@ public final class Relay {
 
     // Leaving, dropout, end -------------------------------------------------------------------
 
-    private void engineClosed(Player p) {
+    private void engineClosed(Player p, Socket which) {
         synchronized (lock) {
-            if (game == null) return;
+            if (game == null || p.engineSock != which) return;       // a link that was replaced (the phone rejoined) ends without a word
             p.linkOpen = false;
             if (p.dropped) { checkEnd(); return; }
             if (p.finished) {
@@ -1700,16 +2028,17 @@ public final class Relay {
                     return;
                 }
                 dropPlayer(p, "desync reported (" + p.fatal + ")");
-            } else if (p.host && p.quit) {
+            } else if (p.host && p.endAll) {
                 // The host chose "End the game for everyone" on its game screen: the game ends on every phone.
                 game.events.add(p.name + " (the host) ended the game");
                 log(p.name + " (the host) quit: ending the game for everyone");
                 endGame(HOST_ENDED);
                 return;
             } else if (p.quit) {
-                dropPlayer(p, "the player quit", "You left the game.");
+                // Leave the game (any phone, the host's too): the game goes on, the seat stays away for the rejoin window.
+                dropPlayer(p, "the player quit", "You left the game." + rejoinHint(), true, true);
             } else {
-                dropPlayer(p, "its engine link closed");
+                dropPlayer(p, "its engine link closed", "You were dropped from the game: its engine link closed." + rejoinHint(), true, false);
             }
             checkEnd();
         }
@@ -1717,17 +2046,35 @@ public final class Relay {
 
     /** Lock held. Sends the unsynced team-gone message F<team> for each of the phone's teams (plan section 2.8). */
     private void dropPlayer(Player p, String why) {
-        dropPlayer(p, why, "You were dropped from the game: " + why);
+        dropPlayer(p, why, "You were dropped from the game: " + why, false, false);
     }
 
     /** {@code toPlayer} is what the dropped phone itself is told (a phone that quit is not "dropped"). */
     private void dropPlayer(Player p, String why, String toPlayer) {
+        dropPlayer(p, why, toPlayer, false, false);
+    }
+
+    private String rejoinHint() {
+        return cfg.rejoinMs > 0 ? " You can rejoin within " + windowText() + "." : "";
+    }
+
+    /**
+     * Lock held. The phone is out of the game: its engine link is closed and its teams are marked gone with F (turns skipped). With
+     * {@code rejoinable} (a lost connection or a phone that left, in a running game) its seat stays "away" for {@link Config#rejoinMs}: the same phone may
+     * come back ({@link #rejoinRefusal}); then the others are told. Without it (desync, a map that differs, never linked) the seat is gone for good.
+     * {@code toPlayer} null says nothing to the phone.
+     */
+    private void dropPlayer(Player p, String why, String toPlayer, boolean rejoinable, boolean onPurpose) {
         Game g = game;
         if (g == null || p.dropped) return;
         p.dropped = true;
+        boolean away = rejoinable && state == S_PLAYING && cfg.rejoinMs > 0;
         String ev = p.name + " dropped (" + why + ")";
         g.events.add(ev);
         log(ev);
+        p.catchUp = false;
+        p.backPending.clear();
+        p.rejoinPending = false;
         p.closeAll(false);
         resumeIfHostGone(g);
         List<Runnable> after = new ArrayList<>();
@@ -1742,7 +2089,15 @@ public final class Relay {
             }
         }
         for (Runnable r : after) r.run();
-        sendLobby(p, Json.obj("t", "dropped", "reason", toPlayer));
+        if (away) {
+            p.away = true;
+            p.gaveUp = false;
+            p.awayAt = System.currentTimeMillis();
+            p.awayOnPurpose = onPurpose;
+            g.events.add(p.name + (onPurpose ? " left the game" : " lost connection") + "; waiting up to " + windowText() + " for them to rejoin");
+            tellOthers(p, p.name + (onPurpose ? " left the game" : " lost connection") + "; waiting up to " + windowText() + " for them to rejoin");
+        }
+        if (toPlayer != null) sendLobby(p, Json.obj("t", "dropped", "reason", toPlayer));
         if (state == S_STARTING) maybeOpenGate();
         else updateArmed(g, System.currentTimeMillis());
         broadcastStateLocked();
@@ -1777,13 +2132,19 @@ public final class Relay {
         }
         // A phone that dropped earlier does not turn a normal end into "gone": the game is over when every phone still
         // in it saw the game over (its engine sent q). Only when no phone is left that finished is every engine gone.
-        boolean anyDropped = false, anyLive = false, liveAllFinished = true;
+        boolean anyDropped = false, anyLive = false, liveAllFinished = true, anyAway = false, anyGaveUp = false;
         for (Player q : players.values()) {
+            if (q.away) anyAway = true;
+            if (q.gaveUp) anyGaveUp = true;
             if (q.dropped) { anyDropped = true; continue; }
             anyLive = true;
             if (!q.finished) liveAllFinished = false;
         }
-        endGame(!anyDropped || (anyLive && liveAllFinished) ? "every engine finished" : "every engine is gone");
+        boolean over = !anyDropped || (anyLive && liveAllFinished);
+        // Nobody is connected, but a phone may still come back inside its window: the game waits for it (nothing can happen meanwhile).
+        // When the last window has run out, or the phones that were left finished, the game ends.
+        if (!over && anyAway && state == S_PLAYING) return;
+        endGame(over ? "every engine finished" : anyGaveUp || anyAway ? NOBODY_LEFT : "every engine is gone");
     }
 
     /** Lock held. */
@@ -1824,7 +2185,8 @@ public final class Relay {
         for (Player q : players.values()) {
             s.perPlayer.add("Phone " + q.name + ": sent to it " + q.toMsgs + " messages (hash " + q.toHash.hex()
                     + "), received from it " + q.fromRaw + " (" + q.fromKept + " forwarded, " + q.fromDropped + " not on the whitelist or not its team)"
-                    + (q.dropped ? ", dropped" : q.finished ? ", finished" : q.quit ? ", quit" : ""));
+                    + (q.rejoins > 0 ? ", rejoined " + q.rejoins + "x" : "")
+                    + (q.gaveUp ? ", did not come back" : q.away ? ", away" : q.dropped ? ", dropped" : q.finished ? ", finished" : q.quit ? ", quit" : ""));
             s.toHashByPlayer.put(q.id, q.toHash.hex());
             s.toMsgsByPlayer.put(q.id, q.toMsgs);
         }
@@ -1864,6 +2226,8 @@ public final class Relay {
             q.ready = q.host;
             q.lobbyRx = nowMs;                       // a phone whose lobby link sat idle in a game must not look silent
             q.linked = q.linkOpen = q.dropped = q.finished = false;
+            q.away = q.gaveUp = q.rejoinPending = q.catchUp = q.endAll = false;
+            q.backPending.clear();
             if (q.lobbySock == null) players.remove(q.id);
         }
         for (Spectator sp : new ArrayList<>(spectators.values())) {
@@ -2022,6 +2386,21 @@ public final class Relay {
                 }
                 Game g = game;
                 if (g == null) return lastPing;
+                if (state == S_PLAYING) {
+                    for (Player q : new ArrayList<>(players.values())) {
+                        if (q.rejoinPending && now - q.rejoinAt > cfg.linkWaitMs) {
+                            q.rejoinPending = false;
+                            g.events.add(q.name + "'s engine did not connect after the rejoin in " + cfg.linkWaitMs / 1000 + " s; still away");
+                            log(q.name + " rejoin: its engine did not connect");
+                        }
+                        if (q.away && now - q.awayAt > cfg.rejoinMs) giveUp(q);
+                    }
+                    checkEnd();
+                    if (g != game) return lastPing;
+                    List<Runnable> afterAsk = new ArrayList<>();
+                    tryInjectBack(g, now, afterAsk);
+                    for (Runnable r : afterAsk) r.run();
+                }
                 if (state == S_PLAYING && cfg.linkDeadMs > 0) linkLiveness(g, now);
                 if (g != game) return lastPing;
                 if (state == S_STARTING && now - g.startedAt > cfg.linkWaitMs) {
@@ -2072,7 +2451,8 @@ public final class Relay {
         }
         for (Player q : new ArrayList<>(players.values())) {
             if (q.linkOpen && !q.dropped && !q.finished && now - q.lastRx > cfg.linkDeadMs) {
-                dropPlayer(q, "its engine link was silent for " + (now - q.lastRx) / 1000 + " s and did not answer the link pings (half-open link)");
+                dropPlayer(q, "its engine link was silent for " + (now - q.lastRx) / 1000 + " s and did not answer the link pings (half-open link)",
+                        "You were dropped from the game: your phone did not answer for " + (now - q.lastRx) / 1000 + " s." + rejoinHint(), true, false);
                 checkEnd();
                 if (game != g) return;
             }
@@ -2090,7 +2470,7 @@ public final class Relay {
     private void silence(Game g, long now) {
         if (now - g.lastKeptAt > g.maxGapMs) g.maxGapMs = now - g.lastKeptAt;
         List<Player> live = new ArrayList<>();
-        for (Player q : players.values()) if (q.linkOpen && !q.dropped && !q.finished) live.add(q);
+        for (Player q : players.values()) if (q.linkOpen && !q.dropped && !q.finished && !q.catchUp) live.add(q);
         Player culprit = null;
         if (g.lastType == 'N' || g.lastType == 'M') {
             for (Player q : live) if (q.id != g.lastSender) { if (culprit == null) culprit = q; else { culprit = null; break; } }
@@ -2105,7 +2485,8 @@ public final class Relay {
         }
         g.lastKeptAt = now;
         if (culprit != null && !culprit.dropped) {
-            dropPlayer(culprit, "no messages for " + cfg.silenceMs / 1000 + " s while it was the one expected to play");
+            dropPlayer(culprit, "no messages for " + cfg.silenceMs / 1000 + " s while it was the one expected to play",
+                    "You were dropped from the game: no messages for " + cfg.silenceMs / 1000 + " s while it was your turn." + rejoinHint(), true, false);
             checkEnd();
         }
     }

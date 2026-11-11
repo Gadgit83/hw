@@ -305,7 +305,7 @@ public class LaunchSmokeTest {
         TestSupport.installData(app());
         Activity a = Robolectric.buildActivity(NetLobbyActivity.class, null).create().start().resume().visible().get();
         final boolean[] yes = { false };
-        android.app.AlertDialog d = BackConfirm.show(a, BackConfirm.WATCH, () -> yes[0] = true);
+        android.app.AlertDialog d = BackConfirm.show(a, BackConfirm.WATCH, () -> yes[0] = true, () -> { });
         org.robolectric.shadows.ShadowAlertDialog sd = org.robolectric.Shadows.shadowOf(d);
         assertTrue(String.valueOf(sd.getTitle()).equals("Stop watching?"));
         assertTrue(String.valueOf(sd.getMessage()).contains("carries on for the players"));
@@ -488,6 +488,48 @@ public class LaunchSmokeTest {
         System.out.println("SDK " + android.os.Build.VERSION.SDK_INT + ": NetLobbyActivity joined state ok");
     }
 
+    private static final String PLAYING_AWAY = "{\"t\":\"state\",\"state\":\"playing\",\"host\":\"Pixel\",\"proto\":1,\"build\":\"0.3.0-tv14\",\"you\":2,"
+            + "\"players\":[{\"id\":1,\"name\":\"Pixel\",\"host\":true,\"ready\":true,\"fg\":true,\"away\":false,"
+            + "\"teams\":[{\"name\":\"Red Team\",\"color\":0,\"level\":0}]},"
+            + "{\"id\":2,\"name\":\"Fairphone\",\"host\":false,\"ready\":false,\"fg\":true,\"away\":true,\"awayLeftMs\":90000,"
+            + "\"teams\":[{\"name\":\"Blue Team\",\"color\":1,\"level\":3}]}],\"canStart\":false,\"game\":1}";
+
+    /** A phone that left the game or lost the connection can rejoin: from its seat in the lobby, or from the note it kept (after a restart). */
+    @Test
+    public void netLobbyActivity_rejoin() throws Exception {
+        TestSupport.installData(app());
+        // Away, still connected (Back > Leave the game): the lobby offers the seat back.
+        netState(PLAYING_AWAY, false);
+        String text = launch(NetLobbyActivity.class, null, 600);
+        assertTrue("the away phone is offered its seat: " + text, text.contains("You are away from the game") && text.contains("Rejoin the game") && text.contains("Fairphone (you)"));
+        assertTrue("and the list says who is away and for how long: " + text, text.contains("away") && text.contains("sitting out") && text.contains("90 s"));
+        // The window ran out: the phone is told so and offered to watch.
+        NetSession.gaveUp = true;
+        netState(PLAYING_AWAY.replace("\"away\":true,\"awayLeftMs\":90000", "\"away\":false,\"gaveUp\":true"), false);
+        text = launch(NetLobbyActivity.class, null, 600);
+        assertTrue("given up: " + text, text.contains("You were away too long") && text.contains("Watch the game") && !text.contains("You are away from the game"));
+        NetSession.gaveUp = false;
+        // Not connected (Wi-Fi lost, app restarted): the note kept at join brings up the offer on the chooser.
+        NetSession.joined = false;
+        NetSession.hosting = false;
+        NetSession.state = null;
+        NetSession.clearRejoin(app());
+        assertTrue("no note, no offer", !launch(NetLobbyActivity.class, null, 600).contains("Rejoin your game"));
+        NetSession.saveRejoin(app(), "192.168.1.20", 46633, "Fairphone", "0123456789abcdef0123456789abcdef");
+        NetSession.RejoinNote n = NetSession.loadRejoin(app());
+        assertTrue("the note round trips", n != null && n.host.equals("192.168.1.20") && n.port == 46633 && n.name.equals("Fairphone") && n.token.equals("0123456789abcdef0123456789abcdef"));
+        text = launch(NetLobbyActivity.class, null, 600);
+        assertTrue("the chooser offers the game back: " + text, text.contains("Rejoin your game") && text.contains("Fairphone") && text.contains("192.168.1.20:46633")
+                && text.contains("Rejoin the game") && text.contains("Forget it") && text.contains("Host network game"));
+        NetSession.rejoinRefusal = "rejoin-late";
+        text = launch(NetLobbyActivity.class, null, 600);
+        assertTrue("after a late attempt it says why and offers watching: " + text, text.contains("You were away too long") && text.contains("Join to watch"));
+        NetSession.rejoinRefusal = "";
+        NetSession.clearRejoin(app());
+        assertTrue("forgotten", NetSession.loadRejoin(app()) == null);
+        System.out.println("SDK " + android.os.Build.VERSION.SDK_INT + ": NetLobbyActivity rejoin offers ok");
+    }
+
     @Test
     public void netLobbyActivity_hostState() throws Exception {
         TestSupport.installData(app());
@@ -651,22 +693,32 @@ public class LaunchSmokeTest {
         TestSupport.installData(app());
         Activity a = Robolectric.buildActivity(NetLobbyActivity.class, null).create().start().resume().visible().get();
         for (boolean host : new boolean[] { false, true }) {
-            final boolean[] yes = { false };
-            android.app.AlertDialog d = BackConfirm.show(a, host, () -> yes[0] = true);
+            final boolean[] yes = { false, false };            // leave, end for everyone
+            android.app.AlertDialog d = BackConfirm.show(a, host, () -> yes[0] = true, () -> yes[1] = true);
             org.robolectric.shadows.ShadowAlertDialog sd = org.robolectric.Shadows.shadowOf(d);
             String title = String.valueOf(sd.getTitle()), msg = String.valueOf(sd.getMessage());
-            assertTrue("title for " + (host ? "host" : "player") + ": " + title, title.equals(host ? "End the game for everyone?" : "Leave the game?"));
-            assertTrue("message: " + msg, host ? msg.contains("every phone") && msg.contains("TV") : msg.contains("carry on"));
+            assertTrue("title for " + (host ? "host" : "player") + ": " + title, title.equals("Leave the game?"));
+            assertTrue("message: " + msg, msg.contains("rejoin") && msg.contains("2 minutes") && (host ? msg.contains("every phone") && msg.contains("TV") : msg.contains("carry on")));
             assertTrue(msg.contains("keeps running"));
-            assertTrue(d.getButton(android.content.DialogInterface.BUTTON_POSITIVE).getText().toString().equals(host ? "End the game" : "Leave"));
+            assertTrue(d.getButton(android.content.DialogInterface.BUTTON_POSITIVE).getText().toString().equals("Leave the game"));
             assertTrue(d.getButton(android.content.DialogInterface.BUTTON_NEGATIVE).getText().toString().equals("Keep playing"));
+            android.widget.Button endAll = d.getButton(android.content.DialogInterface.BUTTON_NEUTRAL);
+            if (host) assertTrue("the host's third answer: " + endAll.getText(), endAll.getVisibility() == android.view.View.VISIBLE && endAll.getText().toString().equals("End the game for everyone"));
+            else assertTrue("a joining phone has no end-for-everyone answer", endAll.getVisibility() != android.view.View.VISIBLE || endAll.getText().length() == 0);
             d.getButton(android.content.DialogInterface.BUTTON_NEGATIVE).performClick();
             TestSupport.settle(100);
-            assertFalse("Keep playing does not quit", yes[0]);
-            android.app.AlertDialog d2 = BackConfirm.show(a, host, () -> yes[0] = true);
+            assertFalse("Keep playing does not quit", yes[0] || yes[1]);
+            android.app.AlertDialog d2 = BackConfirm.show(a, host, () -> yes[0] = true, () -> yes[1] = true);
             d2.getButton(android.content.DialogInterface.BUTTON_POSITIVE).performClick();
             TestSupport.settle(100);                          // the dialog hands the click to its listener through a message
-            assertTrue("the positive button quits", yes[0]);
+            assertTrue("Leave the game leaves, and only leaves", yes[0] && !yes[1]);
+            if (host) {
+                yes[0] = false;
+                android.app.AlertDialog d3 = BackConfirm.show(a, host, () -> yes[0] = true, () -> yes[1] = true);
+                d3.getButton(android.content.DialogInterface.BUTTON_NEUTRAL).performClick();
+                TestSupport.settle(100);
+                assertTrue("End the game for everyone ends it, and only ends it", yes[1] && !yes[0]);
+            }
         }
         java.io.File dir = app().getFilesDir();
         new java.io.File(dir, "net.cfg").delete();
@@ -711,7 +763,7 @@ public class LaunchSmokeTest {
             TestSupport.settle(100);
             android.app.AlertDialog d = org.robolectric.shadows.ShadowAlertDialog.getLatestAlertDialog();
             assertTrue("the Back dialog is showing for the " + role, d != null && d.isShowing());
-            assertTrue(String.valueOf(org.robolectric.Shadows.shadowOf(d).getTitle()).equals(role.equals("host") ? "End the game for everyone?" : "Leave the game?"));
+            assertTrue(String.valueOf(org.robolectric.Shadows.shadowOf(d).getTitle()).equals("Leave the game?"));
             d.dismiss();
         }
         new java.io.File(dir, "net.cfg").delete();

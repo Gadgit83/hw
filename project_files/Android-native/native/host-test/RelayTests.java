@@ -49,11 +49,14 @@ public class RelayTests {
         public void onState(Map<String, Object> s) { state = s; }
         public void onStart(RelayClient.StartInfo s) { start = s; }
         public void onSummary(Map<String, Object> m) { }
-        public void onNotice(String t) { notice = t; }
+        public void onNotice(String t) { notice = t; notices.add(t); }
         public void onClosed(String r) { closed = r; }
-        volatile String refusedCode = "";
+        volatile String refusedCode = "", refusedReason = "", rejoinToken = "", seatName = "", gaveUp = "";
         volatile RelayClient client;
-        public void onRefused(String code, String reason) { refusedCode = code; }
+        final List<String> notices = new CopyOnWriteArrayList<>();
+        public void onRefused(String code, String reason) { refusedCode = code; refusedReason = reason; }
+        public void onJoined(int you, String name, String token) { rejoinToken = token; seatName = name; }
+        public void onGaveUp(String reason) { gaveUp = reason; }
     }
 
     static final class Fix {
@@ -70,6 +73,8 @@ public class RelayTests {
         static String dataDigest = "";
         static boolean netProbe;
         static long netLossMs = 4000;
+        /** How long a seat stays away (the app uses two minutes), how soon team-back is asked for again, and whether chat lines are written into the game. */
+        static long rejoinMs = 120000, backResendMs = 2500;
         final java.util.concurrent.atomic.AtomicBoolean netUp = new java.util.concurrent.atomic.AtomicBoolean(true);
 
         Fix(long silenceMs, long graceMs) throws Exception {
@@ -88,6 +93,8 @@ public class RelayTests {
             if (netProbe) { cfg.networkUp = netUp::get; cfg.networkLossMs = netLossMs; }
             cfg.silenceMs = silenceMs;
             cfg.graceMs = graceMs;
+            cfg.rejoinMs = rejoinMs;
+            cfg.backResendMs = backResendMs;
             cfg.listener = new Relay.Listener() {
                 public void log(String line) { log.add(line); }
                 public void changed() { }
@@ -830,13 +837,297 @@ public class RelayTests {
         g.eb.close();
         check(waitFor(() -> g.pb.notice.contains("You left the game"), 3000), "a joiner that quits is told 'You left the game.' (" + g.pb.notice + ")");
         check(!g.pb.notice.contains("dropped"), "and not that it was dropped");
-        g.ea.send("Q");                                             // the host ends the game
+        g.ea.send(new byte[] { 0, 'Z' });                           // the host confirms "End the game for everyone" (control frame Z) ...
+        g.ea.send("Q");                                             // ... and its engine quits
         g.ea.close();
-        check(waitFor(() -> g.f.relay.lastSummary() != null, 4000), "the host's quit ends the game");
+        check(waitFor(() -> g.f.relay.lastSummary() != null, 4000), "the host's end ends the game");
         Relay.GameSummary gs = g.f.relay.lastSummary();
         check(gs != null && gs.endReason.equals(Relay.HOST_ENDED), "the relay's end reason is '" + Relay.HOST_ENDED + "' (" + (gs == null ? null : gs.endReason) + ")");
         check(gs != null && gs.text().contains("quit"), "the report marks the host's phone as having quit");
         g.end();
+    }
+
+    // Rejoining ------------------------------------------------------------------------------
+
+    static Map<String, Object> me(Fix f, String name) { return player(f.relay.status(0), name); }
+
+    static boolean has(List<String> l, String part) {
+        for (String x : l) if (x.contains(part)) return true;
+        return false;
+    }
+
+    static RelayClient rejoinClient(Fix f, P h, String name, String token) throws Exception {
+        RelayClient c = new RelayClient("127.0.0.1", f.port(), name, "tests", false, new ArrayList<>(), h).rejoin(token);
+        h.client = c;
+        c.connect();
+        return c;
+    }
+
+    static final byte[] G_BACK = { 'g', 'B', 'r', 'a', 'v', 'o', 0, 0 };
+
+    /** Items 1, 4 and 5 of the rejoin rules: the away seat, the token check, the replay, the team-back handshake. */
+    static void testRejoin() throws Exception {
+        System.out.println("rejoin: an away seat, the token check, the replay and the team-back handshake");
+        Fix.rejoinMs = 60000;
+        try {
+            Game g = new Game(60000, 1000);
+            g.ea.send("Mdig");
+            g.eb.send("Mdig");
+            g.eb.send("Lxx");                                              // a move of B, in the log before it is lost
+            check(waitFor(() -> g.ea.received.contains("Lxx"), 2000), "B's move reaches A");
+            check(!g.pb.rejoinToken.isEmpty() && g.pb.seatName.equals("PhoneB"), "B was given a rejoin token and its name at join (" + g.pb.seatName + ")");
+            check(!g.ph.rejoinToken.isEmpty() && !g.ph.rejoinToken.equals(g.pb.rejoinToken), "and the host another one");
+            String token = g.pb.rejoinToken;
+            // The connection is lost: the engine link and the lobby link close.
+            g.eb.close();
+            g.b.close();
+            check(waitFor(() -> Json.bool(me(g.f, "PhoneB"), "away", false), 3000), "B is marked away");
+            check(Json.bool(me(g.f, "PhoneB"), "dropped", false) && !Json.bool(me(g.f, "PhoneB"), "gaveUp", false), "dropped for the engines, not given up");
+            long left = Json.num(me(g.f, "PhoneB"), "awayLeftMs", 0);
+            check(left > 50000 && left <= 60000, "the status says how long the seat is kept (" + left + " ms)");
+            check(waitFor(() -> g.ea.received.contains("FBravo"), 2000), "its team is marked gone for the others: F<team> injected");
+            check(waitFor(() -> has(g.ph.notices, "PhoneB lost connection; waiting up to 1 minute for them to rejoin"), 2000),
+                    "the host is told 'PhoneB lost connection; waiting up to 1 minute for them to rejoin' (" + g.ph.notices + ")");
+            check(waitFor(() -> has(g.ea.received, "s* PhoneB lost connection; waiting up to 1 minute"), 2000), "the same line is written into the game as chat");
+            check(statusBody(g.f).contains("\"away\":true"), "the TV status GET marks the away player");
+            // Wrong token, and the right token with another name: both refused alike.
+            P bad1 = new P();
+            rejoinClient(g.f, bad1, "PhoneB", "00112233445566778899aabbccddeeff");
+            check(waitFor(() -> bad1.refusedCode.equals("rejoin-unknown"), 2000), "a wrong token is refused (rejoin-unknown)");
+            P bad2 = new P();
+            rejoinClient(g.f, bad2, "PhoneZ", token);
+            check(waitFor(() -> bad2.refusedCode.equals("rejoin-unknown"), 2000), "the right token with another name is refused (rejoin-unknown)");
+            check(bad1.refusedReason.equals(bad2.refusedReason), "with the same words, so nothing is learned about other seats");
+            P bad3 = new P();
+            rejoinClient(g.f, bad3, "PhoneA", g.ph.rejoinToken);
+            check(waitFor(() -> bad3.refusedCode.equals("rejoin-unknown"), 2000), "the host's own seat cannot be taken by a hello with its token (the host uses its lobby link)");
+            check(Json.bool(me(g.f, "PhoneB"), "away", false), "the seat is still waiting after the refusals");
+            // The real thing.
+            P pb2 = new P();
+            RelayClient b2 = rejoinClient(g.f, pb2, "PhoneB", token);
+            check(waitFor(() -> pb2.start != null, 3000), "the same phone with its token and name is let back in (start message)");
+            RelayClient.StartInfo si = pb2.start;
+            check(si.rejoin && si.lines.contains("TN") && si.lines.get(si.lines.size() - 1).equals("e$spectate 1"), "  the start says rejoin, TN, and ends with e$spectate 1");
+            int teams = 0, rd = 0, own = 0;
+            String prev = "";
+            for (String l : si.lines) {
+                if (l.startsWith("eaddteam ")) teams++;
+                if (l.equals("erdriven")) rd++;
+                if (l.equals("eowner PhoneB")) { own++; check(prev.equals("erdriven"), "  eowner follows the team's erdriven line"); }
+                prev = l;
+            }
+            check(teams == 2 && rd == 2 && own == 1, "  every team is driven from outside (" + rd + " erdriven) and only B's own has eowner PhoneB (" + own + ")");
+            check(!si.token.equals(g.pb.start.token), "  a new engine token");
+            try { new Eng(g.f.port(), g.pb.start.token).close(); check(false, "the old engine token is refused"); }
+            catch (IllegalStateException e) { check(true, "  the old engine token is refused"); }
+            check(waitFor(() -> pb2.state != null, 2000), "  the new lobby link gets the state");
+            Eng eb2 = new Eng(g.f.port(), si.token);
+            check(waitFor(() -> eb2.received.size() >= 2, 2000) && eb2.received.get(0).equals("Mdig") && eb2.received.contains("Lxx"),
+                    "its engine link gets the whole log so far (" + eb2.received.size() + " messages)");
+            check(waitFor(() -> has(g.ph.notices, "PhoneB is back"), 2000), "the host is told 'PhoneB is back'");
+            check(waitFor(() -> has(eb2.received, "s* PhoneB is back") || has(g.ea.received, "s* PhoneB is back"), 2000), "and it is written into the game");
+            check(!Json.bool(me(g.f, "PhoneB"), "away", true), "B is not away any more");
+            // Until its teams are back, what its engine says is not passed on (it is replaying: a viewer of its own game).
+            long mBefore = g.ea.received.stream().filter(x -> x.equals("Mdig")).count();
+            eb2.send("Mdig");
+            eb2.send("Rxx");
+            Thread.sleep(300);
+            check(!g.ea.received.contains("Rxx") && g.ea.received.stream().filter(x -> x.equals("Mdig")).count() == mBefore, "while its teams are not back its messages are not forwarded");
+            // A's engine plays on: a message from inside its turn; the relay asks for B's team to come back (G), A's engine answers with g.
+            g.ea.send("Axx");
+            check(waitFor(() -> g.ea.received.contains("GBravo") && eb2.received.contains("GBravo"), 2000), "team-back G<team> is injected after a message from inside a live turn, for every engine");
+            g.ea.send(G_BACK);
+            check(waitFor(() -> eb2.received.stream().anyMatch(x -> x.startsWith("gBravo")), 2000), "A's engine answers with the synced g: the relay forwards it");
+            check(g.f.logged("teams are back in the game"), "the relay logs that B's teams are back");
+            eb2.send("Rxx");
+            check(waitFor(() -> g.ea.received.contains("Rxx"), 2000), "now B's moves are forwarded again");
+            // No second G is needed.
+            Thread.sleep(300);
+            long gs = g.ea.received.stream().filter(x -> x.equals("GBravo")).count();
+            g.ea.send("Axx");
+            Thread.sleep(300);
+            check(g.ea.received.stream().filter(x -> x.equals("GBravo")).count() == gs, "no further G once the g was seen");
+            g.ea.send("q");
+            eb2.send("q");
+            g.ea.close();
+            eb2.close();
+            check(waitFor(() -> g.f.relay.lastSummary() != null, 4000), "the game ends normally");
+            Relay.GameSummary gsum = g.f.relay.lastSummary();
+            check(gsum.endReason.equals("every engine finished"), "end reason " + gsum.endReason);
+            check(gsum.text().contains("rejoined 1x"), "the report says B rejoined");
+            check(gsum.toHashByPlayer.containsKey(2) , "the stream totals count what the rejoined phone was sent");
+            eb2.close(); b2.close();
+            g.end();
+        } finally {
+            Fix.rejoinMs = 120000;
+        }
+
+        // Leaving on purpose keeps the lobby link: the seat comes back over it, no token needed.
+        Fix.rejoinMs = 60000;
+        try {
+            Game g = new Game(60000, 1000);
+            g.ea.send("Mdig");
+            g.eb.send("Mdig");
+            g.eb.send(new byte[] { 0, 'Q' });                            // Back > Leave the game
+            g.eb.close();
+            check(waitFor(() -> g.pb.notice.contains("You left the game."), 3000), "a joiner that leaves is told 'You left the game.' (" + g.pb.notice + ")");
+            check(g.pb.notice.contains("rejoin within 1 minute"), "and that it can rejoin within the window (" + g.pb.notice + ")");
+            check(waitFor(() -> has(g.ph.notices, "PhoneB left the game; waiting up to 1 minute for them to rejoin"), 2000), "the host is told it left, with the wait");
+            g.pb.start = null;
+            g.b.rejoinNow();
+            check(waitFor(() -> g.pb.start != null && g.pb.start.rejoin, 3000), "'rejoin' over the same lobby link brings the game again");
+            Eng eb2 = new Eng(g.f.port(), g.pb.start.token);
+            check(waitFor(() -> eb2.received.contains("Mdig"), 2000), "its engine gets the log");
+            // The takeover of a half-open phone: a new lobby link with the token while the old links look alive.
+            g.ea.send("Axx");
+            g.ea.send(G_BACK);
+            check(waitFor(() -> !Json.bool(me(g.f, "PhoneB"), "away", true) && g.f.logged("teams are back"), 2000), "the teams are back");
+            P pb3 = new P();
+            RelayClient b3 = rejoinClient(g.f, pb3, "PhoneB", g.pb.rejoinToken);
+            check(waitFor(() -> pb3.start != null && pb3.start.rejoin, 3000), "a phone whose old links still look alive can rejoin on a new lobby link (the old ones are cut)");
+            check(waitFor(() -> eb2.eof, 2000), "  the old engine link was closed");
+            check(has(g.ph.notices, "PhoneB lost connection"), "  and the host was told it had lost connection");
+            b3.close();
+            eb2.close();
+            g.end();
+        } finally {
+            Fix.rejoinMs = 120000;
+        }
+    }
+
+    /** The window runs out; nobody left to play; the late attempt; the host leaving and ending. */
+    static void testRejoinWindow() throws Exception {
+        System.out.println("rejoin: the window runs out, nobody is left, the host leaves or ends");
+        Fix.rejoinMs = 1500;
+        try {
+            Game g = new Game(60000, 1000);
+            g.ea.send("Mdig");
+            g.eb.send("Mdig");
+            g.eb.close();                                                 // B's engine dies; its lobby link stays (the phone is still on the Wi-Fi)
+            check(waitFor(() -> Json.bool(me(g.f, "PhoneB"), "away", false), 3000), "B is away");
+            check(waitFor(() -> Json.bool(me(g.f, "PhoneB"), "gaveUp", false), 4000), "after the window the seat is given up");
+            check(!Json.bool(me(g.f, "PhoneB"), "away", true), "and it is no longer away");
+            check(waitFor(() -> has(g.ph.notices, "PhoneB did not come back; their teams sit out"), 2000), "the host is told 'PhoneB did not come back; their teams sit out'");
+            check(waitFor(() -> has(g.ea.received, "s* PhoneB did not come back"), 2000), "also as a chat line in the game");
+            check(waitFor(() -> g.pb.gaveUp.contains("away too long"), 2000), "B is told by its lobby link: " + Relay.GAVE_UP_TEXT);
+            g.pb.refusedCode = "";
+            g.b.rejoinNow();
+            check(waitFor(() -> g.pb.refusedCode.equals("rejoin-late"), 2000), "a rejoin over the lobby link is refused: rejoin-late");
+            check(g.pb.refusedReason.equals(Relay.GAVE_UP_TEXT), "with the words: " + g.pb.refusedReason);
+            P late = new P();
+            rejoinClient(g.f, late, "PhoneB", g.pb.rejoinToken);
+            check(waitFor(() -> late.refusedCode.equals("rejoin-late"), 2000) && late.refusedReason.contains("You can watch"), "a rejoin on a new lobby link is refused alike, offering to watch");
+            check(g.f.relay.lastSummary() == null, "the game goes on (A is still playing)");
+            g.ea.send("q");
+            g.ea.close();
+            check(waitFor(() -> g.f.relay.lastSummary() != null, 4000), "when A finishes, the game ends");
+            check(g.f.relay.lastSummary().endReason.equals("every engine finished"), "normally, with a seat that gave up in the game (" + g.f.relay.lastSummary().endReason + ")");
+            g.end();
+        } finally {
+            Fix.rejoinMs = 120000;
+        }
+
+        // Everybody away: the game ends when nobody is connected for the whole window, not before.
+        Fix.rejoinMs = 2000;
+        try {
+            Game g = new Game(60000, 1000);
+            g.ea.send("Mdig");
+            g.eb.send("Mdig");
+            g.eb.close();
+            g.ea.close();
+            Thread.sleep(800);
+            check(g.f.relay.lastSummary() == null, "with everyone away the game waits inside the window");
+            P ph2 = new P();
+            check(waitFor(() -> Json.bool(me(g.f, "PhoneA"), "away", false) && Json.bool(me(g.f, "PhoneB"), "away", false), 2000), "both seats are away");
+            g.pb.refusedCode = "";
+            g.b.rejoinNow();
+            check(waitFor(() -> g.pb.refusedCode.equals("rejoin-alone"), 2000), "a phone cannot come back when nobody else is playing (rejoin-alone: nobody could hand its teams back)");
+            check(waitFor(() -> g.f.relay.lastSummary() != null, 6000), "when the last window has run out the game ends");
+            Relay.GameSummary gs = g.f.relay.lastSummary();
+            check(gs != null && gs.endReason.equals(Relay.NOBODY_LEFT), "with the reason: " + (gs == null ? null : gs.endReason));
+            check(gs != null && Relay.NOBODY_LEFT.length() > 0 && gs.text().contains("did not come back"), "the report says the seats did not come back");
+            g.end();
+        } finally {
+            Fix.rejoinMs = 120000;
+        }
+
+        // The host leaves on purpose: the game goes on; ending for everyone is its own question.
+        Fix.rejoinMs = 60000;
+        try {
+            Game g = new Game(60000, 1000);
+            Socket v = viewerOn(g.f);
+            check(waitFor(() -> g.f.relay.viewerCount() == 1, 2000), "a TV is watching");
+            g.ea.send("Mdig");
+            g.eb.send("Mdig");
+            g.ea.send(new byte[] { 0, 'Q' });                             // Back > Leave the game, as the host
+            g.ea.send("Q");
+            g.ea.close();
+            check(waitFor(() -> Json.bool(me(g.f, "PhoneA"), "away", false), 3000), "the host's seat is away");
+            check(waitFor(() -> g.ph.notice.contains("You left the game.") , 2000), "the host is told it left, not that the game ended (" + g.ph.notice + ")");
+            check(waitFor(() -> g.eb.received.contains("FAlpha"), 2000), "the host's team is gone for the others");
+            check(waitFor(() -> has(g.pb.notices, "PhoneA left the game; waiting up to 1 minute for them to rejoin"), 2000), "phone B is told the host left");
+            Thread.sleep(600);
+            check(g.f.relay.lastSummary() == null && g.pb.closed.isEmpty(), "the game goes on for B and its lobby link is open");
+            check(g.f.relay.viewerCount() == 1, "the TV is still attached (no close code)");
+            check(statusBody(g.f).contains("\"state\":\"playing\""), "the status still says playing");
+            // The host comes back over its own lobby link.
+            g.ph.start = null;
+            g.a.rejoinNow();
+            check(waitFor(() -> g.ph.start != null && g.ph.start.rejoin && g.ph.start.asHost, 3000), "the host rejoins over its lobby link (start with rejoin, as host)");
+            Eng ea2 = new Eng(g.f.port(), g.ph.start.token);
+            check(waitFor(() -> ea2.received.contains("Mdig"), 2000), "its engine gets the log");
+            // The host's engine pause control works again once it is back (host link only).
+            g.eb.send("Lxx");
+            g.eb.send(new byte[] { 'g', 'A', 'l', 'p', 'h', 'a', 0, 0 });
+            check(waitFor(() -> g.f.logged("teams are back"), 2000), "the host's teams come back");
+            // Now it ends the game for everyone.
+            ea2.send(new byte[] { 0, 'Z' });
+            ea2.send("Q");
+            ea2.close();
+            check(waitFor(() -> g.f.relay.lastSummary() != null, 4000), "End the game for everyone ends it");
+            check(g.f.relay.lastSummary().endReason.equals(Relay.HOST_ENDED), "with the old reason: " + g.f.relay.lastSummary().endReason);
+            int[] n = new int[1];
+            String c = closeOf(v, n);
+            check(c.equals("4001 host-ended"), "the TV gets 4001 host-ended (" + c + ")");
+            g.end();
+        } finally {
+            Fix.rejoinMs = 120000;
+        }
+
+        // Only the host may end the game for everyone.
+        {
+            Game g = new Game(60000, 1000);
+            g.eb.send(new byte[] { 0, 'Z' });
+            g.eb.send("Q");
+            g.eb.close();
+            check(waitFor(() -> dropped(g.f, "PhoneB"), 2000), "a joiner's Z does not end the game: it only leaves");
+            Thread.sleep(300);
+            check(g.f.relay.lastSummary() == null && g.f.logged("asked to end the game for everyone: ignored"), "and the request is logged as ignored");
+            g.end();
+        }
+        // A map that differs: not a seat to come back to.
+        Fix.rejoinMs = 60000;
+        try {
+            Game g = new Game(60000, 1000);
+            g.ea.send("Mdig");
+            g.eb.send("Mdig");
+            g.eb.close();
+            check(waitFor(() -> Json.bool(me(g.f, "PhoneB"), "away", false), 2000), "B away");
+            g.pb.start = null;
+            g.b.rejoinNow();
+            check(waitFor(() -> g.pb.start != null, 2000), "B rejoins");
+            Eng eb2 = new Eng(g.f.port(), g.pb.start.token);
+            eb2.send("Mother");
+            check(waitFor(() -> !Json.bool(me(g.f, "PhoneB"), "away", true) && dropped(g.f, "PhoneB"), 2000), "a map digest that differs from the game's drops the rejoiner");
+            check(waitFor(() -> g.pb.notices.stream().anyMatch(x -> x.contains("different map")), 2000), "with a reason");
+            g.pb.refusedCode = "";
+            g.b.rejoinNow();
+            check(waitFor(() -> g.pb.refusedCode.equals("rejoin-none"), 2000), "and it cannot rejoin again");
+            eb2.close();
+            g.end();
+        } finally {
+            Fix.rejoinMs = 120000;
+        }
     }
 
     static byte[] maskedFrame(int op, byte[] p, byte[] mask) {
@@ -923,6 +1214,7 @@ public class RelayTests {
         Socket v = viewerOn(g.f);
         check(waitFor(() -> g.f.relay.viewerCount() == 1, 2000), "viewer attached");
         g.ea.send(new byte[] { 'Z', 1 });
+        g.ea.send(new byte[] { 0, 'Z' });               // "End the game for everyone"
         g.ea.send("Q");
         g.ea.close();                                   // the engine sends Q and exits: its link ends
         int[] n = new int[1];
@@ -1795,6 +2087,8 @@ public class RelayTests {
         testViewerSlow();
         testViewerBindRetry();
         testQuitWording();
+        testRejoin();
+        testRejoinWindow();
         testClientClose();
         testConnectRetry();
         testNoSocketWriteOnCallerThread();

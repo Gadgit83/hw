@@ -181,6 +181,28 @@ const char *hp_ipc_net_nick(void)
     return g_net ? g_net_nick : NULL;
 }
 
+/* The engine is started with --internal, which makes it read --nick as base64 (parseNick in ArgParsers.pas). Its UserNick is what
+ * a team's owner (the "eowner" setup line of a phone that comes back into a running game) is compared with, so the name must arrive
+ * intact. Returns the nick in standard padded base64 (a static buffer), or NULL in a local game. */
+const char *hp_ipc_net_nick_arg(void)
+{
+    static char out[4 * ((sizeof g_net_nick + 2) / 3) + 1];
+    static const char tab[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    if (!g_net) return NULL;
+    size_t n = strlen(g_net_nick), o = 0;
+    for (size_t i = 0; i < n; i += 3) {
+        unsigned v = (unsigned)(unsigned char)g_net_nick[i] << 16;
+        if (i + 1 < n) v |= (unsigned)(unsigned char)g_net_nick[i + 1] << 8;
+        if (i + 2 < n) v |= (unsigned char)g_net_nick[i + 2];
+        out[o++] = tab[(v >> 18) & 63];
+        out[o++] = tab[(v >> 12) & 63];
+        out[o++] = i + 1 < n ? tab[(v >> 6) & 63] : '=';
+        out[o++] = i + 2 < n ? tab[v & 63] : '=';
+    }
+    out[o] = 0;
+    return out;
+}
+
 static void engine_write(const void *buf, size_t n)
 {
     pthread_mutex_lock(&g_wr_lock);
@@ -374,12 +396,13 @@ static void net_pause_request(int pause)
 }
 
 /* What the relay may send to this engine, besides its own control frames (first byte 0): the types the relay itself lets through
- * (Frames.java WHITELIST "M#+LlRrUuDdZzAaSjJ,NpPwtgfhbc12345" and 0x80..0x8A) and F, the relay's "team gone" for a dropped phone.
+ * (Frames.java WHITELIST "M#+LlRrUuDdZzAaSjJ,NpPwtgfhbc12345" and 0x80..0x8A), F and G, the relay's "team gone" for a phone that is away and
+ * "team back" for one that has rejoined, and s, a chat line the relay writes into the game ("X lost connection ...").
  * Anything else, above all 'e' (a local engine command: it would let a hostile or broken host or relay run console commands on this
  * phone's engine), is dropped before it reaches the engine. Local commands come only from this launcher and the app's own files. */
 int hp_ipc_relay_frame_ok(unsigned char type)
 {
-    static const char allowed[] = "M#+LlRrUuDdZzAaSjJ,NpPwtgfhbc12345F";
+    static const char allowed[] = "M#+LlRrUuDdZzAaSjJ,NpPwtgfhbc12345FGs";
     if (type >= 0x80 && type <= 0x8A) return 1;
     return type != 0 && type < 0x80 && strchr(allowed, type) != NULL;
 }
@@ -713,11 +736,11 @@ static void *server_thread(void *arg)
  * open chat would otherwise block: tell the relay first (control frame Q, treated like the engine's own Q message), then ask the
  * engine to quit with its "forcequit" command over the local IPC socket. Only the app's own process can call this; nothing
  * that arrives from the relay is ever turned into such a command. Returns 0 when the engine was asked. */
-int hp_ipc_user_quit(void)
+static int user_quit(char kind, const char *text)
 {
     static const char cmd[] = "eforcequit";
     int rc = -1;
-    if (g_net) net_send_control('Q', "user quit");
+    if (g_net) net_send_control(kind, text);
     pthread_mutex_lock(&g_wr_lock);
     if (g_engine_fd >= 0) {
         unsigned char len = (unsigned char)(sizeof cmd - 1);
@@ -725,6 +748,18 @@ int hp_ipc_user_quit(void)
     }
     pthread_mutex_unlock(&g_wr_lock);
     return rc;
+}
+
+int hp_ipc_user_quit(void)
+{
+    return user_quit('Q', "user quit");
+}
+
+/* The host chose "End the game for everyone": control frame Z (the relay accepts it from the host's link only and then ends the
+ * game for every phone and TV), then the engine quits. A plain hp_ipc_user_quit from the host only leaves: the game goes on. */
+int hp_ipc_end_for_everyone(void)
+{
+    return user_quit('Z', "end for everyone");
 }
 
 #ifdef HP_HOST_TEST

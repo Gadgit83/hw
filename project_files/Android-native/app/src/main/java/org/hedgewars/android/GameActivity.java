@@ -136,7 +136,7 @@ public class GameActivity extends SDLActivity {
             backDialog.dismiss();                    // Back again means "keep playing"
             return;
         }
-        backDialog = BackConfirm.show(this, role, this::quitEngine);
+        backDialog = BackConfirm.show(this, role, () -> quitEngine(false), () -> quitEngine(true));
     }
 
     /**
@@ -162,12 +162,15 @@ public class GameActivity extends SDLActivity {
     /** The launcher (hp_ipc.c): tells the relay the player is leaving and makes the engine quit whatever its UI state. */
     private static native int nativeUserQuit();
 
+    /** The launcher (hp_ipc.c): the host chose "End the game for everyone": control frame Z to the relay, then the engine quits. */
+    private static native int nativeEndForEveryone();
+
     /**
      * The player confirmed. First the launcher is told (it sends the relay an explicit "user quit" and the engine its
      * own forcequit command), which works even with the chat open. As a fallback, the keys a player would press follow
      * if the engine is still up: Escape then Y, repeated so that an open chat is closed first.
      */
-    private void quitEngine() {
+    private void quitEngine(boolean endForEveryone) {
         if (quitting) return;
         quitting = true;
         if (BackConfirm.role(getFilesDir()) == BackConfirm.WATCH) {
@@ -176,7 +179,8 @@ public class GameActivity extends SDLActivity {
             BackConfirm.markLeave(getFilesDir());
         }
         try {
-            nativeUserQuit();
+            if (endForEveryone && BackConfirm.role(getFilesDir()) == BackConfirm.HOST) nativeEndForEveryone();
+            else nativeUserQuit();
         } catch (Throwable e) {
             android.util.Log.w(Diag.TAG, "nativeUserQuit failed: " + e);
         }

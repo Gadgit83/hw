@@ -743,8 +743,12 @@ public class MainActivity extends SetupActivity {
         addValue(right, r, Rules.V_CASE_PROB, "Crate drops", 0, 9, 1, n -> n == 0 ? "Never" : "Every " + n, editable);
         addValue(right, r, Rules.V_HEALTH_PROB, "Health crate chance", 0, 100, 5, n -> n + "%", editable);
         addValue(right, r, Rules.V_EXPLOSIVES, "Explosive barrels", 0, 200, 1, n -> Integer.toString(n), editable);
-        addBoomChoice(right, r, Rules.V_DEATH_BOOM, "Death explosion size", "How big the blast is when a hedgehog dies.", editable);
-        addBoomChoice(right, r, Rules.V_LAND_BOOM, "Terrain destruction", "How much land an explosion removes. Damage is unchanged.", editable);
+        addChoice(right, r, Rules.V_DEATH_BOOM, "Death explosion size", percentNames(Rules.DEATH_BOOM_OPTIONS),
+                "How big the blast is when a hedgehog dies.", editable);
+        addChoice(right, r, Rules.V_LAND_BOOM, "Terrain destruction", percentNames(Rules.LAND_BOOM_OPTIONS),
+                "How much land an explosion removes. Damage is unchanged.", editable);
+        addChoice(right, r, Rules.V_AIM_HELPER, "Aim helper", Rules.AIM_HELPER_NAMES,
+                "Shows the path of the shot while you aim, for everyone in a network game.", editable);
 
         cols.addView(left, wide ? ui.weight(1f) : Ui.lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         cols.addView(right, wide ? ui.margins(ui.weight(1f), 8, 0, 0, 0)
@@ -820,11 +824,15 @@ public class MainActivity extends SetupActivity {
         into.addView(row);
     }
 
-    /** A choice from the fixed percentages of a later number (see {@link Rules#optionsOf}), with its one-line explanation below. */
-    private void addBoomChoice(LinearLayout into, Rules r, int entry, String label, String explain, boolean editable) {
-        int[] opts = Rules.optionsOf(entry);
+    private static String[] percentNames(int[] opts) {
         String[] names = new String[opts.length];
         for (int i = 0; i < opts.length; i++) names[i] = opts[i] + "%";
+        return names;
+    }
+
+    /** A choice from the fixed values of a later number (see {@link Rules#optionsOf}), with its one-line explanation below. */
+    private void addChoice(LinearLayout into, Rules r, int entry, String label, String[] names, String explain, boolean editable) {
+        int[] opts = Rules.optionsOf(entry);
         LinearLayout row = ui.choice(label, Arrays.asList(names), Rules.optionIndex(opts, r.value[entry]), i -> {
             r.value[entry] = opts[i];
             updateSchemeInfo();

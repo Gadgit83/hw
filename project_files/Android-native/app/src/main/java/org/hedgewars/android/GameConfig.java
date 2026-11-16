@@ -100,6 +100,8 @@ public final class GameConfig {
         // Sent only when changed from 100, so a default game gives exactly the setup it always did.
         if (r.value[Rules.V_DEATH_BOOM] != 100) l.add("e$deathboompct " + r.value[Rules.V_DEATH_BOOM]);
         if (r.value[Rules.V_LAND_BOOM] != 100) l.add("e$landboompct " + r.value[Rules.V_LAND_BOOM]);
+        // Sent only when on, so a game with the aim helper off gives exactly the setup it always did.
+        if (r.value[Rules.V_AIM_HELPER] != 0) l.add("e$aimhelper " + r.value[Rules.V_AIM_HELPER]);
         l.add("e$template_filter " + m.templateFilter);
         l.add("e$feature_size " + m.featureSize);
         l.add("e$mapgen " + m.mapType);

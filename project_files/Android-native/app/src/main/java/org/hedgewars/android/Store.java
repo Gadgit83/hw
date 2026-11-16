@@ -42,6 +42,27 @@ public final class Store {
         return m;
     }
 
+    /**
+     * The team a joining phone plays with: the one the player picked on the Network screen ("Your team"), else the first
+     * human team of the setup, else the first team. An index that the setup no longer has falls back to the same default.
+     */
+    public static int joinTeamIndex(Context c, SetupModel m) {
+        int chosen = prefs(c).getInt("joinTeam", -1);
+        if (chosen >= 0 && chosen < m.teams.size()) return chosen;
+        for (int i = 0; i < m.teams.size(); i++) if (m.teams.get(i).level <= 0) return i;
+        return 0;
+    }
+
+    public static void saveJoinTeamIndex(Context c, int index) {
+        prefs(c).edit().putInt("joinTeam", index).apply();
+    }
+
+    /** A copy of the team a joining phone sends (see {@link #joinTeamIndex}). */
+    public static SetupModel.Team joinTeam(Context c, GameData d) {
+        SetupModel m = loadSetup(c, d);
+        return m.teams.get(joinTeamIndex(c, m)).copy();
+    }
+
     public static void saveSetup(Context c, SetupModel m) {
         prefs(c).edit().putString("setup", m.toText()).apply();
     }

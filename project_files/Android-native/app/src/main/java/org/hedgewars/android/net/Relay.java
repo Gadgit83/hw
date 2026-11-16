@@ -995,6 +995,19 @@ public final class Relay {
                     p.ready = p.host;
                     break;
                 }
+                case "remove": {
+                    // The host takes a joiner out of the lobby before the game (its team goes with it). The joiner is told why, and its
+                    // lobby link is closed the way the host's own closing does it. Only the host, only in setup, never the host itself.
+                    if (!p.host || state != S_SETUP) return;
+                    long id = Json.num(m, "id", -1);
+                    Player q = id < 0 || id > Integer.MAX_VALUE ? null : players.get((int) id);
+                    if (q == null || q == p || q.host) return;
+                    sendLobby(q, Json.obj("t", "closed", "reason", "The host removed you from the game. You can join again from the Network screen."));
+                    q.closeAll(true);
+                    players.remove(q.id);
+                    log("lobby: the host removed " + q.name);
+                    break;
+                }
                 case "fg":
                     p.fg = Json.bool(m, "on", true);
                     break;

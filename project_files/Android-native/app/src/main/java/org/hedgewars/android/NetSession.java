@@ -377,6 +377,19 @@ final class NetSession {
         connect(c, n.host, n.port, n.name, false, false, "", n.token);
     }
 
+    /**
+     * The teams this phone sends in its hello. The host sends every team of its setup (its own and the computer teams). A joining
+     * phone sends only its own team ("Your team" on the Network screen). A watcher, or a phone coming back to its seat (the relay
+     * keeps its teams), sends none.
+     */
+    static List<SetupModel.Team> teamsToSend(Context c, boolean isHost, boolean watch, boolean back) {
+        List<SetupModel.Team> out = new ArrayList<>();
+        if (watch || back) return out;
+        if (isHost) return Store.loadSetup(c, Store.data(c)).teams;
+        out.add(Store.joinTeam(c, Store.data(c)));
+        return out;
+    }
+
     /** {@code rejoin} (the token) makes this a phone coming back to its seat; its teams are the relay's, not the setup screen's. */
     static void connect(Context c, String host, int port, String name, boolean isHost, boolean watch, String pin, String rejoin) throws IOException {
         leave();
@@ -399,7 +412,7 @@ final class NetSession {
         NetDiag.clear(c);
         BackConfirm.takeLeave(c.getFilesDir());       // a note left by an earlier game must not end this session
         boolean back = rejoin != null && !rejoin.isEmpty();
-        List<SetupModel.Team> teams = watch || back ? new ArrayList<SetupModel.Team>() : Store.loadSetup(c, Store.data(c)).teams;
+        List<SetupModel.Team> teams = teamsToSend(c, isHost, watch, back);
         RelayClient rc = new RelayClient(host, port, name, Diag.versionName(c), isHost, teams, HANDLER).watch(watch)
                 .identity(org.hedgewars.android.net.Compat.VALUE, dataDigest(c)).pin(sentPin);
         if (back) rc.rejoin(rejoin);

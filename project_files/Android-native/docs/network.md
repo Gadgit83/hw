@@ -11,6 +11,14 @@ Update, build 0.3.0-mp1: this survey describes 0.2.0. The app now has an experim
 - SDL2_net is linked only because the engine uses it for that local IPC socket (`project_files/Android-native/native/CMakeLists.txt`). The app does not open any other connection. (The manifest requests `INTERNET`, which Android requires for any socket, loopback included.)
 - There is no LAN play and no way to find or join another device. Without a relay server of some kind, none of the below works: Hedgewars network games are always client, server, client; two engines never talk to each other directly.
 
+## Teams in a network game (0.3.0-tv17): protocol
+
+The host configures the game's teams on its Setup screen (its own teams and the computer teams), and its hello carries all of them, as before. A joining phone sends only its own team: "Your team" on the Network screen, a saved team chosen there (default: the first human team of its setup, else the first team), editable with the team editor. Its hello `teams` list therefore has one entry. The hello format is unchanged (no proto or compat bump).
+
+- Relay: no per-phone minimum or cap. A player with one team is accepted. The game needs at least two teams in all (`canStart`, and the start notice says so); a team clash is still settled at Start (colours), as before.
+- New lobby message, host only and only before the game: `{"t":"remove","id":N}` takes a joiner out of the lobby, with its team. The joiner gets `{"t":"closed","reason":"The host removed you from the game. ..."}` and its lobby link is closed. Sent by a joiner, or during a game, it is ignored.
+- A joiner whose lobby link is up can send its team again with `{"t":"teams",...}` (the "My team again" button): one team, as above.
+
 ## Game password (0.3.0-tv12): protocol
 
 Update, 0.3.0-tv12: a network game can ask for a 4-digit game password (PIN). This is the protocol of the phone relay (`app/src/main/java/org/hedgewars/android/net/Relay.java`) as the phones and the TV viewer use it. `Compat.VALUE` is now `hwnet-60-sim2` (`protocol` stays 60), because phone and TV must agree on the new fields.

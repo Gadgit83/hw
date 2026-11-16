@@ -21,6 +21,7 @@ import org.hedgewars.android.net.Json;
 import org.hedgewars.android.net.Relay;
 import org.hedgewars.android.net.RelayClient;
 
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
@@ -304,8 +305,8 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
         LinearLayout start = ui.card();
         LinearLayout before = ui.card();
         before.addView(ui.heading("Before you start"));
-        before.addView(ui.hint("All phones on the same Wi-Fi, same app version. Set up your own teams on the Teams tab of the "
-                + "setup screen first. The host's Map and Rules tabs decide the game."));
+        before.addView(ui.hint("All phones on the same Wi-Fi, same app version. Set up your teams on the Teams tab of the "
+                + "setup screen first; your team for the game is chosen under Your team. The host's Map and Rules tabs decide the game."));
         start.addView(ui.heading("Your name"));
         nameField = ui.field(name, "Player name");
         // Saved as it is typed (and marked as the player's own), so a crash or a killed app keeps the edit.
@@ -326,6 +327,10 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
         dice.setContentDescription("Pick another name");
         nameRow.addView(dice, new LinearLayout.LayoutParams(ui.dp(56), ViewGroup.LayoutParams.WRAP_CONTENT));
         start.addView(nameRow);
+        start.addView(ui.heading("Your team"));
+        start.addView(ui.hint("Only this team joins the host's game. Choose one of your saved teams, or edit it. "
+                + "The host sets the other teams, the map and the rules."));
+        start.addView(joinTeamRow());
         start.addView(ui.heading("Host"));
         start.addView(ui.toggle("Game password", NetSession.pinSetting(this), on -> NetSession.setPinOn(this, on)));
         start.addView(ui.hint("On: each hosting session gets a random 4-digit password that players need to join or watch. "
@@ -344,7 +349,7 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
             @Override public void afterTextChanged(android.text.Editable e) { if (!settingAddress) addressTyped = true; }
         });
         join.addView(addressField);
-        join.addView(ui.hint("Play joins with your teams. Watch joins without any: you see the game on this phone, with no controls, "
+        join.addView(ui.hint("Play joins with your team. Watch joins without any: you see the game on this phone, with no controls, "
                 + "and you do not count as a player."));
         LinearLayout jb = ui.row();
         jb.addView(ui.button("Join to play", true, v -> join(false)), ui.weight(1f));
@@ -370,6 +375,43 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
             content.addView(hostsBox, ui.margins(full(), 0, 8, 0, 0));
             content.addView(join, ui.margins(full(), 0, 8, 0, 0));
         }
+    }
+
+    /** The saved team this phone joins with: its name (tap to choose another of the saved teams) and an Edit button. */
+    private View joinTeamRow() {
+        SetupModel m = Store.loadSetup(this, Store.data(this));
+        int idx = Store.joinTeamIndex(this, m);
+        SetupModel.Team t = m.teams.get(idx);
+        LinearLayout row = ui.row();
+        row.addView(ui.button(t.name + (t.level > 0 ? " (computer)" : "") + "  change", false, v -> pickJoinTeam(m)), ui.weight(1f));
+        row.addView(ui.button("Edit", false, v -> startActivity(new Intent(this, TeamEditActivity.class).putExtra("team", idx))),
+                ui.margins(Ui.lp(ViewGroup.LayoutParams.WRAP_CONTENT, ui.dp(52)), 8, 0, 0, 0));
+        return row;
+    }
+
+    private void pickJoinTeam(SetupModel m) {
+        String[] names = new String[m.teams.size()];
+        for (int i = 0; i < names.length; i++) {
+            SetupModel.Team t = m.teams.get(i);
+            names[i] = t.name + (t.level > 0 ? " (computer)" : "") + ", " + t.hogs + " hedgehogs";
+        }
+        Ui.dialog(this).setTitle("Your team")
+                .setItems(names, (d, which) -> { Store.saveJoinTeamIndex(this, which); render(); })
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    /** The host's Remove: asks first, then the relay takes the joiner out (and its team) and tells it why. */
+    private void removeJoiner(final long id, String who) {
+        Ui.dialog(this)
+                .setTitle("Remove " + who + "?")
+                .setMessage("Their team leaves the game. " + who + " is told, and can join again from the Network screen.")
+                .setPositiveButton("Remove", (d, w) -> {
+                    RelayClient c = NetSession.client;
+                    if (c != null) c.removePlayer(id);
+                })
+                .setNegativeButton("Keep", null)
+                .show();
     }
 
     /**
@@ -793,6 +835,12 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
                 row.addView(ui.text(line, 16, Color.WHITE));
                 row.addView(ui.hint(watcher ? "watching only, no teams" : teams.length() == 0 ? "no teams" : teams.toString()
                         + (away ? "  (sitting out; can rejoin for about " + (Json.num(p, "awayLeftMs", 0) + 999) / 1000 + " s)" : gone ? "  (sitting out)" : "")));
+                if (host && !playing && !watcher && !me && !Json.bool(p, "host", false)) {
+                    final long pid = Json.num(p, "id", -1);
+                    final String who = Json.str(p, "name", "?");
+                    row.addView(ui.button("Remove", false, v -> removeJoiner(pid, who)),
+                            ui.margins(Ui.lp(ViewGroup.LayoutParams.WRAP_CONTENT, ui.dp(44)), 0, 6, 0, 0));
+                }
                 card.addView(row, ui.margins(Ui.lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT), 0, 4, 0, 0));
             }
         }
@@ -850,16 +898,18 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
             rb.setEnabled(!playing);
             buttons.addView(rb, ui.weight(1f));
         }
-        if (!NetSession.watching) buttons.addView(ui.button("My teams again", false, v -> {
+        if (!NetSession.watching) buttons.addView(ui.button(host ? "My teams again" : "My team again", false, v -> {
             RelayClient c = NetSession.client;
-            if (c != null) c.setTeams(Store.loadSetup(this, Store.data(this)).teams);
+            if (c == null) return;
+            // The host sends every team of its setup; a joining phone sends only its own team.
+            c.setTeams(host ? Store.loadSetup(this, Store.data(this)).teams : Collections.singletonList(Store.joinTeam(this, Store.data(this))));
         }), ui.margins(Ui.lp(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT), 8, 0, 0, 0));
         buttons.addView(ui.button(host ? "Stop hosting" : NetSession.watching ? "Stop watching" : "Leave", false, v -> leaveOrStop()),
                 ui.margins(Ui.lp(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT), 8, 0, 0, 0));
         card.addView(buttons, ui.margins(Ui.lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT), 0, 10, 0, 0));
         card.addView(ui.hint(host ? "Your teams and the map and rules come from the setup screen. Leaving the game screen does not stop hosting."
                 : NetSession.watching ? "You are watching: no teams, no controls. The game starts on this phone when the host presses Start, or at once if one is running."
-                : "Your teams come from the Teams tab. Wait for the host to press Start."));
+                : "Your team is the one under Your team on the Network screen. Press Ready; the host starts when everyone is ready."));
         for (String n : notes) card.addView(ui.hint(n), ui.margins(full(), 0, 4, 0, 0));
         content.addView(card, ui.margins(Ui.lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT), 0, 6, 0, 0));
     }

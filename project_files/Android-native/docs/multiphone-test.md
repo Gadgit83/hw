@@ -21,14 +21,14 @@ Report: what the TV showed, the delay you felt (phone action to TV), any freeze,
 
 ## Part B: two phones
 
-Words: phone A is the host, phone B joins. "Own teams" are the teams on each phone's Teams tab. The TV may watch this game as in Part A (the host screen shows the TV address in the same way); not required.
+Words: phone A is the host, phone B joins. "Own teams" are the teams on phone A's Teams tab; phone B joins with one team, chosen under "Your team" (the host's Teams tab sets the others). The TV may watch this game as in Part A (the host screen shows the TV address in the same way); not required.
 
 ### B1. Install and prepare
 
 1. Install the APK on both phones (`adb install -r hedge-party-0.3.0-mp2-debug.apk`, or copy and open it). Open the app on each; wait for the first-run data unpacking if it appears.
 2. Check the version: Options, Advanced, About must say 0.3.0-mp2 on both.
 3. Phone A, setup screen: Teams tab. Keep or change the two teams (give them names you can tell apart, for example "A one" and "A two"). Set the Map and Rules tabs as you like; **phone A's Map and Rules decide the game**. For a short first game set Turn time 15 s and Starting health 50.
-4. Phone B, Teams tab: its own teams, for example "B one" and one Computer team ("Computer, level 3"). Phone B's Map and Rules tabs are ignored in a network game.
+4. Phone B, Teams tab: its own teams, for example "B one" and one Computer team ("Computer, level 3"). On the Network screen, under "Your team", choose the one team B plays with (or Edit it). Only that team joins; phone B's Map and Rules tabs are ignored in a network game.
 5. Both phones: screen timeout long (or leave the app in front; the lobby and the game keep the screen on).
 
 ### B2. Host and join

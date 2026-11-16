@@ -337,6 +337,43 @@ public class LaunchSmokeTest {
         System.out.println("SDK " + android.os.Build.VERSION.SDK_INT + ": spectator game screen state ok");
     }
 
+    /**
+     * The Network screen shows "Your team" with the default team (the first human team of the setup). A joining phone sends only that
+     * team in its hello; the host still sends its whole setup; a team chosen under "Your team" is the one that joins.
+     */
+    @Test
+    public void netLobbyActivity_yourTeam_joinSendsOnlyThatTeam() throws Exception {
+        TestSupport.installData(app());
+        app().getSharedPreferences(Store.PREFS_NAME, Context.MODE_PRIVATE).edit().putString("setup", SETUP_0_2_0).commit();
+        String text = launch(NetLobbyActivity.class, null, 600);
+        assertTrue("the Network screen shows Your team with the default team: " + text, text.contains("Your team") && text.contains("Red Team"));
+        java.util.List<SetupModel.Team> joiner = NetSession.teamsToSend(app(), false, false, false);
+        assertTrue("a joining phone sends exactly one team: " + joiner.size(), joiner.size() == 1);
+        assertTrue("and it is the default team: " + joiner.get(0).name, joiner.get(0).name.equals("Red Team"));
+        assertTrue("the host sends its whole setup", NetSession.teamsToSend(app(), true, false, false).size() == 2);
+        assertTrue("a watcher sends none", NetSession.teamsToSend(app(), false, true, false).isEmpty());
+        Store.saveJoinTeamIndex(app(), 1);
+        joiner = NetSession.teamsToSend(app(), false, false, false);
+        assertTrue("the team chosen under Your team joins: " + joiner.get(0).name, joiner.size() == 1 && joiner.get(0).name.equals("CPU 1"));
+        text = launch(NetLobbyActivity.class, null, 600);
+        assertTrue("the chosen team is shown: " + text, text.contains("CPU 1"));
+        System.out.println("SDK " + android.os.Build.VERSION.SDK_INT + ": Your team on the Network screen ok");
+    }
+
+    /** The lobby: the host gets Remove next to a joiner's team; a joiner gets My team again (its own team) and no Remove. */
+    @Test
+    public void netLobbyActivity_removeAndMyTeamAgain() throws Exception {
+        TestSupport.installData(app());
+        netState(LOBBY.replace("\"you\":2", "\"you\":1"), true);
+        String host = launch(NetLobbyActivity.class, null, 600);
+        assertTrue("the host can remove a joiner: " + host, host.contains("Remove") && host.contains("Fairphone"));
+        TestSupport.resetStatics();
+        netState(LOBBY, false);
+        String joiner = launch(NetLobbyActivity.class, null, 600);
+        assertTrue("a joiner sends its own team again: " + joiner, joiner.contains("My team again") && !joiner.contains("Remove"));
+        System.out.println("SDK " + android.os.Build.VERSION.SDK_INT + ": remove and My team again ok");
+    }
+
     private static void editTexts(android.view.View v, java.util.List<android.widget.EditText> out) {
         if (v instanceof android.widget.EditText) out.add((android.widget.EditText) v);
         if (v instanceof android.view.ViewGroup) {

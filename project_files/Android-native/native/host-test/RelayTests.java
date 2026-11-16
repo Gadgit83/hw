@@ -435,6 +435,58 @@ public class RelayTests {
         evil.close(); a.close(); f.stop();
     }
 
+    /** The joining phone sends one team: accepted, listed with it, can start the game; the host removes a joiner; two teams in all to start. */
+    static void testJoinerTeams() throws Exception {
+        System.out.println("J1: a joiner with one team is accepted; the host can remove a joiner (who is told); two teams in all to start");
+        Fix f = new Fix(20000, 1000);
+        P ph = new P(), pb = new P(), pc = new P();
+        RelayClient a = join(f, ph, "PhoneA", true, team("Alpha", 0, 0));
+        a.start();
+        check(waitFor(() -> ph.notice.contains("at least two teams"), 3000) && ph.start == null,
+                "one team in all cannot start, and the host is told why: '" + ph.notice + "'");
+        RelayClient b = join(f, pb, "PhoneB", false, team("Bravo", 1, 0));
+        check(waitFor(() -> player(f.relay.status(0), "PhoneB") != null, 3000), "a joiner with exactly one team is listed");
+        Map<String, Object> pbm = player(f.relay.status(0), "PhoneB");
+        check(pbm != null && Json.list(pbm, "teams").size() == 1, "and it has exactly its one team");
+        check(pb.refusedReason.isEmpty() && pb.closed.isEmpty(), "and it is not refused or closed");
+        b.setReady(true);
+        check(waitFor(() -> ph.state != null && Json.bool(ph.state, "canStart", false), 3000), "two teams in all with both phones ready: the host can start");
+        a.start();
+        check(waitFor(() -> ph.start != null && pb.start != null, 3000), "the game starts for both phones");
+        int adds = 0;
+        if (ph.start != null) for (String l : ph.start.lines) if (l.startsWith("eaddteam ")) adds++;
+        check(ph.start != null && adds == 2, "the start has exactly the two teams (one per phone): " + adds);
+        a.close(); b.close(); f.stop();
+
+        // A joiner cannot remove anyone; the host removes a joiner, who is told and leaves the lobby; the start needs two teams again.
+        Fix g = new Fix(20000, 1000);
+        P ha = new P(), hb = new P(), hc = new P();
+        RelayClient a2 = join(g, ha, "PhoneA", true, team("Alpha", 0, 0));
+        RelayClient b2 = join(g, hb, "PhoneB", false, team("Bravo", 1, 0));
+        RelayClient c2 = join(g, hc, "PhoneC", false, team("Charlie", 2, 0));
+        check(waitFor(() -> player(g.relay.status(0), "PhoneC") != null, 3000), "three phones joined");
+        long idA = (long) Json.num(player(g.relay.status(0), "PhoneA"), "id", -1), idB = (long) Json.num(player(g.relay.status(0), "PhoneB"), "id", -1);
+        long idC = (long) Json.num(player(g.relay.status(0), "PhoneC"), "id", -1);
+        b2.removePlayer(idA);
+        Thread.sleep(300);
+        check(player(g.relay.status(0), "PhoneA") != null && ha.closed.isEmpty(), "a joiner's remove is ignored: the host stays");
+        b2.setReady(true);
+        c2.setReady(true);
+        check(waitFor(() -> ha.state != null && Json.bool(ha.state, "canStart", false), 3000), "PhoneA, PhoneB and PhoneC ready: can start");
+        a2.removePlayer(idB);
+        check(waitFor(() -> hb.closed.contains("removed"), 3000), "the host removes PhoneB: PhoneB is told: '" + hb.closed + "'");
+        check(waitFor(() -> player(g.relay.status(0), "PhoneB") == null, 3000), "PhoneB is gone from the lobby");
+        check(waitFor(() -> ha.state != null && Json.bool(ha.state, "canStart", false), 3000), "PhoneA and PhoneC (two teams) can still start");
+        a2.removePlayer(idC);
+        check(waitFor(() -> hc.closed.contains("removed"), 3000), "the host removes PhoneC too: PhoneC is told");
+        Thread.sleep(200);
+        check(!Json.bool(g.relay.status(0), "canStart", true), "one team in all (the host's): cannot start");
+        a2.start();
+        check(waitFor(() -> ha.notice.contains("at least two teams"), 3000) && ha.start == null, "the host's start is refused: at least two teams");
+        check(player(g.relay.status(0), "PhoneC") == null && player(g.relay.status(0), "PhoneA") != null, "the relay lists the host only");
+        a2.close(); b2.close(); c2.close(); g.stop();
+    }
+
     static void testAbuse() throws Exception {
         System.out.println("M1: hostile and malformed input to the phone port; the relay stays up");
         Fix f = new Fix(20000, 1000);
@@ -2286,6 +2338,7 @@ public class RelayTests {
         Thread.setDefaultUncaughtExceptionHandler((t, e) -> { System.out.println("  FAIL uncaught exception reached the default handler in " + t.getName() + ": " + e); failures++; });
         testJson();
         testTeams();
+        testJoinerTeams();
         testGameRefusals();
         testAbuse();
         testHostRole();

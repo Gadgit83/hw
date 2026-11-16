@@ -243,6 +243,11 @@ public final class RelayClient {
         trySend(Json.obj("t", "teams", "teams", NetTeams.listToJson(t)));
     }
 
+    /** The host takes a joiner out of the lobby before the game (the relay tells that joiner why). Host only. */
+    public void removePlayer(long id) {
+        trySend(Json.obj("t", "remove", "id", id));
+    }
+
     public void setReady(boolean ready) {
         trySend(Json.obj("t", "ready", "ready", ready));
     }

@@ -70,6 +70,9 @@ import java.util.concurrent.TimeUnit;
 public class NetHarness {
     /** The game password every scenario uses. */
     static final String PIN = "4827";
+    /** Scenario settings: the game settings of this build, which every phone must receive in its setup (see GameConfig). */
+    static final List<String> SETTINGS_LINES = java.util.Arrays.asList("e$landboompct 200", "e$deathboompct 300", "e$aimhelper 2");
+    static boolean expectSettings;
 
     static final class Phone implements RelayClient.Handler {
         final String name;
@@ -88,6 +91,7 @@ public class NetHarness {
         final Map<String, String> extraEnv = new HashMap<>();
         /** A watching phone (a spectator at the relay), and whether the harness killed or closed it on purpose before the end. */
         boolean watch, ended, killed;
+        boolean started, settingsMissing;
 
         Phone(String name, Path dir, boolean host, List<SetupModel.Team> teams, String hosttest, String data, String script) {
             this.name = name; this.dir = dir; this.host = host; this.teams = teams;
@@ -99,6 +103,8 @@ public class NetHarness {
         public void onStart(RelayClient.StartInfo si) {
             try {
                 id = si.you;
+                started = true;
+                if (expectSettings) for (String want : SETTINGS_LINES) if (!si.lines.contains(want)) settingsMissing = true;
                 // Experiment only (docs/network.md, Rejoining): NET_STRIP_EOWNER=1 takes the owner lines out of a rejoining phone's setup, to show that the engine
                 // does not hand the team back without them. Never set in the scenarios.
                 if (si.rejoin && System.getenv("NET_STRIP_EOWNER") != null) si.lines.removeIf(l -> l.startsWith("eowner "));
@@ -168,6 +174,12 @@ public class NetHarness {
         hostModel.rules.value[Rules.V_TURN_TIME] = 10;
         hostModel.rules.value[Rules.V_HEALTH] = 40;
         hostModel.rules.value[Rules.V_SUDDEN] = 1;
+        if (scenario.equals("settings")) {
+            // the game settings of this build, all three on the wire at once (setup lines of SETTINGS_LINES)
+            hostModel.rules.value[Rules.V_LAND_BOOM] = 200;
+            hostModel.rules.value[Rules.V_DEATH_BOOM] = 300;
+            hostModel.rules.value[Rules.V_AIM_HELPER] = 2;
+        }
         boolean watchScen = scenario.startsWith("watch");
         if (scenario.equals("viewer3") || scenario.equals("viewerflap") || (watchScen && !scenario.equals("watchpause"))) {
             // a short game that still reaches a normal game over: little health, short turns
@@ -184,7 +196,8 @@ public class NetHarness {
         java.util.Set<String> known = new java.util.HashSet<>(java.util.Arrays.asList("basic", "basic3", "dropout", "dropout3", "stall",
                 "slowstart", "solo", "viewer1", "viewer2", "viewer3", "viewerflap", "hostquit", "joinerquit", "hostquitchat", "joinerquitchat", "negcontrol", "injecte",
                 "rejoin", "rejoinlate", "hostleave", "hostend", "lonerejoin", "lonerejoinb", "lonerejoinc",
-                "hostpause", "hostpausequit", "joinerpause", "pausecap", "watch1", "watchlate", "watchflap", "watchsend", "watchpause", "hidden"));
+                "hostpause", "hostpausequit", "joinerpause", "pausecap", "watch1", "watchlate", "watchflap", "watchsend", "watchpause", "hidden", "settings"));
+        expectSettings = scenario.equals("settings");
         if (!known.contains(scenario)) {
             System.out.println("[harness] unknown scenario '" + scenario + "'; known: " + new java.util.TreeSet<>(known));
             System.exit(2);
@@ -365,7 +378,7 @@ public class NetHarness {
         // TV viewer (scenarios viewer*): the existing e2e-host spectator test. viewer-sim.js plays the TV page
         // (WebSocket client, TL->TN and erdriven, pushes into) pc_host spec, a second desktop engine as the TV's engine.
         // viewerflap runs three such sessions one after the other, killing the first two.
-        boolean wantViewer = scenario.startsWith("viewer") || scenario.equals("hostpause");
+        boolean wantViewer = scenario.startsWith("viewer") || scenario.equals("hostpause") || scenario.equals("settings");
         boolean flap = scenario.equals("viewerflap");
         int viewerAfter = Integer.parseInt(System.getenv().getOrDefault("NET_VIEWER_AFTER_TURNS", scenario.equals("viewer2") ? "3" : flap ? "1" : "0"));
         final int[] killAt = flap ? new int[] { viewerAfter + 1, viewerAfter + 3 } : new int[0];
@@ -856,6 +869,13 @@ public class NetHarness {
         }
         if (pauseScenario || scenario.equals("joinerpause")) pauseChecks(scenario, gs, relayLog, phones, ps, fails);
         if (watchScen) watchChecks(scenario, gs, relayLog, pa, watchers, fails);
+        if (expectSettings) {
+            for (Phone p : new Phone[] { pa, pb }) {
+                if (!p.started) fails.add(p.name + " never started its engine");
+                if (p.settingsMissing) fails.add(p.name + " was not sent the game settings " + SETTINGS_LINES);
+            }
+            if (!gs.endReason.equals("every engine finished")) fails.add("the settings game did not reach a normal end: " + gs.endReason);
+        }
         System.out.println("\nchecks: desync lines " + desyncLines + ", checksum mismatches " + mismatches + ", turns " + gs.digests.size() + ", engine exits " + exits);
         System.out.println(fails.isEmpty() ? "RESULT: PASS (0 Desync detected, " + gs.digests.size() + " turn checksums identical on all " + phones.length + " phones)"
                 : "RESULT: FAIL " + fails);

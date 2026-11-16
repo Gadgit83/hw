@@ -93,7 +93,7 @@ end;
 
 procedure doMakeExplosion(X, Y, Radius: LongInt; AttackingHog: PHedgehog; Mask: Longword; const Tint: LongWord);
 var Gear: PGear;
-    dmg, dmgBase: LongInt;
+    dmg, dmgBase, landR: LongInt;
     fX, fY, tdX, tdY: hwFloat;
     vg: PVisualGear;
     i, cnt: LongInt;
@@ -125,6 +125,10 @@ if ((Mask and EXPLNoGfx) = 0) then
 if (Mask and EXPLAutoSound) <> 0 then PlaySound(sndExplosion);
 
 dmgBase:= Radius shl 1 + cHHRadius div 2;
+
+// radius of the land removed (setup $landboompct); damage above still uses Radius. 100 leaves it unchanged.
+landR:= Radius;
+if cLandBoomPercent <> 100 then landR:= Radius * cLandBoomPercent div 100;
 
 // we might have to run twice if weWrap is enabled
 wrap:= false;
@@ -231,7 +235,7 @@ while Gear <> nil do
 if (Mask and EXPLDontDraw) = 0 then
     if ((GameFlags and gfSolidLand) = 0) or ((Mask and EXPLForceDraw) <> 0) then
         begin
-        cnt:= DrawExplosion(X, Y, Radius) div 1608; // approx 2 16x16 circles to erase per chunk
+        cnt:= DrawExplosion(X, Y, landR) div 1608; // approx 2 16x16 circles to erase per chunk
         if (cnt > 0) and (SpritesData[sprChunk].Texture <> nil) then
             for i:= 0 to cnt do
                 AddVisualGear(X, Y, vgtChunk)
@@ -243,13 +247,13 @@ if (WorldEdge = weWrap) then
     if wrap then
         break;
 
-    // Radius + 5 because that's the actual radius the explosion changes graphically
-    if X + (Radius + 5) > rightX then
+    // landR + 5 because that's the actual radius the explosion changes graphically
+    if X + (landR + 5) > rightX then
         begin
         dec(X, playWidth);
         wrap:= true;
         end
-    else if X - (Radius + 5) < leftX then
+    else if X - (landR + 5) < leftX then
         begin
         inc(X, playWidth);
         wrap:= true;

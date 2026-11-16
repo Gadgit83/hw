@@ -213,7 +213,7 @@ public final class SetupModel {
         for (int k = 1; k <= 25; k++) fl.append(rules.flag[k] ? '1' : '0');
         p.setProperty("flags", fl.toString());
         StringBuilder vals = new StringBuilder();
-        for (int k = 26; k <= 43; k++) vals.append(k > 26 ? "," : "").append(rules.value[k]);
+        for (int k = 26; k <= 46; k++) vals.append(k > 26 ? "," : "").append(rules.value[k]);
         p.setProperty("values", vals.toString());
         p.setProperty("weapons", esc(weaponSet));
         p.setProperty("link", linkWeapons ? "1" : "0");
@@ -287,9 +287,10 @@ public final class SetupModel {
         String fl = p.getProperty("flags", "");
         if (fl.length() == 25) for (int k = 1; k <= 25; k++) r.flag[k] = fl.charAt(k - 1) == '1';
         String[] vs = p.getProperty("values", "").split(",");
-        if (vs.length == 18) {
+        // 18 numbers in files saved before the later numbers existed (20 before the aim helper); those keep the defaults for them.
+        if (vs.length == 18 || vs.length == 20 || vs.length == 21) {
             try {
-                for (int k = 26; k <= 43; k++) r.value[k] = Integer.parseInt(vs[k - 26].trim());
+                for (int k = 26; k < 26 + vs.length; k++) r.value[k] = Integer.parseInt(vs[k - 26].trim());
             } catch (NumberFormatException ignored) { }
         }
         r.clampValues();

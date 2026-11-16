@@ -66,6 +66,7 @@ uses
     , uTeams
     , uDebug
     , uInputHandler
+    , uCollisions
 {$IFDEF USE_VIDEO_RECORDING}
     , uVideoRec
 {$ENDIF}
@@ -1625,6 +1626,198 @@ if smallScreenOffset <> 0 then
 VisibleTeamsCount:= v;
 end;
 
+// ---------------------------------------------------------------------------------------------------------------
+// Aim helper (setup $aimhelper: 0 off, 1 short, 2 full). Display only: the free flight of the shot that the local
+// player is charging is repeated on a probe gear, with the same hwFloat arithmetic, the same gravity and wind terms
+// and the same land tests as the real projectile (doStepFallingGear, doStepShell, doStepDrill, doStepMortar and
+// doStepBomb). Nothing else is touched: no gear is added, no random number is drawn, no sound or visual gear is made.
+
+const
+    cAimHelperMaxSteps = 12000; // steps of flight drawn at most; a step is one millisecond of game time (DoGameTick)
+
+var
+    AimProbe: TGear;           // the probe; it is never added to the gear list
+    AimPathX, AimPathY: array[0..cAimHelperMaxSteps] of LongInt;
+    AimPathN: LongInt;         // number of points; the first one is the launch point
+    AimPathHit: boolean;       // the path ended at a contact with land
+
+// Repeats the free flight from (x0, y0) with velocity (vx, vy). shellLike: the shell and drill add the wind once a frame
+// before the gravity step, unless gfMoreWind is on (then the falling-gear wind applies as for every other projectile).
+// elast and fric are the gear's Elasticity and Friction. The path ends at the step of the first contact with land, where
+// the real gear is bounced once more and so is drawn at the point it explodes (or first lands).
+procedure AimHelperFlight(x0, y0, vx, vy: hwFloat; kind: TGearType; radius: LongInt; density, elast, fric: hwFloat; shellLike: boolean; maxSteps: LongInt);
+var x, y: hwFloat;
+    i: LongInt;
+    wallHit: boolean;
+begin
+// the probe is set up as AddGear sets the real gear: made at the hedgehog's own position, so it starts with the mask
+// lfNotCurHogCrate, which LegacyFixupX/Y relax once it is clear of the hedgehog
+AimProbe.Kind:= kind;
+AimProbe.Hedgehog:= CurrentHedgehog;
+AimProbe.CollisionMask:= lfNotCurHogCrate;
+AimProbe.Radius:= radius;
+x:= x0;
+y:= y0;
+AimPathN:= 1;
+AimPathX[0]:= hwRound(x);
+AimPathY[0]:= hwRound(y);
+AimPathHit:= false;
+for i:= 1 to maxSteps do
+    begin
+    if shellLike and ((GameFlags and gfMoreWind) = 0) then
+        vx:= vx + cWindSpeed;
+    // the same velocity clip as doStepFallingGear
+    if hwAbs(vx) > _1_9 then vx:= SignAs(_1_9, vx);
+    if hwAbs(vy) > _1_9 then vy:= SignAs(_1_9, vy);
+    AimProbe.X:= x;
+    AimProbe.Y:= y;
+    // a contact ends the flight: the ceiling while rising, the ground while falling, or a wall ahead
+    if isNegative(vy) then
+        AimPathHit:= TestCollisionYwithGear(@AimProbe, -1) <> 0
+    else
+        AimPathHit:= TestCollisionYwithGear(@AimProbe, 1) <> 0;
+    wallHit:= false;
+    if not AimPathHit then
+        begin
+        wallHit:= TestCollisionXwithGear(@AimProbe, hwSign(vx)) <> 0;
+        AimPathHit:= wallHit
+        end;
+    if AimPathHit then
+        begin
+        // the contact step: a wall reverses dX and scales dY, land scales dX (friction) and reverses dY (elasticity);
+        // the gear still moves once in that step (doStepFallingGear), then explodes or bounces
+        if wallHit then
+            begin
+            vx:= -vx * elast;
+            vy:= vy * elast
+            end
+        else
+            begin
+            vx:= vx * fric;
+            vy:= -vy * elast
+            end;
+        x:= x + vx;
+        y:= y + vy;
+        AimPathX[AimPathN]:= hwRound(x);
+        AimPathY[AimPathN]:= hwRound(y);
+        inc(AimPathN);
+        exit;
+        end;
+    // free flight: gravity, the falling-gear wind under gfMoreWind, then the move
+    vy:= vy + cGravity;
+    if (GameFlags and gfMoreWind) <> 0 then
+        vx:= vx + cWindSpeed / density;
+    x:= x + vx;
+    y:= y + vy;
+    AimPathX[AimPathN]:= hwRound(x);
+    AimPathY[AimPathN]:= hwRound(y);
+    inc(AimPathN);
+    // out of the world (the limits of doStepFallingGear) or into the water: the shot is gone
+    if (AimPathX[AimPathN - 1] < min(LAND_WIDTH div -2, -2048)) or (AimPathX[AimPathN - 1] > max(LAND_WIDTH * 3 div 2, 6144))
+        or CheckCoordInWater(AimPathX[AimPathN - 1], AimPathY[AimPathN - 1]) then
+        exit;
+    end;
+end;
+
+// Works out the preview for the shot the local player is making. False when there is nothing to show.
+function AimHelperRun: boolean;
+var HHG: PGear;
+    at: TAmmoType;
+    xx, yy, vx, vy, x0, y0, density, elast, fric: hwFloat;
+    radius, maxSteps, fuse: LongInt;
+    kind: TGearType;
+    shellLike, power: boolean;
+begin
+AimHelperRun:= false;
+if (cAimHelper = 0) or (CurrentTeam = nil) or (CurrentHedgehog = nil) then
+    exit;
+// the local player only: never a team driven from another phone, a computer player, or a shot that is not ours
+if CurrentTeam^.ExtDriven or (CurrentHedgehog^.BotLevel > 0) then
+    exit;
+HHG:= CurrentHedgehog^.Gear;
+if (HHG = nil) or ((HHG^.State and gstHHDriven) = 0) or ((HHG^.State and gstAttacked) <> 0) then
+    exit;
+at:= CurrentHedgehog^.CurAmmoType;
+power:= (Ammoz[at].Ammo.Propz and ammoprop_Power) <> 0;
+shellLike:= false;
+// radius, density, elasticity and friction of the real gear, from its set-up in uGearsList
+case at of
+    amBazooka:     begin kind:= gtShell; radius:= 4; density:= _1; elast:= _0_8; fric:= _0_8; shellLike:= true end;
+    amDrill:       begin kind:= gtDrill; radius:= 4; density:= _1; elast:= _0_8; fric:= _0_8; shellLike:= true end;
+    amGrenade:     begin kind:= gtGrenade; radius:= 5; density:= _1_5; elast:= _0_8; fric:= _0_8 end;
+    amClusterBomb: begin kind:= gtClusterBomb; radius:= 5; density:= _1_5; elast:= _0_8; fric:= _0_8 end;
+    amGasBomb:     begin kind:= gtGasBomb; radius:= 5; density:= _1_5; elast:= _0_8; fric:= _0_8 end;
+    amWatermelon:  begin kind:= gtWatermelon; radius:= 6; density:= _2; elast:= _0_8; fric:= _0_995 end;
+    amHellishBomb: begin kind:= gtHellishBomb; radius:= 4; density:= _1_5; elast:= _0_5; fric:= _0_96 end;
+    amMortar:      begin kind:= gtMortar; radius:= 4; density:= _1; elast:= _0_2; fric:= _0_08 end;
+else
+    exit
+end;
+if power then
+    begin
+    // a charged shot: the preview runs while Fire is held, once the power is above zero
+    if ((HHG^.State and gstAttacking) = 0) or (HHG^.Power <= 0) then
+        exit;
+    end
+else if (HHG^.State and gstMoving) <> 0 then
+    // the mortar fires at once at full power, so its preview shows while the hedgehog is still
+    exit;
+
+// the launch velocity exactly as uGearsHedgehog computes it for the shot
+xx:= SignAs(AngleSin(HHG^.Angle), HHG^.dX);
+yy:= -AngleCos(HHG^.Angle);
+if ((HHG^.State and gstHHHJump) <> 0) and (CurrentHedgehog^.Effects[heArtillery] = 0) then
+    xx:= -xx;
+if power then
+    begin
+    vx:= xx * HHG^.Power / cPowerDivisor;
+    vy:= yy * HHG^.Power / cPowerDivisor
+    end
+else
+    begin
+    vx:= xx * cMaxPower / cPowerDivisor;
+    vy:= yy * cMaxPower / cPowerDivisor
+    end;
+// the launch point: the hedgehog's position, whole pixels (the launch offsets are zero)
+x0:= int2hwFloat(hwRound(HHG^.X));
+y0:= int2hwFloat(hwRound(HHG^.Y));
+// a bomb explodes when its fuse runs out in the air: the path stops there (the fuse is the gear's Timer, see AddGear)
+maxSteps:= cAimHelperMaxSteps;
+if (at = amGrenade) or (at = amClusterBomb) or (at = amGasBomb) or (at = amWatermelon) or (at = amHellishBomb) then
+    begin
+    fuse:= GetCurAmmoEntry(CurrentHedgehog^)^.Timer;
+    if fuse <= 0 then
+        fuse:= 3000;
+    if fuse < maxSteps then
+        maxSteps:= fuse
+    end;
+AimHelperFlight(x0, y0, vx, vy, kind, radius, density, elast, fric, shellLike, maxSteps);
+AimHelperRun:= AimPathN > 1;
+end;
+
+// The dots of the preview, at the current world offset. Called once for each drawn copy of the world.
+procedure RenderAimHelperDots;
+var i, n, lastX, lastY: LongInt;
+begin
+n:= AimPathN;
+if cAimHelper = 1 then
+    n:= (AimPathN * 40) div 100; // short: the first 40 per cent of the path
+if n < 2 then
+    exit;
+// a dot about every 14 pixels of the path, so the spacing does not depend on the speed of the shot
+lastX:= AimPathX[0];
+lastY:= AimPathY[0];
+for i:= 1 to n - 1 do
+    if (abs(AimPathX[i] - lastX) + abs(AimPathY[i] - lastY)) >= 14 then
+        begin
+        DrawCircleFilled(AimPathX[i] + WorldDx, AimPathY[i] + WorldDy, 2, $FF, $FF, $FF, $C0);
+        lastX:= AimPathX[i];
+        lastY:= AimPathY[i];
+        end;
+if AimPathHit and (n = AimPathN) then
+    DrawCircle(AimPathX[n - 1] + WorldDx, AimPathY[n - 1] + WorldDy, 6, 2, $FF, $40, $40, $FF);
+end;
+
 procedure RenderAttackBar();
 var i: LongInt;
     tdx, tdy: Double;
@@ -1918,6 +2111,26 @@ if (TargetPoint.X <> NoPointX) and (CurrentTeam <> nil) and (CurrentHedgehog <> 
         if spr = sprTargetP then
             untint;
         end;
+    end;
+
+// Aim helper: the path of the shot being charged, on this phone only (display only, see AimHelperRun)
+if AimHelperRun then
+    begin
+    if replicateToLeft then
+        begin
+        ShiftWorld(-1);
+        RenderAimHelperDots();
+        UnshiftWorld();
+        end;
+
+    if replicateToRight then
+        begin
+        ShiftWorld(1);
+        RenderAimHelperDots();
+        UnshiftWorld();
+        end;
+
+    RenderAimHelperDots();
     end;
 
 // Attack bar

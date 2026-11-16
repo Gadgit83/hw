@@ -258,7 +258,7 @@ begin
 
     case Kind of
               gtFlame: Gear^.Boom := 2;  // some additional expl in there are x3, x4 this
-           gtHedgehog: Gear^.Boom := 30;
+           gtHedgehog: Gear^.Boom := 30 * cDeathBoomPercent div 100;
                gtMine: Gear^.Boom := 50;
                gtCase: Gear^.Boom := 25;
             gtAirMine: Gear^.Boom := 30;

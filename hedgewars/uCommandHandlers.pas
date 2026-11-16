@@ -880,6 +880,23 @@ begin
 cDamagePercent:= StrToInt(s)
 end;
 
+procedure chDeathBoomPercent(var s: shortstring);
+begin
+cDeathBoomPercent:= StrToInt(s)
+end;
+
+procedure chLandBoomPercent(var s: shortstring);
+begin
+cLandBoomPercent:= StrToInt(s)
+end;
+
+procedure chAimHelper(var s: shortstring);
+begin
+cAimHelper:= StrToInt(s);
+if (cAimHelper < 0) or (cAimHelper > 2) then
+    cAimHelper:= 0
+end;
+
 procedure chRopePercent(var s: shortstring);
 begin
 cRopePercent:= StrToInt(s)
@@ -1077,6 +1094,9 @@ begin
     RegisterVariable('healthdec', @chHealthDecrease, false);
     RegisterVariable('inithealth',@chInitHealth, false);
     RegisterVariable('damagepct',@chDamagePercent , false);
+    RegisterVariable('deathboompct',@chDeathBoomPercent, false);
+    RegisterVariable('landboompct',@chLandBoomPercent, false);
+    RegisterVariable('aimhelper',@chAimHelper, false);
     RegisterVariable('ropepct' , @chRopePercent   , false);
     RegisterVariable('getawaytime' , @chGetAwayTime , false);
     RegisterVariable('minedudpct',@chMineDudPercent, false);

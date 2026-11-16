@@ -1798,7 +1798,7 @@ public class RelayTests {
                 Object p0 = ((List<?>) j.get("players")).get(0);
                 check(p0 instanceof Map && ((Map<?, ?>) p0).get("name") instanceof String && ((Map<?, ?>) p0).get("teams") instanceof Number, "  a player has a name and a team count");
                 check(j.get("compatible") instanceof Boolean && j.get("reason") instanceof String && j.get("engine") instanceof String && !((String) j.get("engine")).isEmpty() , "  compatible, reason and engine have the right types");
-                check("hwnet-60-sim2".equals(j.get("compat")) && j.get("protocol") instanceof Number && ((Number) j.get("protocol")).intValue() == 60, "  compat is hwnet-60-sim2 and protocol 60 (" + j.get("compat") + ")");
+                check("hwnet-60-sim3".equals(j.get("compat")) && j.get("protocol") instanceof Number && ((Number) j.get("protocol")).intValue() == 60, "  compat is hwnet-60-sim3 and protocol 60 (" + j.get("compat") + ")");
                 boolean bad = path.equals("/?proto=7") || path.equals("/?compat=hwnet-60-sim0") || path.equals("/?a=1&compat=hwnet-60-sim0") || path.equals("/?a=1&proto=7&b=2");
                 check(((Boolean) j.get("compatible")) == !bad && (bad == !((String) j.get("reason")).isEmpty()), "  compatible is " + !bad + (bad ? ", with a reason: " + j.get("reason") : ""));
             }

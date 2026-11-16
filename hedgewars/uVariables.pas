@@ -115,6 +115,9 @@ var
     cInitHealth     : LongInt; // initial hedgehog health (from game scheme. note the real hog health is sent directly
                                // from frontend, this is only used to inform Lua scripts)
     cDamagePercent  : LongInt;
+    cDeathBoomPercent : LongInt; // hedgehog death explosion size, percent (setup $deathboompct; 100 = unchanged)
+    cLandBoomPercent  : LongInt; // radius of land removed by explosions, percent (setup $landboompct; 100 = unchanged)
+    cAimHelper        : LongInt; // aim helper preview of ballistic shots (setup $aimhelper; 0 = off, 1 = short, 2 = full; display only)
     cMineDudPercent : LongWord;
     cTemplateFilter : LongInt;
     cFeatureSize    : LongInt;
@@ -2992,6 +2995,9 @@ begin
     LastSuddenDWarn     := -2;
     cInitHealth         := 100;
     cDamagePercent      := 100;
+    cDeathBoomPercent   := 100;
+    cLandBoomPercent    := 100;
+    cAimHelper          := 0;
     cRopePercent        := 100;
     cRopeNodeStep       := 4;
     cRopeLayers         := 1;

@@ -11,6 +11,8 @@
 #   negcontrol  NEGATIVE CONTROL: the relay alters one byte of one turn checksum for phone B; passes only if the
 #               desync detection fires (a harness that cannot fail would prove nothing)
 #   solo        one phone with three teams        viewer1  the same with the TV viewer from the start
+#   settings    two phones and the TV viewer from the start, the game settings of this build on the wire (e$landboompct 200,
+#               e$deathboompct 300, e$aimhelper 2): every phone must be sent all three, a normal game over, 0 desync, identical checksums
 #   viewer2     two phones, the TV viewer (viewer-sim.js + a spectator engine) joins late
 #   viewer3     one phone, a short game (low health) played to a NORMAL game over with the viewer connected from the start:
 #               the viewer and its spectator engine must see the game over, no desync, a round trip measured for the viewer
@@ -74,7 +76,7 @@
 SCEN="${1:-basic}"
 if [ "$SCEN" = all ]; then
   rc=0; summary=""
-  for s in malformed basic basic3 dropout dropout3 stall slowstart negcontrol solo viewer1 viewer2 viewer3 viewerflap hostquit hostleave hostend rejoin rejoinlate lonerejoin lonerejoinb lonerejoinc joinerquit hostquitchat joinerquitchat injecte hidden watch1 watchlate watchflap watchsend watchpause hostpause hostpausequit joinerpause pausecap; do
+  for s in malformed basic basic3 dropout dropout3 stall slowstart negcontrol solo settings viewer1 viewer2 viewer3 viewerflap hostquit hostleave hostend rejoin rejoinlate lonerejoin lonerejoinb lonerejoinc joinerquit hostquitchat joinerquitchat injecte hidden watch1 watchlate watchflap watchsend watchpause hostpause hostpausequit joinerpause pausecap; do
     "$0" "$s" > "$BUILD_DIR/host-test-net-$s.log" 2>&1; r=$?
     res="$(grep '^RESULT:' "$BUILD_DIR/host-test-net-$s.log" | tail -1)"
     summary+="$(printf '%-11s exit %d  %s' "$s" "$r" "${res:-(no result line)}")"$'\n'
@@ -104,7 +106,7 @@ fi
 log "launcher (network mode)"
 cmake -S "$HOST_DIR/native/host-test" -B "$B" -G Ninja -DCMAKE_BUILD_TYPE=Release -DHP_ASAN="${ASAN:-OFF}" >/dev/null
 ninja -C "$B" | tail -1
-if [[ "$SCEN" == viewer* || "$SCEN" == hostpause ]]; then
+if [[ "$SCEN" == viewer* || "$SCEN" == hostpause || "$SCEN" == settings ]]; then
   # The existing TV stand-ins from hedgewars-party (tv/e2e-host): the viewer page's test client and the spectator engine launcher.
   PARTY="${PARTY_REPO:-/home/user/hedgewars-party}"; PC="$BUILD_DIR/host-test/pc_host"; mkdir -p "$PC/src"
   { git -C "$PARTY" show origin/main:tv/e2e-host/src/pc_host.c; echo 'void hw_device_rumble(int ms) { (void)ms; }   /* the engine now calls this hook */'; } > "$PC/src/pc_host.c"

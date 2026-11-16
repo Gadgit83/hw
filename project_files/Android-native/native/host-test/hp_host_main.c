@@ -46,6 +46,7 @@ static void *restore_thread(void *arg)
  *   waitfile:<path>                                    (blocks the script until the file exists: the shell or the net-test harness decides when)
  *   key:esc  key:y                                     (a key press and release, as GameActivity sends for Back and the confirm in a network game)
  *   key:enter  text:<chars>                            (opens the chat, types into it)
+ *   keydown:<name>  keyup:<name>                       (a held key, names left right up down space f1..f9: space holds Fire, releasing it fires, f2 selects slot 2)
  *   userquit                                           (what GameActivity does when the player confirms leaving: hp_ipc_user_quit)
  *   endall                                             (the host confirms "End the game for everyone": hp_ipc_end_for_everyone)
  *   log:<text>                                         (marks the engine log, for the shell driver) */
@@ -91,6 +92,29 @@ static void push_window(int ev)
     SDL_PushEvent(&e);
 }
 
+/* One key edge, down or up, for the held-key actions keydown:<name> and keyup:<name> (names: left right up down space f1..f9). */
+static int push_key_edge(const char *name, int down)
+{
+    SDL_Keycode sym = 0; SDL_Scancode sc = 0;
+    if (!strcmp(name, "left")) { sym = SDLK_LEFT; sc = SDL_SCANCODE_LEFT; }
+    else if (!strcmp(name, "right")) { sym = SDLK_RIGHT; sc = SDL_SCANCODE_RIGHT; }
+    else if (!strcmp(name, "up")) { sym = SDLK_UP; sc = SDL_SCANCODE_UP; }
+    else if (!strcmp(name, "down")) { sym = SDLK_DOWN; sc = SDL_SCANCODE_DOWN; }
+    else if (!strcmp(name, "space")) { sym = SDLK_SPACE; sc = SDL_SCANCODE_SPACE; }
+    else if (name[0] == 'f' && name[1] >= '1' && name[1] <= '9' && name[2] == 0) { /* F1 to F9: the weapon slots */
+        sym = SDLK_F1 + (name[1] - '1'); sc = (SDL_Scancode)(SDL_SCANCODE_F1 + (name[1] - '1'));
+    }
+    else return -1;
+    SDL_Event e;
+    memset(&e, 0, sizeof e);
+    e.type = down ? SDL_KEYDOWN : SDL_KEYUP;
+    e.key.state = down ? SDL_PRESSED : SDL_RELEASED;
+    e.key.keysym.sym = sym;
+    e.key.keysym.scancode = sc;
+    e.key.windowID = 1;
+    return SDL_PushEvent(&e);
+}
+
 static void *script_thread(void *arg)
 {
     char *list = (char *)arg, *save = NULL;
@@ -112,6 +136,8 @@ static void *script_thread(void *arg)
         else if (!strncmp(act, "ctl:", 4) && act[4]) { hp_ipc_send_control(act[4]); fprintf(stderr, "[hosttest] control frame %c sent to the relay\n", act[4]); }
         else if (!strncmp(act, "relay:", 6) && act[6]) fprintf(stderr, "[hosttest] raw message to the relay -> %d\n", hp_ipc_send_relay(act + 6));
         else if (!strncmp(act, "waitfile:", 9)) { for (int i = 0; i < 20000 && access(act + 9, F_OK) != 0; i++) usleep(50000); }
+        else if (!strncmp(act, "keydown:", 8)) push_key_edge(act + 8, 1);
+        else if (!strncmp(act, "keyup:", 6)) push_key_edge(act + 6, 0);
         else if (!strcmp(act, "key:esc")) push_key(SDLK_ESCAPE, SDL_SCANCODE_ESCAPE);
         else if (!strcmp(act, "key:y")) push_key(SDLK_y, SDL_SCANCODE_Y);
         else if (!strcmp(act, "key:enter")) push_key(SDLK_RETURN, SDL_SCANCODE_RETURN);

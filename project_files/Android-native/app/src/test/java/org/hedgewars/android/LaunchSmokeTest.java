@@ -603,6 +603,39 @@ public class LaunchSmokeTest {
     }
 
     @Test
+    public void netLobbyActivity_networkToUseOffered_vpnHintWhenAVpnIsOn() throws Exception {
+        TestSupport.installData(app());
+        NetworkPicker.save(app(), NetworkPicker.AUTO);
+        NetworkPicker.interfaces = () -> java.util.Arrays.asList(
+                new NetworkPicker.Iface("wlan0", "192.168.1.62", "Wi-Fi", 24),
+                new NetworkPicker.Iface("tun0", "100.64.0.4", "VPN", 32));
+        try {
+            Activity a = Robolectric.buildActivity(NetLobbyActivity.class, null).create().start().postCreate(null).resume().visible().get();
+            TestSupport.settle(800);
+            TestSupport.layout(a);
+            String text = TestSupport.texts(a.getWindow().getDecorView());
+            assertTrue("the Network to use option is shown: " + text, text.contains("Network to use") && text.contains("Automatic"));
+            android.widget.TextView hint = findText(a.getWindow().getDecorView(), NetworkPicker.VPN_HINT);
+            assertTrue("the VPN hint is shown with Automatic: " + text, hint != null && hint.getVisibility() == android.view.View.VISIBLE);
+        } finally {
+            NetworkPicker.interfaces = null;
+            NetworkPicker.save(app(), NetworkPicker.AUTO);
+        }
+        NetworkPicker.interfaces = () -> java.util.Arrays.asList(new NetworkPicker.Iface("wlan0", "192.168.1.62", "Wi-Fi", 24));
+        try {
+            Activity a = Robolectric.buildActivity(NetLobbyActivity.class, null).create().start().postCreate(null).resume().visible().get();
+            TestSupport.settle(800);
+            String text = TestSupport.texts(a.getWindow().getDecorView());
+            android.widget.TextView hint = findText(a.getWindow().getDecorView(), NetworkPicker.VPN_HINT);
+            assertTrue("the option is there: " + text, text.contains("Network to use"));
+            assertTrue("no VPN, no hint (the text stays in the tree, hidden): " + text, hint != null && hint.getVisibility() == android.view.View.GONE);
+        } finally {
+            NetworkPicker.interfaces = null;
+        }
+        System.out.println("SDK " + android.os.Build.VERSION.SDK_INT + ": network to use and VPN hint ok");
+    }
+
+    @Test
     public void netSession_locksFollowHosting() throws Exception {
         NetSession.acquireLocks(app());
         java.lang.reflect.Field wf = NetSession.class.getDeclaredField("wifi");

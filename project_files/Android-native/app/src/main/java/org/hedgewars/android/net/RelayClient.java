@@ -71,6 +71,8 @@ public final class RelayClient {
     private String rejoinToken = "";
     private final Handler handler;
     private volatile Socket socket;
+    /** Makes the (unconnected) socket for each attempt; null: a plain {@code new Socket()}. See {@link #socketFactory}. */
+    private javax.net.SocketFactory factory;
     private OutputStream out;
     private volatile boolean closed;
     /** Taken only to decide who closes; never while writing, so close() never waits for a stalled write. */
@@ -109,6 +111,15 @@ public final class RelayClient {
     /** Comes back into a running game with the token the relay gave at the first join ({@code onJoined}); the name must be the same. Call before connect(). */
     public RelayClient rejoin(String token) {
         rejoinToken = token == null ? "" : token;
+        return this;
+    }
+
+    /**
+     * The factory that makes the socket for each attempt, e.g. one bound to the Wi-Fi network so that a VPN does not take the join.
+     * Optional: without it the socket is a plain {@code new Socket()}. Call before connect().
+     */
+    public RelayClient socketFactory(javax.net.SocketFactory f) {
+        factory = f;
         return this;
     }
 
@@ -175,7 +186,7 @@ public final class RelayClient {
     }
 
     private void connect(int timeoutMs) throws IOException {
-        Socket s = new Socket();
+        Socket s = factory != null ? factory.createSocket() : new Socket();
         socket = s;
         if (closed) { try { s.close(); } catch (IOException ignored) { } throw new IOException("The join was cancelled."); }
         s.connect(new InetSocketAddress(host, port), timeoutMs);

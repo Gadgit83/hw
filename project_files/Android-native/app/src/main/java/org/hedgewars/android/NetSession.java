@@ -400,7 +400,8 @@ final class NetSession {
         boolean back = rejoin != null && !rejoin.isEmpty();
         List<SetupModel.Team> teams = watch || back ? new ArrayList<SetupModel.Team>() : Store.loadSetup(c, Store.data(c)).teams;
         RelayClient rc = new RelayClient(host, port, name, Diag.versionName(c), isHost, teams, HANDLER).watch(watch)
-                .identity(org.hedgewars.android.net.Compat.VALUE, dataDigest(c)).pin(sentPin);
+                .identity(org.hedgewars.android.net.Compat.VALUE, dataDigest(c)).pin(sentPin)
+                .socketFactory(NetworkPicker.socketFactory(c, host));
         if (back) rc.rejoin(rejoin);
         if (isHost) rc.hostSecret(HostService.hostSecret);
         synchronized (NetSession.class) {
@@ -558,7 +559,7 @@ final class NetSession {
             return out;
         }
         if (all == null) return out;
-        for (NetworkInterface ni : Collections.list(all)) {
+        for (NetworkInterface ni : NetworkPicker.lanFirst(Collections.list(all))) {
             // One interface that cannot be read (it vanished, or the platform refuses) must not hide the others.
             try {
                 if (!ni.isUp() || ni.isLoopback() || !isLanInterface(ni.getName())) continue;

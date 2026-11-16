@@ -267,6 +267,7 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
         dice.setContentDescription("Pick another name");
         nameRow.addView(dice, new LinearLayout.LayoutParams(ui.dp(56), ViewGroup.LayoutParams.WRAP_CONTENT));
         start.addView(nameRow);
+        start.addView(NetworkChoice.block(this, ui, this::changed), ui.margins(full(), 0, 6, 0, 0));
         start.addView(ui.heading("Host"));
         start.addView(ui.toggle("Game password", NetSession.pinSetting(this), on -> NetSession.setPinOn(this, on)));
         start.addView(ui.hint("On: each hosting session gets a random 4-digit password that players need to join or watch. "

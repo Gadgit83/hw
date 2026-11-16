@@ -3,8 +3,10 @@ package org.hedgewars.android;
 import android.content.Context;
 import android.net.nsd.NsdManager;
 import android.net.nsd.NsdServiceInfo;
+import android.net.wifi.WifiManager;
 import android.os.Handler;
 import android.os.Looper;
+import android.util.Log;
 
 import org.hedgewars.android.net.HostAdvert;
 import org.hedgewars.android.net.ResolveQueue;
@@ -33,6 +35,8 @@ final class NsdFinder implements HostDiscovery {
     private final Map<String, HostAdvert.Found> found = new LinkedHashMap<>();
     private final Map<String, NsdServiceInfo> seen = new LinkedHashMap<>();
     private volatile boolean running;
+    /** Held while searching: some phones (Samsung, Android 16 among them) drop multicast DNS answers without it. Not reference-counted. */
+    private WifiManager.MulticastLock multicast;
     /** This phone's own addresses: an advert from one of them is this phone's own, stale after it stopped hosting. */
     private volatile java.util.Set<String> own = java.util.Collections.emptySet();
     private final Runnable timeout = () -> {
@@ -41,6 +45,7 @@ final class NsdFinder implements HostDiscovery {
         Listener l = listener;
         int shown;
         synchronized (this) { shown = visible(); }
+        Log.i(Diag.TAG, "nsd: search time is up, " + shown + " host(s) listed");
         if (l != null) l.status(shown == 0 ? "No host found on this Wi-Fi." : "Search finished.", true);
     };
 
@@ -60,9 +65,11 @@ final class NsdFinder implements HostDiscovery {
             nsd = null;
         }
         if (nsd == null) {
+            Log.w(Diag.TAG, "nsd: no NSD service on this phone, the search cannot run");
             l.status("This phone cannot search for hosts (no NSD service).", true);
             return;
         }
+        takeMulticastLock();
         queue = new ResolveQueue(this::resolveOne, new ResolveQueue.Sink() {
             @Override public void resolved(String key, Object result) {
                 synchronized (NsdFinder.this) {
@@ -81,19 +88,28 @@ final class NsdFinder implements HostDiscovery {
         }, 5000, 700, 3);
         discovery = new NsdManager.DiscoveryListener() {
             @Override public void onStartDiscoveryFailed(String type, int code) {
+                Log.w(Diag.TAG, "nsd: the search could not start, error " + code);
+                releaseMulticastLock();
                 running = false;
                 Listener x = listener;
                 if (x != null) x.status("The search could not start (error " + code + "). Type the host's address instead.", true);
             }
 
-            @Override public void onStopDiscoveryFailed(String type, int code) { }
+            @Override public void onStopDiscoveryFailed(String type, int code) {
+                Log.w(Diag.TAG, "nsd: stopping the search failed, error " + code);
+            }
 
-            @Override public void onDiscoveryStarted(String type) { }
+            @Override public void onDiscoveryStarted(String type) {
+                Log.i(Diag.TAG, "nsd: search started for " + type);
+            }
 
-            @Override public void onDiscoveryStopped(String type) { }
+            @Override public void onDiscoveryStopped(String type) {
+                Log.i(Diag.TAG, "nsd: search stopped");
+            }
 
             @Override public void onServiceFound(NsdServiceInfo info) {
                 String n = info.getServiceName();
+                Log.i(Diag.TAG, "nsd: found " + n);
                 if (n == null) return;
                 synchronized (NsdFinder.this) {
                     if (!running) return;
@@ -104,6 +120,7 @@ final class NsdFinder implements HostDiscovery {
 
             @Override public void onServiceLost(NsdServiceInfo info) {
                 String n = info.getServiceName();
+                Log.i(Diag.TAG, "nsd: lost " + n);
                 if (n == null) return;
                 synchronized (NsdFinder.this) {
                     seen.remove(n);
@@ -122,10 +139,13 @@ final class NsdFinder implements HostDiscovery {
         try {
             nsd.discoverServices(HostAdvert.SERVICE_TYPE_BARE, NsdManager.PROTOCOL_DNS_SD, discovery);
         } catch (RuntimeException e) {
+            Log.w(Diag.TAG, "nsd: the search could not start: " + e);
             running = false;
+            releaseMulticastLock();
             l.status("The search could not start (" + e.getMessage() + "). Type the host's address instead.", true);
             return;
         }
+        Log.i(Diag.TAG, "nsd: searching for " + HostAdvert.SERVICE_TYPE_BARE + " for " + (SEARCH_MS / 1000) + " s");
         l.status("Searching for hosts on this Wi-Fi...", false);
         main.postDelayed(timeout, SEARCH_MS);
     }
@@ -154,10 +174,12 @@ final class NsdFinder implements HostDiscovery {
         try {
             nsd.resolveService(info, new NsdManager.ResolveListener() {
                 @Override public void onResolveFailed(NsdServiceInfo i, int code) {
+                    Log.w(Diag.TAG, "nsd: resolving " + key + " failed, error " + code);
                     done.fail(code == NsdManager.FAILURE_ALREADY_ACTIVE ? "FAILURE_ALREADY_ACTIVE" : "resolve error " + code);
                 }
 
                 @Override public void onServiceResolved(NsdServiceInfo i) {
+                    Log.i(Diag.TAG, "nsd: resolved " + key + " to " + i.getHost() + ":" + i.getPort());
                     if (!(i.getHost() instanceof Inet4Address)) { done.fail("not an IPv4 address"); return; }
                     done.ok(HostAdvert.parse(key, i.getHost().getHostAddress(), i.getPort(), i.getAttributes()));
                 }
@@ -167,9 +189,34 @@ final class NsdFinder implements HostDiscovery {
         }
     }
 
+    /** Holds the multicast lock while a search runs. A failure to take it is logged; the search still runs. */
+    private void takeMulticastLock() {
+        releaseMulticastLock();
+        try {
+            WifiManager wm = (WifiManager) app.getSystemService(Context.WIFI_SERVICE);
+            multicast = wm.createMulticastLock("hedgeparty:nsd");
+            multicast.setReferenceCounted(false);
+            multicast.acquire();
+            Log.i(Diag.TAG, "nsd: multicast lock taken for the search");
+        } catch (RuntimeException e) {
+            multicast = null;
+            Log.w(Diag.TAG, "nsd: could not take the multicast lock: " + e);
+        }
+    }
+
+    private void releaseMulticastLock() {
+        WifiManager.MulticastLock m = multicast;
+        multicast = null;
+        try {
+            if (m != null && m.isHeld()) m.release();
+        } catch (RuntimeException ignored) {
+        }
+    }
+
     @Override
     public synchronized void stop() {
         running = false;
+        releaseMulticastLock();
         main.removeCallbacks(timeout);
         if (queue != null) queue.stop();
         queue = null;

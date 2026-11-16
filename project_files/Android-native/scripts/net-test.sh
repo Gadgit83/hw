@@ -30,6 +30,9 @@
 #               held. After NET_LONE_AWAY_S (default 5) the host comes back alone on its own seat (loopback, the token, the secret): the
 #               relay asks for its teams, its engine answers for them, and the game plays on to a normal end, 0 desync
 #   lonerejoinb the same with the roles swapped: the host leaves first, then phone B leaves, and B comes back alone
+#   lonerejoinc phone B quits, comes back while the host still plays, and the host's engine is paused (it sends nothing that could hand
+#               B its teams) and then leaves: B's teams are pending and nobody else plays. The relay tells B's engine it is alone (control
+#               frame L, the launcher's local command eloneback 1); B's engine answers for its teams and the game plays on to the end
 #   joinerquit  the same on phone B: clean exit, the relay says B quit, B is told "You left the game."
 #   hostquitchat, joinerquitchat   the same with the chat open and half a message typed: the app's launcher sends the relay an
 #               explicit user quit (control frame Q) and the engine a forcequit, so the wording is still right
@@ -71,7 +74,7 @@
 SCEN="${1:-basic}"
 if [ "$SCEN" = all ]; then
   rc=0; summary=""
-  for s in malformed basic basic3 dropout dropout3 stall slowstart negcontrol solo viewer1 viewer2 viewer3 viewerflap hostquit hostleave hostend rejoin rejoinlate lonerejoin lonerejoinb joinerquit hostquitchat joinerquitchat injecte hidden watch1 watchlate watchflap watchsend watchpause hostpause hostpausequit joinerpause pausecap; do
+  for s in malformed basic basic3 dropout dropout3 stall slowstart negcontrol solo viewer1 viewer2 viewer3 viewerflap hostquit hostleave hostend rejoin rejoinlate lonerejoin lonerejoinb lonerejoinc joinerquit hostquitchat joinerquitchat injecte hidden watch1 watchlate watchflap watchsend watchpause hostpause hostpausequit joinerpause pausecap; do
     "$0" "$s" > "$BUILD_DIR/host-test-net-$s.log" 2>&1; r=$?
     res="$(grep '^RESULT:' "$BUILD_DIR/host-test-net-$s.log" | tail -1)"
     summary+="$(printf '%-11s exit %d  %s' "$s" "$r" "${res:-(no result line)}")"$'\n'

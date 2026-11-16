@@ -386,6 +386,19 @@ static void net_apply_pause(int pause)
     engine_write(frame, n + 1);
 }
 
+/* The relay says nobody else plays while this phone is still getting its teams back (control frame L): the engine is told it is alone,
+ * so it answers the relay's team-back ask for its own teams (uTeams.pas, LoneBack). Local IPC, as the pause: never a relay message. */
+static void net_apply_loneback(void)
+{
+    static const char cmd[] = "eloneback 1";
+    unsigned char frame[16];
+    size_t n = sizeof cmd - 1;
+    frame[0] = (unsigned char)n;
+    memcpy(frame + 1, cmd, n);
+    diag("LONEBACK nobody else plays: the engine answers for its own teams");
+    engine_write(frame, n + 1);
+}
+
 /* The engine (host phone only, touch on the pause button) asks for a pause or resume: message 'y' + '1' or '0'. Not an engine
  * game message: it is not tapped to the relay as one; it goes as the control frame P / R, which the relay accepts from the
  * host's link only. */
@@ -429,6 +442,7 @@ static void *down_thread(void *arg)
                 net_lost(m);
             }
             if (len == 2 && (msg[1] == 'P' || msg[1] == 'R')) net_apply_pause(msg[1] == 'P');
+            if (len == 2 && msg[1] == 'L') net_apply_loneback();
             /* The relay's link ping: answered here, on this thread, so it works while the engine generates a map or is paused. */
             if (len == 2 && msg[1] == 'K') {
                 unsigned char k[3] = { 2, 0, 'K' };                    /* straight onto the link: no waiting behind the queue, no log line every 5 s */

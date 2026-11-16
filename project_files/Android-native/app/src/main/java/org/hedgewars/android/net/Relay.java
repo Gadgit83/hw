@@ -528,6 +528,8 @@ public final class Relay {
         long awayAt, rejoinAt, linkUpAt;
         /** Set from the moment the engine link of a rejoining phone is up until its teams are back: what it sends is not forwarded. */
         boolean catchUp;
+        /** Its engine has been told it is alone (the start line or control frame L): it answers for its own teams. */
+        boolean loneSent;
         /** Teams of this phone the relay still has to get back (it has not yet seen the synced team-back message for them), and when it last asked. */
         final List<String> backPending = new ArrayList<>();
         long lastBackSent;
@@ -1142,7 +1144,8 @@ public final class Relay {
         List<String> lines = new ArrayList<>(GameConfig.forRejoin(g.canonical, p.ownedIdx, p.name));
         // Alone: nobody else plays, so this engine must answer for its own teams (uTeams.pas, LoneBack). Not sent when another phone plays:
         // that engine answers, and a second answer from this one would put a second, untimely team-back into the log.
-        if (noOtherPlaying(p)) lines.add("eloneback 1");
+        p.loneSent = noOtherPlaying(p);
+        if (p.loneSent) lines.add("eloneback 1");
         lines.add("e$spectate 1");
         List<Object> out = new ArrayList<>(lines);
         sendLobby(p, Json.obj("t", "start", "you", (long) p.id, "token", p.token, "nick", p.name,
@@ -1815,6 +1818,18 @@ public final class Relay {
         for (Runnable r : after) r.run();
     }
 
+    /**
+     * Lock held. The engine of a phone that is catching up is told it is alone (control frame {@code \0L}: the launcher passes it on to the
+     * engine as the local command {@code eloneback 1}, which the start line also carries when the phone comes back alone). Once only.
+     */
+    private void tellAlone(Player p) {
+        if (p.loneSent || p.engineOut == null || p.backPending.isEmpty()) return;
+        p.loneSent = true;
+        p.engineOut.offer(Frames.frame(new byte[] { 0, 'L' }));
+        game.events.add(p.name + " is alone now: its engine is told so (control frame L)");
+        log(p.name + " is alone now: its engine is told so");
+    }
+
     /** Lock held. True when no phone other than {@code except} is linked, not dropped, not finished and not catching up: nobody else can answer. */
     private boolean noOtherPlaying(Player except) {
         for (Player q : players.values()) if (q != except && q.linkOpen && !q.dropped && !q.finished && !q.catchUp) return false;
@@ -1838,6 +1853,9 @@ public final class Relay {
             tvOverlay(Json.obj("t", "gaveup", "name", q.name));
         }
         if (state != S_PLAYING || g.paused) return;
+        // A phone still waiting for its teams is told it is alone as soon as nobody else plays (the others went away while it was catching up):
+        // its engine then answers for its own teams, the same as a phone that came back alone (control frame L, see tellAlone).
+        for (Player q : new ArrayList<>(players.values())) if (q.catchUp && noOtherPlaying(q)) tellAlone(q);
         // Usually a live phone asks, right after its own turn message (a synced point). When no other phone is playing (the game was held
         // while every player was away, and this is the first one back), nobody else has a team in play to answer: the phone that is
         // coming back is asked itself, its engine answers for its own team (uTeams.pas, chTeamBack), and it need not wait for a turn.

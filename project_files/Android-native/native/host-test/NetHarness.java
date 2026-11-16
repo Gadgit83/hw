@@ -183,7 +183,7 @@ public class NetHarness {
         if (scenario.equals("solo") || scenario.startsWith("viewer1") || scenario.equals("viewer3") || scenario.equals("viewerflap") || (watchScen && !scenario.equals("watchpause"))) { aTeams.add(team(d, rnd, "Alpha Three", 3, 4, aTeams)); bTeams.clear(); }
         java.util.Set<String> known = new java.util.HashSet<>(java.util.Arrays.asList("basic", "basic3", "dropout", "dropout3", "stall",
                 "slowstart", "solo", "viewer1", "viewer2", "viewer3", "viewerflap", "hostquit", "joinerquit", "hostquitchat", "joinerquitchat", "negcontrol", "injecte",
-                "rejoin", "rejoinlate", "hostleave", "hostend", "lonerejoin", "lonerejoinb",
+                "rejoin", "rejoinlate", "hostleave", "hostend", "lonerejoin", "lonerejoinb", "lonerejoinc",
                 "hostpause", "hostpausequit", "joinerpause", "pausecap", "watch1", "watchlate", "watchflap", "watchsend", "watchpause", "hidden"));
         if (!known.contains(scenario)) {
             System.out.println("[harness] unknown scenario '" + scenario + "'; known: " + new java.util.TreeSet<>(known));
@@ -288,10 +288,15 @@ public class NetHarness {
         // lonerejoin / lonerejoinb: the first phone to leave is the joiner (lonerejoin) or the host (lonerejoinb). The second one leaves a few
         // turns later, so every phone is away and the game is held; the second one comes back alone a few seconds after that.
         final boolean lone = scenario.startsWith("lonerejoin"), loneHostBack = scenario.equals("lonerejoin");
+        // lonerejoinc: phone B quits, comes back while the host still plays; the host goes quiet (paused, so it sends nothing that could
+        // hand B its teams) and then leaves. B's teams are still pending and nobody else plays: its engine must be told it is alone (L).
+        final boolean loneC = scenario.equals("lonerejoinc");
         final String loneQ1 = "0:waitfile:" + root.resolve("lone1.now") + ";0:userquit", loneQ2 = "0:waitfile:" + root.resolve("lone2.now") + ";0:userquit";
-        Phone pa = new Phone("Phone A", root.resolve("phoneA"), true, aTeams, hosttest, data, lone ? (loneHostBack ? loneQ2 : loneQ1)
+        // The host's engine is paused first (it sends nothing, so it cannot hand B its teams while B replays), then it leaves once B has its start.
+        final String loneCQuitA = "0:waitfile:" + root.resolve("lone0.now") + ";0:ipc:enetpause 1;0:waitfile:" + root.resolve("lone2.now") + ";800:userquit";
+        Phone pa = new Phone("Phone A", root.resolve("phoneA"), true, aTeams, hosttest, data, loneC ? loneCQuitA : lone ? (loneHostBack ? loneQ2 : loneQ1)
                 : (hostLeave || scenario.equals("hostend")) ? quitScript : hostScript);
-        Phone pb = new Phone("Phone B", root.resolve("phoneB"), false, bTeams, hosttest, data, lone ? (loneHostBack ? loneQ1 : loneQ2)
+        Phone pb = new Phone("Phone B", root.resolve("phoneB"), false, bTeams, hosttest, data, loneC ? loneQ1 : lone ? (loneHostBack ? loneQ1 : loneQ2)
                 : scenario.startsWith("joinerquit") ? quitScript : joinerScript);
         if (pauseScenario) pb.extraEnv.put("HP_NET_PAUSE_JITTER_MS", "700");
         Phone pc = new Phone("Phone C", root.resolve("phoneC"), false, cTeams, hosttest, data, script);
@@ -422,7 +427,35 @@ public class NetHarness {
                     rjStage = 2;
                 }
             }
-            if (lone) {
+            if (loneC) {
+                long nowMs = System.currentTimeMillis();
+                if (loneStage == 0 && relay.turns() >= killAfterTurns) {
+                    flag(root, "lone1.now");
+                    loneStage = 1;
+                    turnsAtLone1 = relay.turns();
+                    loneSince = nowMs;
+                    System.out.println("[harness] === lonerejoinc: phone B leaves for good after " + turnsAtLone1 + " turn checksums ===");
+                } else if (loneStage == 1 && nowMs - loneSince >= 3000) {
+                    flag(root, "lone0.now");
+                    loneStage = 2;
+                    loneSince = nowMs;
+                    System.out.println("[harness] === lonerejoinc: the host's engine is paused: it sends nothing from now on ===");
+                } else if (loneStage == 2 && nowMs - loneSince >= 2500) {
+                    turnsAtReturn = relay.turns();
+                    back = new Phone("Phone B2", root.resolve("phoneB2"), false, bTeams, hosttest, data, joinerScript);
+                    back.client = new RelayClient("127.0.0.1", relay.port(), "Phone B", "harness", false, bTeams, back)
+                            .identity(org.hedgewars.android.net.Compat.VALUE, digest).rejoin(pb.rejoinToken);
+                    back.client.connect();
+                    loneStage = 3;
+                    loneSince = nowMs;
+                    System.out.println("[harness] === lonerejoinc: phone B asks to come back while the host is paused (" + turnsAtReturn + " turn checksums) ===");
+                } else if (loneStage == 3 && back.gotStart.getCount() == 0) {
+                    flag(root, "lone2.now");
+                    loneStage = 4;
+                    turnsAtLone2 = relay.turns();
+                    System.out.println("[harness] === lonerejoinc: phone B got its start; the host pauses its engine and leaves now, so B's teams are still pending and nobody else plays ===");
+                }
+            } else if (lone) {
                 long nowMs = System.currentTimeMillis();
                 String leaver = loneHostBack ? "phone B" : "the host";
                 String comer = loneHostBack ? "the host" : "phone B";
@@ -657,7 +690,8 @@ public class NetHarness {
             if (back == null) lf.add("the returning phone was never started");
             else {
                 if (!back.refused.isEmpty()) lf.add("the return was refused: '" + back.refused + "' " + back.refusedReason);
-                if (!held) lf.add("the relay never noted that every player was away (the game should be held)");
+                if (!held && !loneC) lf.add("the relay never noted that every player was away (the game should be held)");
+                if (loneC && !relayLog.stream().anyMatch(l -> l.contains("is alone now: its engine is told so"))) lf.add("the relay never told phone B that it is alone (control frame L)");
                 if (!rejoinedEv) lf.add("the relay has no 'rejoined' event for " + seat);
                 if (!askedEv) lf.add("the relay did not ask for the returning phone's teams (no G injected)");
                 if (!teamsBackEv) lf.add(seat + "'s teams did not come back (no synced team-back from its engine)");

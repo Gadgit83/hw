@@ -97,6 +97,9 @@ public final class GameConfig {
         l.add("e$ropepct " + r.value[Rules.V_ROPE]);
         l.add("e$getawaytime " + r.value[Rules.V_GETAWAY]);
         l.add("e$worldedge " + r.value[Rules.V_WORLD_EDGE]);
+        // Sent only when changed from 100, so a default game gives exactly the setup it always did.
+        if (r.value[Rules.V_DEATH_BOOM] != 100) l.add("e$deathboompct " + r.value[Rules.V_DEATH_BOOM]);
+        if (r.value[Rules.V_LAND_BOOM] != 100) l.add("e$landboompct " + r.value[Rules.V_LAND_BOOM]);
         l.add("e$template_filter " + m.templateFilter);
         l.add("e$feature_size " + m.featureSize);
         l.add("e$mapgen " + m.mapType);

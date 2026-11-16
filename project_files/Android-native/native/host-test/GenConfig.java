@@ -76,6 +76,14 @@ public class GenConfig {
         }
         if (System.getenv("HP_TEST_SEED") != null) m.seed = System.getenv("HP_TEST_SEED");
         List<String> lines = GameConfig.build(m, d, new Random(seed));
+        // HP_TEST_SETUP: extra setup lines, separated by ';', e.g. "e$landboompct 200;e$deathboompct 300". Put before the teams.
+        if (System.getenv("HP_TEST_SETUP") != null) {
+            int at = lines.size();
+            for (int i = 0; i < lines.size(); i++) if (lines.get(i).startsWith("eammloadt")) { at = i; break; }
+            for (String extra : System.getenv("HP_TEST_SETUP").split(";")) {
+                if (!extra.trim().isEmpty()) lines.add(at++, extra.trim());
+            }
+        }
         GameConfig.write(new File(a[0]), lines);
         System.err.println("GenConfig: " + scenario + ", " + lines.size() + " lines, " + m.teams.size() + " teams");
     }

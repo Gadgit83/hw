@@ -131,9 +131,15 @@ public class ConfigCheck {
             m.rules.value[Rules.V_HEALTH] = 150;
             m.rules.value[Rules.V_MINES_TIME] = -1;
             m.rules.flag[6] = true;
+            m.rules.value[Rules.V_DEATH_BOOM] = 300;
+            m.rules.value[Rules.V_LAND_BOOM] = 125;
             List<String> l = validate(m, d, engineCommands, "edited");
             check(l.contains("eseed my seed"), "fixed seed");
             check(l.contains("e$turntime 20000") && l.contains("e$inithealth 150") && l.contains("e$minestime -1000"), "edited values");
+            check(l.contains("e$deathboompct 300") && l.contains("e$landboompct 125"), "death and terrain settings sent when changed");
+            // A default game sends neither of the two later settings (the engine's defaults are then unchanged).
+            List<String> plain = validate(teams(d, rnd, 3, 5), d, engineCommands, "plain");
+            check(plain.stream().noneMatch(s -> s.startsWith("e$deathboompct") || s.startsWith("e$landboompct")), "default games send neither new setting");
             check(l.contains("e$gmflags " + (8192 | 0x40)), "laser sight flag");
             check(l.contains("eaddhh 0 150 " + m.teams.get(0).hogName[0]), "hog health follows the scheme");
             check(m.rulesEdited(), "edited rules are noticed");

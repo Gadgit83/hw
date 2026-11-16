@@ -8,6 +8,7 @@
 #   HP_TEST_SCENARIO what game to start, see native/host-test/GenConfig.java: two (default), ai (two computer
 #                    teams that play alone), humanvsai, mixed8x8, scheme:NAME, map:KIND, style:NAME
 #   HP_TEST_SEED     fixed map seed text (default: random from the scenario number)
+#   HP_TEST_SETUP    extra setup lines appended before the teams, separated by ';', e.g. "e$landboompct 200;e$deathboompct 300"
 #   HP_TEST_SOUND=1  run with sound on (SDL dummy audio) instead of off
 #   HP_TEST_SCRIPT   timed input injection, see native/host-test/hp_host_main.c (touch events, focus lost/gained, ...)
 #   HP_TEST_ARGS     extra engine options, e.g. "--ui-scale 240 --inset-left 80 --inset-top 40"

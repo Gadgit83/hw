@@ -716,7 +716,7 @@ public class LaunchSmokeTest {
         NetSession.state = null;
         NetSession.clearRejoin(app());
         assertTrue("no note, no offer", !launch(NetLobbyActivity.class, null, 600).contains("Rejoin your game"));
-        NetSession.saveRejoin(app(), "192.168.1.20", 46633, "Fairphone", "0123456789abcdef0123456789abcdef");
+        NetSession.saveRejoin(app(), "192.168.1.20", 46633, "Fairphone", "0123456789abcdef0123456789abcdef", false);
         NetSession.RejoinNote n = NetSession.loadRejoin(app());
         assertTrue("the note round trips", n != null && n.host.equals("192.168.1.20") && n.port == 46633 && n.name.equals("Fairphone") && n.token.equals("0123456789abcdef0123456789abcdef"));
         text = launch(NetLobbyActivity.class, null, 600);

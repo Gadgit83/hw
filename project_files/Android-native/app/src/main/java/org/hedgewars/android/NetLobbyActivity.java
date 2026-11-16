@@ -421,27 +421,31 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
     private void rejoinCard() {
         NetSession.RejoinNote n = NetSession.loadRejoin(this);
         if (n == null) return;
+        // The hosting phone's seat is only there while its hosting runs (HostService); after that there is nothing to come back to.
+        if (n.asHost && HostService.relay == null) { NetSession.clearRejoin(this); return; }
         String code = NetSession.rejoinRefusal;
         LinearLayout card = ui.card();
         card.addView(ui.heading("Rejoin your game"));
-        card.addView(ui.text("You were playing as " + n.name + " on " + n.host + ":" + n.port + ".", 16, Color.WHITE));
-        if (code.equals("rejoin-late")) {
-            card.addView(coloured(Relay.GAVE_UP_TEXT, Ui.ACCENT));
-        } else if (code.equals("rejoin-alone")) {
-            card.addView(coloured("Nobody else is playing at the moment, so your teams cannot come back. You can watch.", Ui.ACCENT));
+        card.addView(ui.text("You were playing as " + n.name + (n.asHost ? " (hosting this phone)." : " on " + n.host + ":" + n.port + "."), 16, Color.WHITE));
+        if (code.equals("rejoin-late") && NetSession.notice.isEmpty()) {
+            card.addView(coloured(n.asHost ? Relay.GAVE_UP_HOST_TEXT : Relay.GAVE_UP_TEXT, Ui.ACCENT));
+        } else if (code.startsWith("rejoin-") && !NetSession.notice.isEmpty()) {
+            // The reason the relay refused the last try, with what it offers (a line that offers watching has its button below).
+            card.addView(coloured(NetSession.notice, Ui.ACCENT));
         } else {
             card.addView(ui.hint("If that game is still running and you left less than " + BackConfirm.REJOIN_TIME
                     + " ago, you go back into it and your teams play on. The game keeps going without you meanwhile."));
         }
         LinearLayout row = ui.row();
-        if (!code.equals("rejoin-late") && !code.equals("rejoin-alone")) {
+        if (!code.equals("rejoin-late")) {
             Button rb = ui.button(connecting ? "Rejoining..." : "Rejoin the game", true, v -> rejoinFromNote());
             rb.setEnabled(!connecting);
             row.addView(rb, ui.weight(1f));
         } else {
             row.addView(ui.button("Try again", false, v -> rejoinFromNote()), ui.weight(1f));
         }
-        row.addView(ui.button("Join to watch", false, v -> connectTo(n.host, n.port, true)), ui.margins(Ui.lp(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f), 8, 0, 0, 0));
+        // A hosting phone cannot watch its own game; a joiner that can no longer play can watch the same game.
+        if (!n.asHost) row.addView(ui.button("Join to watch", false, v -> connectTo(n.host, n.port, true)), ui.margins(Ui.lp(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f), 8, 0, 0, 0));
         row.addView(ui.button("Forget it", false, v -> { NetSession.clearRejoin(this); NetSession.rejoinRefusal = ""; render(); }),
                 ui.margins(Ui.lp(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT), 8, 0, 0, 0));
         card.addView(row, ui.margins(full(), 8, 0, 0, 0));
@@ -858,8 +862,10 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
                 RelayClient c = NetSession.client;
                 if (c != null) c.rejoinNow();
             }), ui.margins(full(), 6, 0, 0, 4));
-        } else if (playing && iGaveUp && !NetSession.watching && !host) {
-            card.addView(coloured(Relay.GAVE_UP_TEXT, Ui.ACCENT));
+        } else if (!NetSession.watching && !host && (iGaveUp || NetSession.offersWatch(NetSession.notice))) {
+            // Whatever offers watching comes with this button, while a game runs or after it ended (the notice stays on the screen):
+            // the given-up notice, a refused rejoin. It joins as a watcher; the relay sends the running game or the last summary.
+            if (iGaveUp && NetSession.notice.isEmpty()) card.addView(coloured(Relay.GAVE_UP_TEXT, Ui.ACCENT));
             card.addView(ui.button("Watch the game", true, v -> {
                 final String h = NetSession.lastHostName;
                 final int pt = NetSession.lastPort;

@@ -60,7 +60,7 @@ final class NetSession {
     static volatile String rejoinToken = "", seatName = "";
     /** The window ran out while this phone was away: the relay says so, the screen offers to watch. */
     static volatile boolean gaveUp;
-    /** The code of the last refusal of a rejoin ("rejoin-late", "rejoin-alone", "rejoin-unknown", "rejoin-none"), or "". */
+    /** The code of the last refusal of a rejoin ("rejoin-late", "rejoin-unknown", "rejoin-none"), or "". */
     static volatile String rejoinRefusal = "";
 
     /** What the phone keeps in files/rejoin.txt: enough to come back into a running game after the connection was lost or the app restarted. */
@@ -68,13 +68,16 @@ final class NetSession {
         final String host, name, token;
         final int port;
         final long savedAt;
+        /** The seat is this phone's own hosted game (its relay runs in HostService, on loopback). */
+        final boolean asHost;
 
-        RejoinNote(String host, int port, String name, String token, long savedAt) {
+        RejoinNote(String host, int port, String name, String token, long savedAt, boolean asHost) {
             this.host = host;
             this.port = port;
             this.name = name;
             this.token = token;
             this.savedAt = savedAt;
+            this.asHost = asHost;
         }
     }
 
@@ -85,9 +88,10 @@ final class NetSession {
         return new File(c.getFilesDir(), "rejoin.txt");
     }
 
-    static void saveRejoin(Context c, String host, int port, String name, String token) {
+    static void saveRejoin(Context c, String host, int port, String name, String token, boolean asHost) {
         try (java.io.Writer w = new java.io.OutputStreamWriter(new java.io.FileOutputStream(rejoinFile(c)), java.nio.charset.StandardCharsets.UTF_8)) {
-            w.write("host=" + host + "\nport=" + port + "\nname=" + name.replace('\n', ' ') + "\ntoken=" + token + "\nsaved=" + System.currentTimeMillis() + "\n");
+            w.write("host=" + host + "\nport=" + port + "\nname=" + name.replace('\n', ' ') + "\ntoken=" + token + "\nsaved=" + System.currentTimeMillis()
+                    + (asHost ? "\nseat=host" : "") + "\n");
         } catch (IOException e) {
             android.util.Log.w(Diag.TAG, "could not keep the rejoin note: " + e);
         }
@@ -97,7 +101,7 @@ final class NetSession {
     static RejoinNote loadRejoin(Context c) {
         File f = rejoinFile(c);
         if (!f.exists()) return null;
-        String host = "", name = "", token = "";
+        String host = "", name = "", token = "", seat = "";
         int port = 0;
         long saved = 0;
         try (java.io.BufferedReader r = new java.io.BufferedReader(new java.io.InputStreamReader(new java.io.FileInputStream(f), java.nio.charset.StandardCharsets.UTF_8))) {
@@ -110,13 +114,14 @@ final class NetSession {
                 else if (k.equals("name")) name = v;
                 else if (k.equals("token")) token = v;
                 else if (k.equals("saved")) saved = Long.parseLong(v.trim());
+                else if (k.equals("seat")) seat = v.trim();
             }
         } catch (IOException | NumberFormatException e) {
             return null;
         }
         if (host.isEmpty() || port <= 0 || name.isEmpty() || token.isEmpty()) return null;
         if (System.currentTimeMillis() - saved > REJOIN_NOTE_MAX_MS) { f.delete(); return null; }
-        return new RejoinNote(host, port, name, token, saved);
+        return new RejoinNote(host, port, name, token, saved, seat.equals("host"));
     }
 
     static void clearRejoin(Context c) {
@@ -225,8 +230,8 @@ final class NetSession {
             boolean h;
             synchronized (NetSession.class) { h = pendingIsHost || hosting; }
             Context c = HpApp.appContext;
-            // A joining phone keeps the token in a file; the host's seat lives and dies with its service, so memory is enough there.
-            if (!h && c != null && !lastHostName.isEmpty()) saveRejoin(c, lastHostName, lastPort, name, token);
+            // The token is kept in a file, for a joining phone and for the host's own seat (it comes back over loopback to HostService's relay).
+            if (c != null && !lastHostName.isEmpty()) saveRejoin(c, lastHostName, lastPort, name, token, h);
         }
 
         @Override public void onGaveUp(String reason) {
@@ -278,8 +283,9 @@ final class NetSession {
         @Override public void onRefused(String code, String reason) {
             if (code.startsWith("rejoin")) {
                 rejoinRefusal = code;
+                if (reason != null && !reason.isEmpty()) notice = reason;      // the screen shows why, and offers what the reason offers (watching)
                 Context rc = HpApp.appContext;
-                // A seat that is not ours or a game that is over cannot be offered again; "late" and "alone" still can (watching, trying later).
+                // A seat that is not ours or a game that is over cannot be offered again; "late" still can (watching, trying later).
                 if (rc != null && (code.equals("rejoin-unknown") || code.equals("rejoin-none"))) clearRejoin(rc);
             }
             if (code.startsWith("password")) {
@@ -374,7 +380,12 @@ final class NetSession {
 
     /** Comes back into a running game with the note kept at the first join: the same name and the token the relay gave then. */
     static void connectRejoin(Context c, RejoinNote n) throws IOException {
-        connect(c, n.host, n.port, n.name, false, false, "", n.token);
+        connect(c, n.host, n.port, n.name, n.asHost, false, "", n.token);
+    }
+
+    /** True when a line the relay or the refusal wrote offers watching the game (the lines it offers it in say "You can watch"). */
+    static boolean offersWatch(String text) {
+        return text != null && text.contains("You can watch");
     }
 
     /**

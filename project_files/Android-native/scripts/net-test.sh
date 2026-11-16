@@ -26,6 +26,10 @@
 #               back and plays on: 0 desync and identical turn checksums on all phones, also for the turns after the rejoin
 #   rejoinlate  the same with a short window (NET_REJOIN_MS, default 15000): the attempt after it is refused (rejoin-late), the teams
 #               stay gone, the game goes to a normal end with no desync
+#   lonerejoin  two phones; phone B quits for good (Back > Leave the game), then the host leaves too: every phone is away and the game is
+#               held. After NET_LONE_AWAY_S (default 5) the host comes back alone on its own seat (loopback, the token, the secret): the
+#               relay asks for its teams, its engine answers for them, and the game plays on to a normal end, 0 desync
+#   lonerejoinb the same with the roles swapped: the host leaves first, then phone B leaves, and B comes back alone
 #   joinerquit  the same on phone B: clean exit, the relay says B quit, B is told "You left the game."
 #   hostquitchat, joinerquitchat   the same with the chat open and half a message typed: the app's launcher sends the relay an
 #               explicit user quit (control frame Q) and the engine a forcequit, so the wording is still right
@@ -67,7 +71,7 @@
 SCEN="${1:-basic}"
 if [ "$SCEN" = all ]; then
   rc=0; summary=""
-  for s in malformed basic basic3 dropout dropout3 stall slowstart negcontrol solo viewer1 viewer2 viewer3 viewerflap hostquit hostleave hostend rejoin rejoinlate joinerquit hostquitchat joinerquitchat injecte hidden watch1 watchlate watchflap watchsend watchpause hostpause hostpausequit joinerpause pausecap; do
+  for s in malformed basic basic3 dropout dropout3 stall slowstart negcontrol solo viewer1 viewer2 viewer3 viewerflap hostquit hostleave hostend rejoin rejoinlate lonerejoin lonerejoinb joinerquit hostquitchat joinerquitchat injecte hidden watch1 watchlate watchflap watchsend watchpause hostpause hostpausequit joinerpause pausecap; do
     "$0" "$s" > "$BUILD_DIR/host-test-net-$s.log" 2>&1; r=$?
     res="$(grep '^RESULT:' "$BUILD_DIR/host-test-net-$s.log" | tail -1)"
     summary+="$(printf '%-11s exit %d  %s' "$s" "$r" "${res:-(no result line)}")"$'\n'

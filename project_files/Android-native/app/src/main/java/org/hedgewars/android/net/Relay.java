@@ -84,6 +84,8 @@ public final class Relay {
     public static final String NOBODY_LEFT = "Every player left the game and nobody came back";
     /** What a phone is told when it asks to come back after its window ran out. */
     public static final String GAVE_UP_TEXT = "You were away too long; the game went on without your teams. You can watch.";
+    /** The same for the hosting phone, which cannot watch its own game (a watcher hello from it is refused). */
+    public static final String GAVE_UP_HOST_TEXT = "You were away too long; the game went on without your teams.";
     public static final int MAX_PLAYERS = 8, MAX_CONNECTIONS = 32, MAX_VIEWERS = 16;
     /** Phones that only watch (they play no team, so they are not players): their own cap, apart from MAX_PLAYERS. */
     public static final int MAX_SPECTATORS = 8;
@@ -685,6 +687,8 @@ public final class Relay {
         byte lastStamp0, lastStamp1;
         final int no = ++gameNo;
         long lastLinkPing;
+        /** Set once the game's report has noted that every player is away and the game is held (checkEnd). */
+        boolean heldLogged;
         final List<TeamRef> teams = new ArrayList<>();
         List<String> canonical;
         List<String> viewerLines;
@@ -1065,23 +1069,15 @@ public final class Relay {
         return Math.max(1, ms / 1000) + " s";
     }
 
-    /** Lock held. How many other phones are playing right now: they are the ones whose engines can hand a team back. */
-    private int liveOthers(Player p) {
-        int n = 0;
-        for (Player q : players.values()) if (q != p && q.linkOpen && !q.dropped && !q.finished && !q.catchUp) n++;
-        return n;
-    }
-
     /** Lock held. Why this seat cannot be taken back now as {code, reason}, or null when it can. */
     private String[] rejoinRefusal(Player p, long now) {
         if (game == null || state == S_SETUP) return new String[] { "rejoin-none", "There is no game to come back to." };
         if (state != S_PLAYING || cfg.rejoinMs <= 0) return new String[] { "rejoin-none", "The game has not started playing yet. Try again in a moment." };
         if (p.away && now - p.awayAt > cfg.rejoinMs) giveUp(p);
-        if (p.gaveUp) return new String[] { "rejoin-late", GAVE_UP_TEXT };
+        if (p.gaveUp) return new String[] { "rejoin-late", p.host ? GAVE_UP_HOST_TEXT : GAVE_UP_TEXT };
         if (p.finished) return new String[] { "rejoin-none", "Your game is over." };
-        if (p.dropped && !p.away) return new String[] { "rejoin-none", "You were dropped from this game and cannot come back to it. You can watch." };
-        if (liveOthers(p) == 0)
-            return new String[] { "rejoin-alone", "Nobody else is playing at the moment, so your teams cannot come back. You can watch." };
+        if (p.dropped && !p.away) return new String[] { "rejoin-none", "You were dropped from this game and cannot come back to it." + (p.host ? "" : " You can watch.") };
+        // A held game (every player away) is still open for the first phone that comes back: see tryInjectBack.
         return null;
     }
 
@@ -1100,8 +1096,13 @@ public final class Relay {
             Player p = null;
             for (Player q : players.values()) if (MessageDigest.isEqual(tok, q.rejoinToken.getBytes(StandardCharsets.UTF_8))) p = q;
             String nm = GameConfig.clean(Json.str(hello, "name", ""), "Player");
-            if (p == null || p.host || Json.bool(hello, "host", false) || !p.name.equalsIgnoreCase(nm)) {
+            boolean asHost = Json.bool(hello, "host", false);
+            if (p == null || p.host != asHost || !p.name.equalsIgnoreCase(nm)) {
                 // The same words for a wrong token, another name and a seat that no longer exists: nothing to learn about other seats.
+                refuse(s, "This seat is not yours, or the game it belonged to is over.", "rejoin-unknown");
+                return;
+            }
+            if (asHost && (!s.getInetAddress().isLoopbackAddress() || !secretOk(Json.str(hello, "secret", "")))) {
                 refuse(s, "This seat is not yours, or the game it belonged to is over.", "rejoin-unknown");
                 return;
             }
@@ -1139,6 +1140,9 @@ public final class Relay {
         p.rejoinPending = true;
         p.rejoinAt = now;
         List<String> lines = new ArrayList<>(GameConfig.forRejoin(g.canonical, p.ownedIdx, p.name));
+        // Alone: nobody else plays, so this engine must answer for its own teams (uTeams.pas, LoneBack). Not sent when another phone plays:
+        // that engine answers, and a second answer from this one would put a second, untimely team-back into the log.
+        if (noOtherPlaying(p)) lines.add("eloneback 1");
         lines.add("e$spectate 1");
         List<Object> out = new ArrayList<>(lines);
         sendLobby(p, Json.obj("t", "start", "you", (long) p.id, "token", p.token, "nick", p.name,
@@ -1157,7 +1161,7 @@ public final class Relay {
         g.events.add(p.name + " did not come back within " + windowText() + "; their teams sit out");
         log(p.name + " did not come back within " + windowText());
         tellOthers(p, p.name + " did not come back; their teams sit out");
-        sendLobby(p, Json.obj("t", "gaveup", "reason", GAVE_UP_TEXT));
+        sendLobby(p, Json.obj("t", "gaveup", "reason", p.host ? GAVE_UP_HOST_TEXT : GAVE_UP_TEXT));
         tvOverlay(Json.obj("t", "gaveup", "name", p.name));
         broadcastStateLocked();
     }
@@ -1811,6 +1815,12 @@ public final class Relay {
         for (Runnable r : after) r.run();
     }
 
+    /** Lock held. True when no phone other than {@code except} is linked, not dropped, not finished and not catching up: nobody else can answer. */
+    private boolean noOtherPlaying(Player except) {
+        for (Player q : players.values()) if (q != except && q.linkOpen && !q.dropped && !q.finished && !q.catchUp) return false;
+        return true;
+    }
+
     /**
      * Lock held. Asks for the teams of rejoined phones to come back: the unsynced team-back message {@code G<team>} goes into the log, so every
      * engine reads it at the same place. The engine that has a team of its own in play answers with the synced {@code g}, which hands the team to
@@ -1827,9 +1837,17 @@ public final class Relay {
             q.catchUp = false;
             tvOverlay(Json.obj("t", "gaveup", "name", q.name));
         }
-        if (state != S_PLAYING || g.paused || now - g.midTurnAt > 700) return;
-        Player s = players.get(g.midTurnSender);
-        if (s == null || !s.linkOpen || s.dropped || s.finished || s.catchUp) return;
+        if (state != S_PLAYING || g.paused) return;
+        // Usually a live phone asks, right after its own turn message (a synced point). When no other phone is playing (the game was held
+        // while every player was away, and this is the first one back), nobody else has a team in play to answer: the phone that is
+        // coming back is asked itself, its engine answers for its own team (uTeams.pas, chTeamBack), and it need not wait for a turn.
+        Player s = null;
+        boolean lone = noOtherPlaying(null);
+        if (!lone) {
+            if (now - g.midTurnAt > 700) return;
+            s = players.get(g.midTurnSender);
+            if (s == null || !s.linkOpen || s.dropped || s.finished || s.catchUp) return;
+        }
         for (Player q : new ArrayList<>(players.values())) {
             if (q == s || !q.linkOpen || q.dropped || q.backPending.isEmpty()) continue;
             if (q.lastBackSent != 0 && now - q.lastBackSent < cfg.backResendMs) continue;
@@ -1938,7 +1956,7 @@ public final class Relay {
             g.rawByType.merge(type, 1L, Long::sum);
             if (type == 'q') { p.finished = true; return; }
             if (type == 'Q' || type == 'H') { p.quit = true; return; }
-            if (p.catchUp) {
+            if (p.catchUp && !ownTeamBack(p, msg, type)) {
                 // A phone that has rejoined is still replaying the game and its teams are not back: it has nothing to say to the game yet.
                 // Its map digest is checked against the game's (a different map would mean different data), the rest is ignored.
                 if (type == 'M') {
@@ -1994,6 +2012,15 @@ public final class Relay {
             }
         }
         for (Runnable r : after) r.run();
+    }
+
+    /**
+     * A synced team-back {@code g<team>} from a phone that is catching up, for one of its own teams it is still waiting for: the answer
+     * to the relay's ask (tryInjectBack) when it is the only engine in the game. Anything else from a catching-up phone is still ignored.
+     */
+    private static boolean ownTeamBack(Player p, byte[] msg, char type) {
+        if (type != 'g' || msg.length < 4) return false;
+        return p.backPending.contains(new String(msg, 1, msg.length - 3, StandardCharsets.UTF_8));
     }
 
     /**
@@ -2254,10 +2281,16 @@ public final class Relay {
             if (!q.finished) liveAllFinished = false;
         }
         boolean over = !anyDropped || (anyLive && liveAllFinished);
-        // Nobody is connected but a window is still open: the game is kept until the windows run out. A phone cannot actually rejoin meanwhile
-        // (rejoinRefusal says rejoin-alone while no other phone plays: no engine could hand its teams back), so this only gives a phone
-        // that is merely slow to notice its own loss a moment. When the last window has run out, or the phones that were left finished, the game ends.
-        if (!over && anyAway && state == S_PLAYING) return;
+        // Nobody is connected but a window is still open: the game is held (no traffic, nobody dropped) until the windows run out. A phone
+        // that comes back in the meantime resumes it: its engine is handed its teams by the relay's own team-back ask (tryInjectBack).
+        if (!over && anyAway && state == S_PLAYING) {
+            if (!anyLive && !game.heldLogged) {
+                game.heldLogged = true;
+                game.events.add("every player is away: the game is held until one of them comes back or the windows run out");
+                log("every player is away: the game is held for " + windowText());
+            }
+            return;
+        }
         endGame(over ? "every engine finished" : anyGaveUp || anyAway ? NOBODY_LEFT : "every engine is gone");
     }
 

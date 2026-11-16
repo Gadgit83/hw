@@ -183,7 +183,7 @@ public class NetHarness {
         if (scenario.equals("solo") || scenario.startsWith("viewer1") || scenario.equals("viewer3") || scenario.equals("viewerflap") || (watchScen && !scenario.equals("watchpause"))) { aTeams.add(team(d, rnd, "Alpha Three", 3, 4, aTeams)); bTeams.clear(); }
         java.util.Set<String> known = new java.util.HashSet<>(java.util.Arrays.asList("basic", "basic3", "dropout", "dropout3", "stall",
                 "slowstart", "solo", "viewer1", "viewer2", "viewer3", "viewerflap", "hostquit", "joinerquit", "hostquitchat", "joinerquitchat", "negcontrol", "injecte",
-                "rejoin", "rejoinlate", "hostleave", "hostend",
+                "rejoin", "rejoinlate", "hostleave", "hostend", "lonerejoin", "lonerejoinb",
                 "hostpause", "hostpausequit", "joinerpause", "pausecap", "watch1", "watchlate", "watchflap", "watchsend", "watchpause", "hidden"));
         if (!known.contains(scenario)) {
             System.out.println("[harness] unknown scenario '" + scenario + "'; known: " + new java.util.TreeSet<>(known));
@@ -285,8 +285,14 @@ public class NetHarness {
         // Once in front again, B plays on with the same scripted touch input as the other phones (from 2 s after V), so its turns move.
         if (scenario.equals("hidden")) joinerScript = "0:waitfile:" + root.resolve("hide.now") + ";0:ctl:H;0:ipc:enetpause 1;40000:ipc:enetpause 0;40000:ctl:V;"
                 + inputScript(400, 40000);
-        Phone pa = new Phone("Phone A", root.resolve("phoneA"), true, aTeams, hosttest, data, (hostLeave || scenario.equals("hostend")) ? quitScript : hostScript);
-        Phone pb = new Phone("Phone B", root.resolve("phoneB"), false, bTeams, hosttest, data, scenario.startsWith("joinerquit") ? quitScript : joinerScript);
+        // lonerejoin / lonerejoinb: the first phone to leave is the joiner (lonerejoin) or the host (lonerejoinb). The second one leaves a few
+        // turns later, so every phone is away and the game is held; the second one comes back alone a few seconds after that.
+        final boolean lone = scenario.startsWith("lonerejoin"), loneHostBack = scenario.equals("lonerejoin");
+        final String loneQ1 = "0:waitfile:" + root.resolve("lone1.now") + ";0:userquit", loneQ2 = "0:waitfile:" + root.resolve("lone2.now") + ";0:userquit";
+        Phone pa = new Phone("Phone A", root.resolve("phoneA"), true, aTeams, hosttest, data, lone ? (loneHostBack ? loneQ2 : loneQ1)
+                : (hostLeave || scenario.equals("hostend")) ? quitScript : hostScript);
+        Phone pb = new Phone("Phone B", root.resolve("phoneB"), false, bTeams, hosttest, data, lone ? (loneHostBack ? loneQ1 : loneQ2)
+                : scenario.startsWith("joinerquit") ? quitScript : joinerScript);
         if (pauseScenario) pb.extraEnv.put("HP_NET_PAUSE_JITTER_MS", "700");
         Phone pc = new Phone("Phone C", root.resolve("phoneC"), false, cTeams, hosttest, data, script);
         // Watching phones (scenarios watch*): every session is its own Phone (own directory, engine and lobby link). The watcher's script
@@ -367,6 +373,11 @@ public class NetHarness {
         // rejoin / rejoinlate: phone B dies, then comes back as Phone B2 (own directory, own engine) with the token the relay gave it
         Phone pb2 = null;
         int rjStage = 0, turnsAtKill = 0, turnsAtRejoin = 0;
+        // lonerejoin / lonerejoinb: stage 0 waits for the first leave, 1 for the second one, 2 for the return, 3 is back in the game
+        Phone back = null;
+        int loneStage = 0, turnsAtLone1 = 0, turnsAtLone2 = 0, turnsAtReturn = 0;
+        long loneSince = 0;
+        final long loneAwayMs = Long.parseLong(System.getenv().getOrDefault("NET_LONE_AWAY_S", "5")) * 1000;
         long rjKilledAt = 0;
         final long rejoinAfterMs = Long.parseLong(System.getenv().getOrDefault("NET_REJOIN_AFTER_S", "8")) * 1000
                 + (scenario.equals("rejoinlate") ? cfg.rejoinMs : 0);
@@ -374,7 +385,7 @@ public class NetHarness {
         int turnsAtQuit = -1;
         final boolean closeProbeScen = scenario.equals("hostleave") || scenario.equals("hostend");
         while (System.currentTimeMillis() - t0 < timeout * 1000) {
-            if (pa.gotSummary.await(1, TimeUnit.SECONDS)) break;
+            if ((lone && back != null ? back : pa).gotSummary.await(1, TimeUnit.SECONDS)) break;
             if (closeProbeScen && probe == null && relay.viewerPort() > 0 && relay.turns() >= 1) {
                 probe = CloseProbe.start(relay.viewerPort());
                 System.out.println("[harness] === a WebSocket probe (a TV) connects after " + relay.turns() + " turn checksums; it must see the right close code at the end ===");
@@ -409,6 +420,39 @@ public class NetHarness {
                             .identity(org.hedgewars.android.net.Compat.VALUE, digest).rejoin(pb.rejoinToken);
                     pb2.client.connect();
                     rjStage = 2;
+                }
+            }
+            if (lone) {
+                long nowMs = System.currentTimeMillis();
+                String leaver = loneHostBack ? "phone B" : "the host";
+                String comer = loneHostBack ? "the host" : "phone B";
+                if (loneStage == 0 && relay.turns() >= killAfterTurns) {
+                    flag(root, "lone1.now");
+                    loneStage = 1;
+                    turnsAtLone1 = relay.turns();
+                    loneSince = nowMs;
+                    System.out.println("[harness] === " + scenario + ": " + leaver + " leaves for good (Back > Leave the game) after " + turnsAtLone1 + " turn checksums ===");
+                } else if (loneStage == 1 && relay.turns() >= turnsAtLone1 + 2) {
+                    flag(root, "lone2.now");
+                    loneStage = 2;
+                    turnsAtLone2 = relay.turns();
+                    loneSince = nowMs;
+                    System.out.println("[harness] === " + comer + " leaves too after " + turnsAtLone2 + " turn checksums: every player is away, the game is held ===");
+                } else if (loneStage == 2 && nowMs - loneSince >= loneAwayMs) {
+                    turnsAtReturn = relay.turns();
+                    if (loneHostBack) {
+                        back = new Phone("Phone A2", root.resolve("phoneA2"), true, aTeams, hosttest, data, hostScript);
+                        back.client = new RelayClient("127.0.0.1", relay.port(), "Phone A", "harness", true, aTeams, back)
+                                .hostSecret(cfg.hostSecret).identity(org.hedgewars.android.net.Compat.VALUE, digest).rejoin(pa.rejoinToken);
+                    } else {
+                        back = new Phone("Phone B2", root.resolve("phoneB2"), false, bTeams, hosttest, data, joinerScript);
+                        back.client = new RelayClient("127.0.0.1", relay.port(), "Phone B", "harness", false, bTeams, back)
+                                .identity(org.hedgewars.android.net.Compat.VALUE, digest).rejoin(pb.rejoinToken);
+                    }
+                    back.client.connect();
+                    loneStage = 3;
+                    System.out.println("[harness] === " + scenario + ": " + comer + " comes back alone " + (nowMs - loneSince) / 1000 + " s after the last phone left, "
+                            + turnsAtReturn + " turn checksums so far ===");
                 }
             }
             if (wantViewer && relay.viewerPort() > 0) {
@@ -490,10 +534,11 @@ public class NetHarness {
                 else victim.proc.destroyForcibly();
             }
         }
-        boolean over = pa.gotSummary.getCount() == 0;
+        boolean over = (lone && back != null ? back : pa).gotSummary.getCount() == 0;
         List<Phone> everyone = new ArrayList<>(java.util.Arrays.asList(players));
         everyone.addAll(watchers);
         if (pb2 != null && pb2.proc != null) everyone.add(pb2);
+        if (back != null && back.proc != null) everyone.add(back);
         final Phone[] phones = everyone.toArray(new Phone[0]);
         final List<String> fails = new ArrayList<>();
         final Map<String, Integer> exits = new HashMap<>();
@@ -596,6 +641,64 @@ public class NetHarness {
         System.out.println("\nturn checksum mismatches between the phones: " + mismatches);
         byte[] vb = relay.viewerBacklog();
         System.out.println("viewer backlog framing available after the game: " + (vb == null ? "no (game cleared)" : vb.length + " bytes"));
+
+        if (lone) {
+            // The game must be held while every phone is away, and the phone that comes back must get its teams back and play on to a normal end.
+            List<String> lf = new ArrayList<>();
+            String seat = loneHostBack ? "Phone A" : "Phone B";
+            boolean held = false, rejoinedEv = false, askedEv = false, teamsBackEv = false, gaveUpEv = false;
+            for (String e : gs.events) {
+                if (e.startsWith("every player is away")) held = true;
+                if (e.startsWith(seat + " rejoined after")) rejoinedEv = true;
+                if (e.startsWith("injected G ")) askedEv = true;
+                if (e.startsWith(seat + "'s team ") && e.contains("is back")) teamsBackEv = true;
+                if (e.contains(seat + " did not come back")) gaveUpEv = true;
+            }
+            if (back == null) lf.add("the returning phone was never started");
+            else {
+                if (!back.refused.isEmpty()) lf.add("the return was refused: '" + back.refused + "' " + back.refusedReason);
+                if (!held) lf.add("the relay never noted that every player was away (the game should be held)");
+                if (!rejoinedEv) lf.add("the relay has no 'rejoined' event for " + seat);
+                if (!askedEv) lf.add("the relay did not ask for the returning phone's teams (no G injected)");
+                if (!teamsBackEv) lf.add(seat + "'s teams did not come back (no synced team-back from its engine)");
+                if (gaveUpEv) lf.add(seat + " was given up although it came back in time");
+                if (!over) lf.add("the game did not end within " + timeout + " s");
+                if (!gs.endReason.contains("every engine finished")) lf.add("the game did not go on to a normal end: " + gs.endReason);
+                if (gs.digests.size() <= turnsAtReturn) lf.add("no turn was played after the return (" + turnsAtReturn + " -> " + gs.digests.size() + ")");
+                List<String> rs = seqs.get(back.name);
+                if (rs == null || rs.size() < gs.digests.size()) lf.add("the returning engine saw fewer turns than the relay: " + (rs == null ? 0 : rs.size()) + " of " + gs.digests.size());
+            }
+            int desyncLines = 0;
+            for (int v : desyncs.values()) desyncLines += v;
+            boolean relayDesync = false;
+            for (String e : gs.events) if (e.toLowerCase().contains("desync")) relayDesync = true;
+            int mism = 0;
+            for (int i = 0; i < gs.digests.size(); i++) {
+                String first = null;
+                for (Phone p : phones) {
+                    List<String> sq = seqs.get(p.name);
+                    if (i >= sq.size()) continue;
+                    String cs = sq.get(i).split(" ")[1];
+                    if (first == null) first = cs; else if (!first.equals(cs)) { mism++; break; }
+                }
+            }
+            if (desyncLines > 0 || relayDesync) lf.add("desync reported (engine log lines " + desyncs + ")");
+            if (mism > 0) lf.add(mism + " turn checksum mismatches between the phones");
+            for (Phone p : phones) {
+                Integer ex = exits.get(p.name);
+                if (ex == null || ex != 0) lf.add(p.name + ": engine exit code " + ex + " (expected 0)");
+                // The seat that came back has its stream totals reset at the rejoin (the relay counts what the new engine got), so the
+                // first engine of that seat is not compared; the coming-back engine is, and it must equal the relay's count.
+                if (back != null && p == (loneHostBack ? pa : pb)) continue;
+                if (!Boolean.TRUE.equals(streamOk.get(p.name))) lf.add(p.name + ": the relay's stream and the launcher's received stream differ");
+            }
+            System.out.println("\nlone check: " + seat + " back alone: held " + held + ", rejoined " + rejoinedEv + ", teams asked " + askedEv + ", teams back " + teamsBackEv
+                    + "; turns " + turnsAtLone2 + " when every phone was away, " + turnsAtReturn + " when it came back, " + gs.digests.size() + " at the end");
+            System.out.println("checks: desync lines " + desyncLines + ", checksum mismatches " + mism + ", turns " + gs.digests.size() + ", engine exits " + exits);
+            System.out.println(lf.isEmpty() ? "RESULT: PASS (0 Desync detected, " + gs.digests.size() + " turn checksums identical on all " + phones.length + " phones)"
+                    : "RESULT: FAIL " + lf);
+            System.exit(lf.isEmpty() ? 0 : 1);
+        }
 
         // Verdict ---------------------------------------------------------------------------------
         boolean droppedScenario = scenario.startsWith("dropout") || scenario.equals("stall") || scenario.startsWith("joinerquit") || hostLeave || rejoinScen;

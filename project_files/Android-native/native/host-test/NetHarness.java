@@ -282,7 +282,9 @@ public class NetHarness {
         if (scenario.equals("joinerpause")) joinerScript = "0:waitfile:" + root.resolve("jp.now") + ";0:ctl:P;1500:ctl:P;1500:ctl:R";
         // hidden: phone B's app goes to the background (control frame H). SDL pauses the engine then, so it sends nothing for 40 s (longer
         // than the 20 s silence rule); the launcher keeps answering the relay's pings. Then the app is in front again (control frame V).
-        if (scenario.equals("hidden")) joinerScript = "0:waitfile:" + root.resolve("hide.now") + ";0:ctl:H;0:ipc:enetpause 1;40000:ipc:enetpause 0;0:ctl:V";
+        // Once in front again, B plays on with the same scripted touch input as the other phones (from 2 s after V), so its turns move.
+        if (scenario.equals("hidden")) joinerScript = "0:waitfile:" + root.resolve("hide.now") + ";0:ctl:H;0:ipc:enetpause 1;40000:ipc:enetpause 0;40000:ctl:V;"
+                + inputScript(400, 40000);
         Phone pa = new Phone("Phone A", root.resolve("phoneA"), true, aTeams, hosttest, data, (hostLeave || scenario.equals("hostend")) ? quitScript : hostScript);
         Phone pb = new Phone("Phone B", root.resolve("phoneB"), false, bTeams, hosttest, data, scenario.startsWith("joinerquit") ? quitScript : joinerScript);
         if (pauseScenario) pb.extraEnv.put("HP_NET_PAUSE_JITTER_MS", "700");
@@ -1096,8 +1098,13 @@ public class NetHarness {
 
     /** Taps on the touch HUD (fractions of the screen, as the host launcher injects them): walk right, jump, aim and fire, walk left. */
     static String inputScript(int seconds) {
+        return inputScript(seconds, 0);
+    }
+
+    /** The same touch input, every time moved later by {@code offsetMs} (a phone that starts playing after a pause). */
+    static String inputScript(int seconds, int offsetMs) {
         StringBuilder b = new StringBuilder();
-        for (int t = 2000; t < seconds * 1000; t += 6000) {
+        for (int t = 2000 + offsetMs; t < seconds * 1000; t += 6000) {
             b.append(t).append(":down:0:0.077:0.93;").append(t + 900).append(":up:0:0.077:0.93;");
             b.append(t + 1200).append(":down:1:0.965:0.865;").append(t + 1300).append(":up:1:0.965:0.865;");
             b.append(t + 2600).append(":down:2:0.123:0.93;").append(t + 3800).append(":up:2:0.123:0.93;");

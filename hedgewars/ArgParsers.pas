@@ -117,8 +117,8 @@ begin
     WriteLn(stdout, '  --showfps: Show frames per second');
     WriteLn(stdout, '');
     WriteLn(stdout, 'Computer players (both are off unless given):');
-    WriteLn(stdout, '  --quick-ai: computer turns start sooner: no pause before the first move, a shorter think time and fewer walking trials');
-    WriteLn(stdout, '  --smart-ai: computer players vary their weapons (less repeating the last shots) and walk on when the best shot is weak');
+    WriteLn(stdout, '  --quick-ai: computer turns start sooner: no artificial pause before the first move (the thinking time is unchanged)');
+    WriteLn(stdout, '  --smart-ai: computer players vary their weapons (less repeating the last shots), walk on when the best shot is weak, and walk towards an enemy when they stay put');
     WriteLn(stdout, '');
     WriteLn(stdout, 'Miscellaneous:');
     WriteLn(stdout, '  --nick <name>: Set user nickname');

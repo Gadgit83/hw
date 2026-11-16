@@ -34,18 +34,19 @@ uses uConsts, SDLh, uAIMisc, uAIAmmoTests, uAIActions,
     uVariables, uCommands, uUtils, uDebug, uAILandMarks,
     uGearsUtils, uAI2;
 
-// --quick-ai and --smart-ai (both off unless the launcher passes them; see ArgParsers.pas)
-const cQuickThinkTime = 3000;      // game ms: a think stops here (the desktop limit is cMaxAIThinkTime, 9 s)
-      cQuickWalkTicks = 6000;      // game ms: the walk of one plan (the desktop allows up to about 36 s)
-      cQuickWalkTrialStep = 8;     // quick: weapons are tested every 8 steps of a walk (4 otherwise)
-      cSmartLowShot = 10 * 1024;   // smart: a best shot worth under 10 points of damage is weak
+// --smart-ai (off unless the launcher passes it; see ArgParsers.pas). --quick-ai only drops the artificial pauses.
+const cSmartLowShot = 10 * 1024;   // smart: a best shot worth under 10 points of damage is weak
       cSmartRepeatPenalty = 2048;  // smart: 2 points of damage off for each recent shot with the same weapon
+      cSmartApproachPx = 40;       // smart: a walk must end this many pixels nearer the nearest enemy to count as an approach
+      cSmartStayTurns = 2;         // smart: after this many turns in the same place, the hog walks towards an enemy first
 
 var BestActions: TActions;
     CanUseAmmo: array [TAmmoType] of boolean;
     StopThinking: boolean;
     StartTicks: Longword;
-    aiThinkLimit: Longword; // how long one think may run: cMaxAIThinkTime, or the shorter quick limit
+    ApproachActions: TActions; // smart: the walk that got nearest an enemy so far (see Walk)
+    ApproachDist: LongInt;
+    ApproachFound: boolean;
     ThreadSem: PSDL_Sem;
 
 procedure FreeActionsList;
@@ -316,6 +317,24 @@ aiGravity:= cGravity;
 aiGravityf:= cGravityf;
 end;
 
+// --smart-ai: Manhattan distance in pixels from Me to the nearest living hedgehog of another team
+function NearestEnemyDist(Me: PGear): LongInt;
+var Gear: PGear;
+    d: LongInt;
+begin
+NearestEnemyDist:= High(LongInt);
+Gear:= GearsList;
+while Gear <> nil do
+    begin
+    if (Gear^.Kind = gtHedgehog) and (Gear^.Hedgehog^.Team <> Me^.Hedgehog^.Team) and (Gear^.Health > Gear^.Damage) then
+        begin
+        d:= abs(hwRound(Gear^.X) - hwRound(Me^.X)) + abs(hwRound(Gear^.Y) - hwRound(Me^.Y));
+        if d < NearestEnemyDist then NearestEnemyDist:= d
+        end;
+    Gear:= Gear^.NextGear
+    end
+end;
+
 procedure Walk(Me: PGear; var Actions: TActions);
 const FallPixForBranching = cHHRadius;
 var
@@ -327,11 +346,13 @@ var
     BotLevel: Byte;
     a: TAmmoType;
     isAfterAttack: boolean;
+    dEnemy: LongInt;
 begin
 Actions.ticks:= 0;
 oldticks:= 0; // avoid compiler hint
 walkTrialStep:= 4;
-if cQuickAI then walkTrialStep:= cQuickWalkTrialStep;
+ApproachFound:= false;
+if cSmartAI then ApproachDist:= NearestEnemyDist(Me);
 Stack.Count:= 0;
 
 clearAllMarks;
@@ -346,9 +367,6 @@ if isAfterAttack then
     maxticks:= Max(0, TurnTimeLeft - 500)
 else
     maxticks:= Max(0, TurnTimeLeft - 5000 - LongWord(4000 * BotLevel));
-
-if cQuickAI and (not isAfterAttack) and (maxticks > cQuickWalkTicks) then
-    maxticks:= cQuickWalkTicks;
 
 if not isAfterAttack then
     TestAmmos(Actions, Me, false);
@@ -469,6 +487,16 @@ if ((CurrentHedgehog^.MultiShootAttacks = 0) or ((Ammoz[Me^.Hedgehog^.CurAmmoTyp
 
              inc(steps);
              Actions.actions[Pred(Actions.Count)].Param:= hwRound(Me^.X);
+             if cSmartAI and (not isAfterAttack) then
+                 begin
+                 dEnemy:= NearestEnemyDist(Me);
+                 if (dEnemy < ApproachDist - cSmartApproachPx) and (RatePlace(Me) >= 0) then
+                     begin
+                     ApproachActions:= Actions;
+                     ApproachDist:= dEnemy;
+                     ApproachFound:= true
+                     end
+                 end;
              Rate:= RatePlace(Me);
              if Rate > BestRate then
                 begin
@@ -497,6 +525,15 @@ if ((CurrentHedgehog^.MultiShootAttacks = 0) or ((Ammoz[Me^.Hedgehog^.CurAmmoTyp
             exit
         end {while}
     end {if}
+
+// --smart-ai: no good attack from here, or this hog has stood still for cSmartStayTurns turns: walk to the place the
+// search reached nearest the enemy, when that is much nearer. The next think starts from there.
+if cSmartAI and ApproachFound and (not isAfterAttack) and (not StopThinking)
+    and ((BestActions.Score < cSmartLowShot) or (AIStays(Me^.Hedgehog) >= cSmartStayTurns)) then
+    begin
+    BestActions:= ApproachActions;
+    BestActions.isWalkingToABetterPlace:= true
+    end
 end;
 
 function Think(Me: PGear): LongInt; cdecl; export;
@@ -640,8 +677,6 @@ BestActions.isWalkingToABetterPlace:= false;
 
 StopThinking:= false;
 ThinkingHH:= Me;
-aiThinkLimit:= cMaxAIThinkTime;
-if cQuickAI then aiThinkLimit:= cQuickThinkTime;
 
 FillTargets;
 
@@ -692,7 +727,7 @@ with CurrentHedgehog^ do
 {$ENDIF}
                 ProcessAction(BestActions, Gear)
                 end
-        else if ((GameTicks - StartTicks) > aiThinkLimit)
+        else if ((GameTicks - StartTicks) > cMaxAIThinkTime)
             or (TurnTimeLeft <= cStopThinkTime) then
                 StopThinking:= true
 end;

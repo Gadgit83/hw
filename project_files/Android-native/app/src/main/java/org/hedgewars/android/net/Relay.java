@@ -1908,7 +1908,10 @@ public final class Relay {
                 } else if (msg.length == 2 && (msg[1] == 'P' || msg[1] == 'R')) {
                     pauseControl(g, p, msg[1] == 'P', System.currentTimeMillis());
                 } else if (msg.length == 2 && (msg[1] == 'H' || msg[1] == 'V')) {
-                    setHidden(g, p.name, p.hidden, msg[1] == 'H', System.currentTimeMillis(), (h, at) -> { p.hidden = h; p.hiddenAt = at; });
+                    long now = System.currentTimeMillis();
+                    boolean endsHiding = msg[1] == 'V' && p.hidden;
+                    setHidden(g, p.name, p.hidden, msg[1] == 'H', now, (h, at) -> { p.hidden = h; p.hiddenAt = at; });
+                    if (endsHiding) restartSilenceIfOwed(g, p, now);
                 }
                 return;
             }
@@ -2566,6 +2569,39 @@ public final class Relay {
                 dropSpectator(q, "its engine link was silent for " + (now - q.lastRx) / 1000 + " s");
     }
 
+    /** Lock held. The phones whose silence the rule watches: linked, not dropped, not finished and not catching up after a rejoin. */
+    private List<Player> silenceLive() {
+        List<Player> live = new ArrayList<>();
+        for (Player q : players.values()) if (q.linkOpen && !q.dropped && !q.finished && !q.catchUp) live.add(q);
+        return live;
+    }
+
+    /**
+     * Lock held. The phone the silence rule would blame if nothing arrives: after a turn end or map digest it is the phone that is not
+     * the last sender (with exactly two phones the other one; null when that cannot be told), otherwise the last sender.
+     */
+    private Player silenceCulprit(Game g, List<Player> live) {
+        if (g.lastType == 'N' || g.lastType == 'M') {
+            Player culprit = null;
+            for (Player q : live) if (q.id != g.lastSender) { if (culprit == null) culprit = q; else return null; }
+            return culprit;
+        }
+        return players.get(g.lastSender);
+    }
+
+    /**
+     * Lock held. A phone that is in front again (V) and is the one the silence rule would blame now starts its silence window from
+     * now. While it was hidden the clock ran against it (the other phones' messages do not stop it; the hidden check is made only when
+     * the clock has run out), so without this it could be dropped moments after it came back, with no time at all to speak again.
+     */
+    private void restartSilenceIfOwed(Game g, Player p, long now) {
+        if (state != S_PLAYING || !g.armed || g.paused) return;
+        if (silenceCulprit(g, silenceLive()) == p) {
+            g.lastKeptAt = now;
+            log(p.name + " is in front again: the silence window starts again");
+        }
+    }
+
     /**
      * Lock held. Nothing has arrived from any phone for the silence limit (the rule is armed: every live phone has
      * sent its map digest). The current team's owner sends an empty tick at least once a second, so someone is
@@ -2574,19 +2610,13 @@ public final class Relay {
      */
     private void silence(Game g, long now) {
         if (now - g.lastKeptAt > g.maxGapMs) g.maxGapMs = now - g.lastKeptAt;
-        List<Player> live = new ArrayList<>();
-        for (Player q : players.values()) if (q.linkOpen && !q.dropped && !q.finished && !q.catchUp) live.add(q);
-        Player culprit = null;
-        if (g.lastType == 'N' || g.lastType == 'M') {
-            for (Player q : live) if (q.id != g.lastSender) { if (culprit == null) culprit = q; else { culprit = null; break; } }
-            if (culprit == null && live.size() > 2) {
-                log("silence for " + (now - g.lastKeptAt) / 1000 + " s after a turn end or map digest with " + live.size()
-                        + " phones: cannot tell who is stalled");
-                g.lastKeptAt = now;
-                return;
-            }
-        } else {
-            culprit = players.get(g.lastSender);
+        List<Player> live = silenceLive();
+        Player culprit = silenceCulprit(g, live);
+        if (culprit == null && (g.lastType == 'N' || g.lastType == 'M') && live.size() > 2) {
+            log("silence for " + (now - g.lastKeptAt) / 1000 + " s after a turn end or map digest with " + live.size()
+                    + " phones: cannot tell who is stalled");
+            g.lastKeptAt = now;
+            return;
         }
         if (culprit != null && hiddenNow(culprit.hidden, culprit.hiddenAt, now)) {
             // Its app is in the background: its engine may be paused there. Not blamed (the limit is hiddenMaxMs, then it is dropped).

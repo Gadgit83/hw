@@ -2211,6 +2211,23 @@ public class RelayTests {
         check(!dropped(g.f, "PhoneA"), "  and A, which had said nothing for the same time, is not blamed");
         g.end();
 
+        // The race (issue 17): B is owed the next turn (A ends its turn) and hides at once. Its silence window runs out while it is hidden,
+        // the rule checks it, holds off, and then B comes back in front just before the next check. B must get the full silence limit
+        // from its V (1.5 s here), not the few tenths of a second the old clock had left.
+        Game g5 = new Game(1500, 500);
+        g5.eb.send("Mdigest-one");
+        g5.ea.send("Mdigest-one");
+        g5.ea.send(new byte[] { 'N', 0, 0, 0, 0, 0, 1 });
+        g5.eb.send(HIDE);
+        check(waitFor(() -> g5.f.logged("PhoneB is hidden: not dropped"), 4000), "B, owed the turn, hides; its silence window runs out while hidden: held off");
+        Thread.sleep(1200);
+        g5.eb.send(SHOW);
+        check(waitFor(() -> g5.f.logged("PhoneB is in front again"), 2000), "B comes back in front just before the next silence check");
+        Thread.sleep(1000);
+        check(!dropped(g5.f, "PhoneB"), "  and is not dropped in the 1 s after V: its silence window started at V");
+        check(waitFor(() -> dropped(g5.f, "PhoneB"), 6000), "  then, silent for the full limit, it is dropped as before");
+        g5.end();
+
         // A real close while hidden drops at once, into the rejoin window as today (the limit is not what drops it).
         Game g2 = new Game(60000, 1000);
         g2.eb.send(HIDE);

@@ -486,6 +486,21 @@ if isOnWidget(@jumpWidget, finger) then
     TouchTeamCommand('ljump');
     exit;
     end;
+if isOnWidget(@highJumpButton, finger) then
+    begin
+    TouchTeamCommand('hjump');
+    exit;
+    end;
+end;
+
+// --jump-forward-when-moving: a finger holds the left or the right arrow
+function sidewaysMoveHeld: boolean;
+var i: LongInt;
+begin
+sidewaysMoveHeld:= false;
+for i:= 0 to LongInt(pointerCount) - 1 do
+    if (fingers[i].pressedWidget = @arrowLeft) or (fingers[i].pressedWidget = @arrowRight) then
+        sidewaysMoveHeld:= true;
 end;
 
 procedure onTouchClick(finger: TTouch_Data);
@@ -518,7 +533,28 @@ if isOnCurrentHog(finger) or isOnWidget(@AMWidget, finger) then
 
 if isOnWidget(@jumpWidget, finger) then
     begin
-    WriteLnToConsole('[Touch] tapped jump');
+    // --two-jump-buttons: this button is the long forward jump. With one button, a walking hedgehog gets the long
+    // forward jump under --jump-forward-when-moving; standing still the button keeps its high jump.
+    if cTwoJumpButtons then
+        begin
+        WriteLnToConsole('[Touch] tapped jump (forward)');
+        TouchTeamCommand('ljump');
+        end
+    else if cJumpForwardWhenMoving and sidewaysMoveHeld then
+        begin
+        WriteLnToConsole('[Touch] tapped jump while moving');
+        TouchTeamCommand('ljump');
+        end
+    else
+        begin
+        WriteLnToConsole('[Touch] tapped jump');
+        TouchTeamCommand('hjump');
+        end;
+    exit;
+    end;
+if isOnWidget(@highJumpButton, finger) then
+    begin
+    WriteLnToConsole('[Touch] tapped high jump');
     TouchTeamCommand('hjump');
     exit;
     end;

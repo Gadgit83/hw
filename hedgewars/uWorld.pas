@@ -739,6 +739,48 @@ with utilityWidget2 do
 {$ENDIF}
 end;
 
+// --two-jump-buttons: the high jump button sits just left of the jump button, on the same row.
+// --swap-fire-jump: the Fire and the jump buttons exchange centres (mirrored); the high jump button then sits on the
+// outer side of the forward jump. The aim buttons and the weapon chest keep their places. Only widgets move here.
+procedure PlaceJumpPair;
+var gap, fx, fy, jx, jy: LongInt;
+begin
+{$IFDEF USE_TOUCH_INTERFACE}
+if cTwoJumpButtons then
+    begin
+    highJumpButton.show:= true;
+    highJumpButton.sprite:= sprJumpWidget;
+    highJumpButton.frame.w:= jumpWidget.frame.w;
+    highJumpButton.frame.h:= jumpWidget.frame.h;
+    gap:= jumpWidget.frame.w div 4;
+    highJumpButton.frame.x:= jumpWidget.frame.x - highJumpButton.frame.w - gap;
+    highJumpButton.frame.y:= jumpWidget.frame.y;
+    highJumpButton.active:= highJumpButton.frame;
+    end;
+
+if cSwapFireJump then
+    begin
+    // centres are swapped, so the two sprites may differ in size
+    fx:= firebutton.frame.x + firebutton.frame.w div 2;
+    fy:= firebutton.frame.y + firebutton.frame.h div 2;
+    jx:= jumpWidget.frame.x + jumpWidget.frame.w div 2;
+    jy:= jumpWidget.frame.y + jumpWidget.frame.h div 2;
+    firebutton.frame.x:= jx - firebutton.frame.w div 2;
+    firebutton.frame.y:= jy - firebutton.frame.h div 2;
+    jumpWidget.frame.x:= fx - jumpWidget.frame.w div 2;
+    jumpWidget.frame.y:= fy - jumpWidget.frame.h div 2;
+    firebutton.active:= firebutton.frame;
+    jumpWidget.active:= jumpWidget.frame;
+    if cTwoJumpButtons then
+        begin
+        highJumpButton.frame.x:= jumpWidget.frame.x + jumpWidget.frame.w + (jumpWidget.frame.w div 4);
+        highJumpButton.frame.y:= jumpWidget.frame.y;
+        highJumpButton.active:= highJumpButton.frame;
+        end;
+    end;
+{$ENDIF}
+end;
+
 procedure InitTouchInterface;
 var noShape: boolean;
 begin
@@ -752,6 +794,7 @@ if noShape then
     InitTouchLegacy
 else
     InitTouchPlaced;
+PlaceJumpPair;
 UISwapOut;
 {$ENDIF}
 end;
@@ -2229,6 +2272,7 @@ if (GameType <> gmtNet) or (not cNetWatch) then
 
         DrawScreenWidget(@fireButton);
         DrawScreenWidget(@jumpWidget);
+        if cTwoJumpButtons then DrawScreenWidget(@highJumpButton);
         end;
     DrawScreenWidget(@AMWidget);
     if not touchIdleTurn then

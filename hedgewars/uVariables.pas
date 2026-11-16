@@ -208,6 +208,9 @@ var
     cHideIdleControls: boolean; // touch: hide the controls that do nothing when it is not this phone's turn (the weapon chest stays)
     cDirectAmmoMenu : boolean; // touch: the weapon drawer follows the finger: the slot under it is highlighted, lifting on a weapon picks it (--direct-ammo-menu)
     cRefreshWeaponUI: boolean; // touch: at the start of a turn (and when the hedgehog changes) show the aim buttons of its weapon and mark that weapon in the drawer (--refresh-weapon-ui)
+    cTwoJumpButtons : boolean; // touch: Jump is the long forward jump (ljump) and a second button, High jump (hjump), sits left of it (--two-jump-buttons)
+    cJumpForwardWhenMoving: boolean; // touch: with one jump button, Jump does the long forward jump while a left or right move is held (--jump-forward-when-moving)
+    cSwapFireJump   : boolean; // touch: the Fire and the Jump buttons swap places, mirrored (--swap-fire-jump)
     cTurnCamPending : boolean; // a turn has started and the camera has not been moved for it yet
     cMenuTarget     : GLfloat; // wanted scale of the weapon menu (0: same as the HUD)
     cMenuScale      : GLfloat; // scale the weapon menu is drawn at right now
@@ -330,6 +333,7 @@ var
 
     arrowUp, arrowDown, arrowLeft, arrowRight : TOnScreenWidget;
     firebutton, jumpWidget, AMWidget          : TOnScreenWidget;
+    highJumpButton                            : TOnScreenWidget; // --two-jump-buttons: the high (vertical) jump, left of jumpWidget
     pauseButton, utilityWidget                : TOnScreenWidget;
     utilityWidget2                            : TOnScreenWidget;
 {$ENDIF}
@@ -2836,6 +2840,9 @@ begin
     cHideIdleControls:= false;
     cDirectAmmoMenu:= false;
     cRefreshWeaponUI:= false;
+    cTwoJumpButtons:= false;
+    cJumpForwardWhenMoving:= false;
+    cSwapFireJump:= false;
     cTurnCamPending:= false;
     cCornerTL:= 0;
     cCornerTR:= 0;

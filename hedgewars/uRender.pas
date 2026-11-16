@@ -1728,7 +1728,11 @@ with widget^ do
 
     if show or (fadeAnimStart <> 0) then
         begin
-        Tint($FF, $FF, $FF, alpha);
+        // the high jump shares the forward jump's picture: a darker shade tells the two apart (--two-jump-buttons)
+        if widget = @highJumpButton then
+            Tint($9A, $9A, $9A, alpha)
+        else
+            Tint($FF, $FF, $FF, alpha);
         DrawTexture(frame.x, frame.y, spritesData[sprite].Texture, buttonScale);
         untint;
         end;

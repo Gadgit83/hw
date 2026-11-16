@@ -99,6 +99,31 @@ if (CurrentTeam <> nil) and (CurrentHedgehog <> nil) then
     ParseTeamCommand(s);
 end;
 
+// --direct-ammo-menu: the weapon drawer follows the finger, with no drift. directAmmoPoint is the finger in weapon
+// drawer units; uWorld (ShowAmmoMenuBody) highlights the slot under it while directAmmoOn is set.
+procedure setDirectAmmoPoint(finger: TTouch_Data);
+begin
+directAmmoPoint.X:= round(finger.x / cMenuScale);
+directAmmoPoint.Y:= round(finger.y / cMenuScale);
+end;
+
+// A finger on the drawer owns it, unless another finger already does. Leaving the drawer clears the highlight but keeps
+// the owner, so that its lift is seen (and picks nothing).
+procedure directAmmoMove(finger: TTouch_Data; id: Int64);
+begin
+if isOnUIRect(AmmoRect, finger, cMenuScale) then
+    begin
+    if (directAmmoId = -1) or (directAmmoId = id) then
+        begin
+        directAmmoId:= id;
+        directAmmoOn:= true;
+        setDirectAmmoPoint(finger);
+        end;
+    end
+else if id = directAmmoId then
+    directAmmoOn:= false;
+end;
+
 procedure onTouchDown(x, y: Single; pointerId: Int64);
 var
     finger: PTouch_Data;
@@ -121,6 +146,17 @@ inc(buttonsDown);//inc buttonsDown, if we don't see a button down we'll dec it
 // a phone that only watches a network game has no controls: every touch pans or zooms the camera
 if ((not isPaused) or isOnWidget(@pauseButton, finger^)) and ((GameType <> gmtNet) or (not cNetWatch)) then
 begin
+// --direct-ammo-menu: the open weapon drawer takes the touch first; the slot under the finger is highlighted
+if cDirectAmmoMenu and bShowAmmoMenu and (not isPaused) and isOnUIRect(AmmoRect, finger^, cMenuScale) then
+    begin
+    dec(buttonsDown);   // the drawer is not a button
+    directAmmoId:= pointerId;
+    directAmmoOn:= true;
+    setDirectAmmoPoint(finger^);
+    moveCursor:= false;
+    exit;
+    end;
+
 if isOnWidget(@fireButton, finger^) then
     begin
     TouchTeamCommand('+attack');
@@ -265,6 +301,13 @@ finger:= updateFinger(xr, yr, dxr, dyr, pointerId);
 if finger = nil then
     exit;
 
+// --direct-ammo-menu: the open weapon drawer follows the finger directly, no drift
+if cDirectAmmoMenu and bShowAmmoMenu and (moveCursor or (pointerId = directAmmoId)) then
+    begin
+    directAmmoMove(finger^, pointerId);
+    exit;
+    end;
+
 if moveCursor then
     begin
         if bShowAmmoMenu then
@@ -323,6 +366,21 @@ yr:= round(y * cScreenHeight);
 finger:= updateFinger(xr, yr, 0, 0, pointerId);
 if finger = nil then
     exit;
+
+// --direct-ammo-menu: the finger that works the drawer picks the slot under it when lifted on the drawer, nothing else
+if cDirectAmmoMenu and bShowAmmoMenu and (pointerId = directAmmoId) then
+    begin
+    directAmmoOn:= false;
+    directAmmoId:= -1;
+    if isOnUIRect(AmmoRect, finger^, cMenuScale) then
+        begin
+        setDirectAmmoPoint(finger^);
+        // doPut marks the selection; the menu then picks the slot under directAmmoPoint (ShowAmmoMenuBody)
+        if not touchIdleTurn then TouchTeamCommand('put');
+        end;
+    deleteFinger(pointerId);
+    exit;
+    end;
 
 //Check for onTouchClick event
 if not(fingerHasMoved(finger^)) then

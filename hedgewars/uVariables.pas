@@ -206,6 +206,7 @@ var
     cTurnZoom       : LongInt; // touch: zoom in to this percent of the default zoom when a turn starts, 0: off
     cJumpInset      : LongInt; // touch: move the jump button this percent of its own width further in from the right edge, 0: off
     cHideIdleControls: boolean; // touch: hide the controls that do nothing when it is not this phone's turn (the weapon chest stays)
+    cDirectAmmoMenu : boolean; // touch: the weapon drawer follows the finger: the slot under it is highlighted, lifting on a weapon picks it (--direct-ammo-menu)
     cTurnCamPending : boolean; // a turn has started and the camera has not been moved for it yet
     cMenuTarget     : GLfloat; // wanted scale of the weapon menu (0: same as the HUD)
     cMenuScale      : GLfloat; // scale the weapon menu is drawn at right now
@@ -2646,6 +2647,9 @@ var
     WindBarWidth: LongInt;
     bShowAmmoMenu: boolean;
     bSelected: boolean;
+    directAmmoId: Int64; // touch, --direct-ammo-menu: the finger that works the weapon drawer (-1: none)
+    directAmmoOn: boolean; // touch, --direct-ammo-menu: that finger is on the drawer now
+    directAmmoPoint: TPoint; // touch, --direct-ammo-menu: the finger in weapon drawer units (the slot under it is hit-tested)
     bShowFinger: boolean;
     bShowSwitcher: boolean;
     Frames: Longword;
@@ -2829,6 +2833,7 @@ begin
     cTurnZoom:= 0;
     cJumpInset:= 0;
     cHideIdleControls:= false;
+    cDirectAmmoMenu:= false;
     cTurnCamPending:= false;
     cCornerTL:= 0;
     cCornerTR:= 0;

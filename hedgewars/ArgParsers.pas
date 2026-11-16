@@ -115,6 +115,7 @@ begin
     WriteLn(stdout, '  --turn-zoom [percent]: Zoom in to this percentage of the default zoom when a turn starts (touch builds, 110 to 200)');
     WriteLn(stdout, '  --jump-inset [percent]: Move the jump button this percentage of its own width further in from the right edge (touch builds, 0 keeps the old place)');
     WriteLn(stdout, '  --hide-idle-controls: Hide the playing controls (keep the weapon chest) when it is not this phone''s turn (touch builds)');
+    WriteLn(stdout, '  --direct-ammo-menu: The weapon drawer follows the finger: the slot under it is highlighted, lifting on a weapon picks it, nothing drifts (touch builds)');
     WriteLn(stdout, '  --screen-shape <tl,tr,bl,br,margin,ly0,ly1,ry0,ry1>: corner radii, extra edge margin and the vertical extent of the left and right cut-out, in pixels');
     WriteLn(stdout, '  --showfps: Show frames per second');
     WriteLn(stdout, '');
@@ -288,7 +289,7 @@ begin
 end;
 
 function parseParameter(cmd:string; arg:string; var paramIndex:LongInt): Boolean;
-const reallyAll: array[0..51] of shortstring = (
+const reallyAll: array[0..52] of shortstring = (
                 '--prefix', '--user-prefix', '--locale', '--fullscreen-width', '--fullscreen-height', '--width',
                 '--height', '--maximized', '--frame-interval', '--volume','--nomusic', '--nosound', '--nodampen',
                 '--fullscreen', '--showfps', '--altdmg', '--low-quality', '--raw-quality', '--stereo', '--nick',
@@ -297,7 +298,7 @@ const reallyAll: array[0..51] of shortstring = (
   {misc}        '--stats-only', '--gci', '--help','--protocol', '--no-teamtag','--no-hogtag','--no-healthtag','--translucent-tags','--lua-test','--no-holiday-silliness','--chat-size', '--prefix64', '--user-prefix64',
   {android}     '--ui-scale', '--inset-left', '--inset-top', '--inset-right', '--inset-bottom', '--menu-scale',
                 '--effects-volume', '--music-volume', '--no-voices', '--screen-shape', '--turn-centre', '--turn-zoom',
-                '--jump-inset', '--hide-idle-controls');
+                '--jump-inset', '--hide-idle-controls', '--direct-ammo-menu');
 var cmdIndex: byte;
 begin
     parseParameter:= false;
@@ -362,6 +363,7 @@ begin
         {--turn-zoom}           49: cTurnZoom          := getLongIntParameter(arg, paramIndex, parseParameter);
         {--jump-inset}          50: cJumpInset         := getLongIntParameter(arg, paramIndex, parseParameter);
         {--hide-idle-controls}  51: cHideIdleControls  := true;
+        {--direct-ammo-menu}    52: cDirectAmmoMenu    := true;
     else
         begin
         //Assume the first "non parameter" is the demo file, anything else is invalid

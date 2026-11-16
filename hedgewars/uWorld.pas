@@ -938,6 +938,8 @@ var Slot, Pos: LongInt;
     Ammo: PHHAmmo;
     c,i,g,t,STurns: LongInt;
     tipScale: GLfloat;
+    hit: TPoint; // the point the slot is hit-tested at
+    hitOn: boolean; // false: no slot is hit (the drawer finger is off the drawer)
 begin
 // the menu stays open when another team's turn runs out (--hide-idle-controls); it is view-only then
 if (TurnTimeLeft = 0) and (not touchIdleTurn) then bShowAmmoMenu:= false;
@@ -1079,6 +1081,18 @@ if ((AMState = AMHiding) or (AMState = AMShowingUp)) and ((AMAnimType and AMType
 
 Pos:= -1;
 Slot:= -1;
+// --direct-ammo-menu: the slot under the drawer finger, while it is on the drawer (or lifted on it, to pick it);
+// otherwise the drift cursor as before
+if cDirectAmmoMenu then
+    begin
+    hit:= directAmmoPoint;
+    hitOn:= directAmmoOn or bSelected;
+    end
+else
+    begin
+    hit:= CursorPoint;
+    hitOn:= true;
+    end;
 {$IFDEF USE_LANDSCAPE_AMMOMENU}
 c:= -1;
     for i:= 0 to cMaxSlotIndex do
@@ -1093,10 +1107,10 @@ c:= -1;
             for t:=0 to cMaxSlotAmmoIndex do
                 if (Ammo^[i, t].Count > 0) and (Ammo^[i, t].AmmoType <> amNothing) then
                     begin
-                    if (CursorPoint.Y <= (cScreenHeight - AmmoRect.y) - ( g    * (AMSlotSize+1))) and
-                       (CursorPoint.Y >  (cScreenHeight - AmmoRect.y) - ((g+1) * (AMSlotSize+1))) and
-                       (CursorPoint.X >  AmmoRect.x                   + ( c    * (AMSlotSize+1))) and
-                       (CursorPoint.X <= AmmoRect.x                   + ((c+1) * (AMSlotSize+1))) then
+                    if hitOn and (hit.Y <= (cScreenHeight - AmmoRect.y) - ( g    * (AMSlotSize+1))) and
+                       (hit.Y >  (cScreenHeight - AmmoRect.y) - ((g+1) * (AMSlotSize+1))) and
+                       (hit.X >  AmmoRect.x                   + ( c    * (AMSlotSize+1))) and
+                       (hit.X <= AmmoRect.x                   + ((c+1) * (AMSlotSize+1))) then
                         begin
                         Slot:= i;
                         Pos:= t;
@@ -1123,10 +1137,10 @@ c:= -1;
             for t:=0 to cMaxSlotAmmoIndex do
                 if (Ammo^[i, t].Count > 0) and (Ammo^[i, t].AmmoType <> amNothing) then
                     begin
-                    if (CursorPoint.Y <= (cScreenHeight - AmmoRect.y) - ( c    * (AMSlotSize+1))) and
-                       (CursorPoint.Y >  (cScreenHeight - AmmoRect.y) - ((c+1) * (AMSlotSize+1))) and
-                       (CursorPoint.X >  AmmoRect.x                   + ( g    * (AMSlotSize+1))) and
-                       (CursorPoint.X <= AmmoRect.x                   + ((g+1) * (AMSlotSize+1))) then
+                    if hitOn and (hit.Y <= (cScreenHeight - AmmoRect.y) - ( c    * (AMSlotSize+1))) and
+                       (hit.Y >  (cScreenHeight - AmmoRect.y) - ((c+1) * (AMSlotSize+1))) and
+                       (hit.X >  AmmoRect.x                   + ( g    * (AMSlotSize+1))) and
+                       (hit.X <= AmmoRect.x                   + ((g+1) * (AMSlotSize+1))) then
                         begin
                         Slot:= i;
                         Pos:= t;
@@ -2281,7 +2295,7 @@ else if isPaused then
     end;
 
 // Cursor
-if isCursorVisible and bShowAmmoMenu then
+if isCursorVisible and bShowAmmoMenu and (not cDirectAmmoMenu) then
     DrawSprite(sprArrow, CursorPoint.X, cScreenHeight - CursorPoint.Y, (RealTicks shr 6) mod 8);
 
 // FPS and demo replay time
@@ -2850,6 +2864,8 @@ begin
     WindBarWidth:= 0;
     bShowAmmoMenu:= false;
     bSelected:= false;
+    directAmmoId:= -1;
+    directAmmoOn:= false;
     bShowFinger:= false;
     Frames:= 0;
     WorldDx:= -512;

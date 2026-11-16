@@ -22,6 +22,8 @@ void hp_ipc_set_error_handler(void (*handler)(const char *message));
 int hp_ipc_user_quit(void);
 /* The host phone only: ends the game for everyone (control frame Z), then quits the engine. */
 int hp_ipc_end_for_everyone(void);
+/* A network game: the app is in the background (hidden != 0, control frame H) or in front again (0, control frame V). */
+int hp_ipc_hidden(int hidden);
 
 #ifdef HP_HOST_TEST
 /* Test hook for the host test: send one message to the engine, e.g. "Fteamname". Returns 0 when sent. */

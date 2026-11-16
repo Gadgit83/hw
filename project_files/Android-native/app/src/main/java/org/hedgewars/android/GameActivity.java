@@ -182,6 +182,37 @@ public class GameActivity extends SDLActivity {
     /** The launcher (hp_ipc.c): the host chose "End the game for everyone": control frame Z to the relay, then the engine quits. */
     private static native int nativeEndForEveryone();
 
+    /** The launcher (hp_ipc.c): the app went to the background (true, control frame H) or is in front again (false, V). */
+    private static native void nativeHidden(boolean hidden);
+
+    /**
+     * A network game whose app is hidden (home screen, another app, the screen off): SDL pauses the engine then, so it sends nothing,
+     * and the relay would take the phone for stalled. Control frame H tells the relay the phone is hidden (it leaves the silence rule
+     * alone for a while, see Relay.java); V tells it the game is in front again. The launcher's threads keep answering the relay's
+     * pings meanwhile. A local game has no relay, so nothing is sent.
+     */
+    private void reportHidden(boolean hidden) {
+        if (BackConfirm.role(getFilesDir()) == BackConfirm.LOCAL) return;
+        try {
+            nativeHidden(hidden);
+        } catch (Throwable e) {
+            // The native libraries did not load (the error is shown elsewhere): nothing to tell.
+            android.util.Log.w(Diag.TAG, "could not tell the relay the game is " + (hidden ? "hidden" : "in front") + ": " + e);
+        }
+    }
+
+    @Override
+    protected void onStop() {
+        super.onStop();
+        if (!quitting) reportHidden(true);
+    }
+
+    @Override
+    protected void onStart() {
+        super.onStart();
+        reportHidden(false);
+    }
+
     /**
      * The player confirmed. First the launcher is told (it sends the relay an explicit "user quit" and the engine its
      * own forcequit command), which works even with the chat open. As a fallback, the keys a player would press follow

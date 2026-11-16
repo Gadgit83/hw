@@ -42,7 +42,11 @@ import java.util.function.Supplier;
  *     {@link Config#rejoinMs}, the host's too), {@code \0Z} the host chose "End the game for everyone" (host's link only);
  *     {@code \0P} / {@code \0R} from the host's launcher: pause / resume the game, which the relay answers by sending
  *     {@code \0P} / {@code \0R} to every engine link. Accepted only from the host's link while the game runs; never forwarded
- *     as an engine message, never in the game log or the viewers' stream).</li>
+ *     as an engine message, never in the game log or the viewers' stream).
+ *     {@code \0H} / {@code \0V} from the phone's launcher: the app went to the background (GameActivity stopped) / is in front again.
+ *     Accepted only from that player's own engine link (a watching phone's too) while a game runs. While a phone is hidden the silence rule, the
+ *     link-ping check and the map wait leave it alone, for up to {@link Config#hiddenMaxMs}; its TCP link still counts (a real close drops it at
+ *     once, as before), and after the limit it is dropped as a lost connection. {@code \0V} ends that at once.</li>
  * <li>{@code {"t":"hello","role":"lobby","watch":true,...}}: a phone that only watches (no teams). It is a spectator, not a player: it
  *     has its own cap ({@link #MAX_SPECTATORS}), is never part of the map-digest, silence, dropout or desync rules, and cannot send
  *     game messages: whatever its engine link sends is ignored and logged (only {@code \0E}, {@code \0Q} and the finished message
@@ -141,6 +145,11 @@ public final class Relay {
         public long mapWaitMs = 180000;
         /** The longest the host's pause may last: after this the relay resumes everyone itself (the silence rule is off while paused). */
         public long pauseMaxMs = 600000;
+        /**
+         * How long a phone may be hidden (its control frame H, the app in the background) before the relay stops leaving it alone: while it is hidden
+         * the silence rule, the link-ping check and the map wait do not drop it. Then it is dropped as a lost connection. 0 turns hiding off.
+         */
+        public long hiddenMaxMs = 600000;
         /**
          * How long a player's seat stays "away" after the connection was lost or the player left (the Back dialog's "Leave the game"):
          * its teams are gone (turns skipped) and the same phone may rejoin inside this time. After it the seat is given up. 0 turns rejoining off.
@@ -527,6 +536,9 @@ public final class Relay {
         Socket engineSock;
         Outbox engineOut;
         boolean linked, linkOpen, dropped, finished, quit;
+        /** The launcher reported that the app is in the background (\0H) and not yet in front again (\0V): see {@link Config#hiddenMaxMs}. */
+        boolean hidden;
+        long hiddenAt;
         String fatal;
         long lastMsg;
         /** When anything last arrived on the engine link (a game message or a control frame, the pong included). */
@@ -592,6 +604,9 @@ public final class Relay {
         Socket engineSock;
         Outbox engineOut;
         boolean tokenUsed, linkOpen, finished, quit, sessionOpen;
+        /** As for a player: \0H from its launcher (the app is in the background), until \0V. */
+        boolean hidden;
+        long hiddenAt;
         long lastRx = System.currentTimeMillis();
         String fatal;
         long sessionStart;
@@ -1268,6 +1283,7 @@ public final class Relay {
         state = S_STARTING;
         for (Player q : players.values()) {
             q.linked = q.linkOpen = q.dropped = q.finished = q.quit = false;
+            q.hidden = false;
             q.fatal = null;
             q.lastMsg = 0;
             q.toMsgs = q.fromRaw = q.fromKept = q.fromDropped = 0;
@@ -1584,6 +1600,8 @@ public final class Relay {
                 } else if (msg.length > 1 && msg[1] == 'Q') {
                     sp.quit = true;
                     log("watcher " + sp.name + " stopped watching (control frame)");
+                } else if (msg.length == 2 && (msg[1] == 'H' || msg[1] == 'V')) {
+                    setHidden(g, sp.name, sp.hidden, msg[1] == 'H', System.currentTimeMillis(), (h, at) -> { sp.hidden = h; sp.hiddenAt = at; });
                 } else {
                     String what = msg.length == 2 && msg[1] == 'P' ? "pause" : msg.length == 2 && msg[1] == 'R' ? "resume" : "control frame " + Frames.typeName(msg.length > 1 ? msg[1] : 0);
                     noteIgnored(g, sp, (char) (0x100 + (msg.length > 1 ? msg[1] & 0xff : 0)),   // control frames count apart from game messages of the same letter
@@ -1596,6 +1614,32 @@ public final class Relay {
             if (type == 'Q' || type == 'H') { sp.quit = true; return; }  // its own engine's quit: it stops watching
             noteIgnored(g, sp, type, "sent a '" + Frames.typeName(type) + "' message (" + msg.length + " bytes): ignored, a watching phone cannot send game messages");
         }
+    }
+
+    /**
+     * Lock held. Control frame H (the app went to the background) or V (it is in front again) from a phone's own engine link. Only the
+     * flag and its start time change here; the rules that look at them are in {@link #hiddenNow}.
+     */
+    private void setHidden(Game g, String name, boolean was, boolean hide, long now, java.util.function.BiConsumer<Boolean, Long> set) {
+        if (was == hide) return;                 // already so: the start of the hiding is kept
+        set.accept(hide, now);
+        String text = hide ? name + " is hidden (its app is in the background): the silence rule is off for it for up to " + hiddenLimitText()
+                : name + " is in front again";
+        g.events.add(text);
+        log(text);
+    }
+
+    /** The hiding limit as the players read it: minutes, or seconds for a short test limit. */
+    private String hiddenLimitText() {
+        return cfg.hiddenMaxMs >= 60000 ? cfg.hiddenMaxMs / 60000 + " min" : cfg.hiddenMaxMs / 1000 + " s";
+    }
+
+    /**
+     * Lock held. True while a phone is hidden (control frame H, no V yet) and the limit has not run out: the silence rule, the link-ping
+     * check and the map wait leave it alone. A real close of its link is not affected: that drops it at once, as before.
+     */
+    private boolean hiddenNow(boolean hidden, long hiddenAt, long now) {
+        return hidden && cfg.hiddenMaxMs > 0 && now - hiddenAt <= cfg.hiddenMaxMs;
     }
 
     /** Lock held. Counts and logs a message from a watcher that is thrown away; the first of each type is also an event in the report. */
@@ -1615,6 +1659,7 @@ public final class Relay {
         synchronized (lock) {
             if (!sp.linkOpen) return;              // dropped or reset by the relay already
             sp.linkOpen = false;
+            sp.hidden = false;
             Game g = game;
             if (g != null) {
                 String why = sp.finished ? "it saw the game over" : sp.fatal != null ? "engine error: " + sp.fatal : sp.quit ? "it stopped watching" : "its engine link closed";
@@ -1660,6 +1705,7 @@ public final class Relay {
                 return;                  // overtaken by a newer link while the ok was being written
             } else {
                 me.linked = me.linkOpen = true;
+                me.hidden = false;
                 me.lastMsg = System.currentTimeMillis();
                 me.lastRx = me.lastMsg;
                 me.engineOut.attach(os);
@@ -1694,6 +1740,7 @@ public final class Relay {
         me.away = false;
         me.gaveUp = false;
         me.dropped = false;
+        me.hidden = false;
         me.linked = me.linkOpen = true;
         me.finished = me.quit = me.endAll = false;
         me.fatal = null;
@@ -1847,6 +1894,8 @@ public final class Relay {
                     }
                 } else if (msg.length == 2 && (msg[1] == 'P' || msg[1] == 'R')) {
                     pauseControl(g, p, msg[1] == 'P', System.currentTimeMillis());
+                } else if (msg.length == 2 && (msg[1] == 'H' || msg[1] == 'V')) {
+                    setHidden(g, p.name, p.hidden, msg[1] == 'H', System.currentTimeMillis(), (h, at) -> { p.hidden = h; p.hiddenAt = at; });
                 }
                 return;
             }
@@ -2096,6 +2145,7 @@ public final class Relay {
         Game g = game;
         if (g == null || p.dropped) return;
         p.dropped = true;
+        p.hidden = false;                        // its link is gone: nothing to be hidden for any more
         boolean away = rejoinable && state == S_PLAYING && cfg.rejoinMs > 0;
         String ev = p.name + " dropped (" + why + ")";
         g.events.add(ev);
@@ -2426,6 +2476,16 @@ public final class Relay {
                         // The window is judged by when the rejoin request arrived: an accepted rejoin keeps its seat for the engine link wait.
                         if (q.away && now - q.awayAt > cfg.rejoinMs && !(q.rejoinPending && now - q.rejoinAt <= cfg.linkWaitMs)) giveUp(q);
                     }
+                    // A phone hidden for longer than the limit is no longer left alone: it is dropped as a lost connection (its window applies).
+                    if (cfg.hiddenMaxMs > 0) {
+                        for (Player q : new ArrayList<>(players.values())) {
+                            if (!q.hidden || q.dropped || q.finished || !q.linkOpen || now - q.hiddenAt <= cfg.hiddenMaxMs) continue;
+                            String why = "its app was in the background for more than " + hiddenLimitText();
+                            dropPlayer(q, why, "You were dropped from the game: " + why + "." + rejoinHint(), true, false);
+                            checkEnd();
+                            if (g != game) return lastPing;
+                        }
+                    }
                     checkEnd();
                     if (g != game) return lastPing;
                     List<Runnable> afterAsk = new ArrayList<>();
@@ -2450,7 +2510,7 @@ public final class Relay {
                     // generating the map must not be blamed; one that never finishes is dropped after a long wait.
                     if (now - g.gateOpenAt > cfg.mapWaitMs) {
                         for (Player q : new ArrayList<>(players.values()))
-                            if (!q.dropped && !q.finished && !g.mSeen.contains(q.id))
+                            if (!q.dropped && !q.finished && !g.mSeen.contains(q.id) && !hiddenNow(q.hidden, q.hiddenAt, now))
                                 dropPlayer(q, "no map digest in " + cfg.mapWaitMs / 1000 + " s: it never finished generating the map");
                         updateArmed(g, now);
                         checkEnd();
@@ -2481,7 +2541,7 @@ public final class Relay {
                 if (q.linkOpen && q.engineOut != null) q.engineOut.offer(k);
         }
         for (Player q : new ArrayList<>(players.values())) {
-            if (q.linkOpen && !q.dropped && !q.finished && now - q.lastRx > cfg.linkDeadMs) {
+            if (q.linkOpen && !q.dropped && !q.finished && now - q.lastRx > cfg.linkDeadMs && !hiddenNow(q.hidden, q.hiddenAt, now)) {
                 dropPlayer(q, "its engine link was silent for " + (now - q.lastRx) / 1000 + " s and did not answer the link pings (half-open link)",
                         "You were dropped from the game: your phone did not answer for " + (now - q.lastRx) / 1000 + " s." + rejoinHint(), true, false);
                 checkEnd();
@@ -2489,7 +2549,8 @@ public final class Relay {
             }
         }
         for (Spectator q : new ArrayList<>(spectators.values()))
-            if (q.linkOpen && now - q.lastRx > cfg.linkDeadMs) dropSpectator(q, "its engine link was silent for " + (now - q.lastRx) / 1000 + " s");
+            if (q.linkOpen && now - q.lastRx > cfg.linkDeadMs && !hiddenNow(q.hidden, q.hiddenAt, now))
+                dropSpectator(q, "its engine link was silent for " + (now - q.lastRx) / 1000 + " s");
     }
 
     /**
@@ -2513,6 +2574,12 @@ public final class Relay {
             }
         } else {
             culprit = players.get(g.lastSender);
+        }
+        if (culprit != null && hiddenNow(culprit.hidden, culprit.hiddenAt, now)) {
+            // Its app is in the background: its engine may be paused there. Not blamed (the limit is hiddenMaxMs, then it is dropped).
+            log("silence for " + (now - g.lastKeptAt) / 1000 + " s, but " + culprit.name + " is hidden: not dropped");
+            g.lastKeptAt = now;
+            return;
         }
         g.lastKeptAt = now;
         if (culprit != null && !culprit.dropped) {

@@ -128,6 +128,14 @@ JNIEXPORT jint JNICALL Java_org_hedgewars_android_GameActivity_nativeEndForEvery
     return hp_ipc_end_for_everyone();
 }
 
+/* GameActivity.nativeHidden(hidden): the game went to the background (onStop) or is in front again (onStart) in a network game. */
+JNIEXPORT void JNICALL Java_org_hedgewars_android_GameActivity_nativeHidden(JNIEnv *env, jclass cls, jboolean hidden)
+{
+    (void)env;
+    (void)cls;
+    hp_ipc_hidden(hidden ? 1 : 0);
+}
+
 /* Asks GameActivity.engineDisplayInfo() (see there) for the HUD scale, the weapon menu scale and the
  * safe area insets. On any failure the defaults stay (scale 100 %, no insets, which is the desktop layout). */
 static void query_display(int out[15])

@@ -184,7 +184,7 @@ public class NetHarness {
         java.util.Set<String> known = new java.util.HashSet<>(java.util.Arrays.asList("basic", "basic3", "dropout", "dropout3", "stall",
                 "slowstart", "solo", "viewer1", "viewer2", "viewer3", "viewerflap", "hostquit", "joinerquit", "hostquitchat", "joinerquitchat", "negcontrol", "injecte",
                 "rejoin", "rejoinlate", "hostleave", "hostend",
-                "hostpause", "hostpausequit", "joinerpause", "pausecap", "watch1", "watchlate", "watchflap", "watchsend", "watchpause"));
+                "hostpause", "hostpausequit", "joinerpause", "pausecap", "watch1", "watchlate", "watchflap", "watchsend", "watchpause", "hidden"));
         if (!known.contains(scenario)) {
             System.out.println("[harness] unknown scenario '" + scenario + "'; known: " + new java.util.TreeSet<>(known));
             System.exit(2);
@@ -280,6 +280,9 @@ public class NetHarness {
         String joinerScript = script;
         if (pauseScenario) joinerScript = inputScript(400);
         if (scenario.equals("joinerpause")) joinerScript = "0:waitfile:" + root.resolve("jp.now") + ";0:ctl:P;1500:ctl:P;1500:ctl:R";
+        // hidden: phone B's app goes to the background (control frame H). SDL pauses the engine then, so it sends nothing for 40 s (longer
+        // than the 20 s silence rule); the launcher keeps answering the relay's pings. Then the app is in front again (control frame V).
+        if (scenario.equals("hidden")) joinerScript = "0:waitfile:" + root.resolve("hide.now") + ";0:ctl:H;0:ipc:enetpause 1;40000:ipc:enetpause 0;0:ctl:V";
         Phone pa = new Phone("Phone A", root.resolve("phoneA"), true, aTeams, hosttest, data, (hostLeave || scenario.equals("hostend")) ? quitScript : hostScript);
         Phone pb = new Phone("Phone B", root.resolve("phoneB"), false, bTeams, hosttest, data, scenario.startsWith("joinerquit") ? quitScript : joinerScript);
         if (pauseScenario) pb.extraEnv.put("HP_NET_PAUSE_JITTER_MS", "700");
@@ -468,6 +471,10 @@ public class NetHarness {
                 System.out.println("[harness] === " + scenario + ": " + (hostLeave || hostEnd ? "the host" : "phone B") + " confirms '" + (hostEnd ? "end the game for everyone" : "leave the game") + "' (" + (chatQuit ? "chat open with typed text, then the launcher quit" : "Escape then Y") + ") after " + relay.turns() + " turn checksums ===");
                 Files.write(quitFlag, new byte[] { 1 });
                 turnsAtQuit = relay.turns();
+            }
+            if (scenario.equals("hidden") && !Files.exists(root.resolve("hide.now")) && relay.turns() >= killAfterTurns) {
+                System.out.println("[harness] === hidden: phone B's app goes to the background after " + relay.turns() + " turn checksums (its engine stops for 40 s) ===");
+                Files.write(root.resolve("hide.now"), new byte[] { 1 });
             }
             if (!killed && (scenario.startsWith("dropout") || scenario.equals("stall")) && relay.turns() >= killAfterTurns) {
                 killed = true;
@@ -690,6 +697,18 @@ public class NetHarness {
             if (pb.notices.stream().anyMatch(x -> x.contains("The host ended the game"))) fails.add("phone B was told the host ended the game: " + pb.notices);
         }
         if (rejoinScen) rejoinChecks(scenario, gs, pa, pb, pb2, bTeams.size(), turnsAtKill, turnsAtRejoin, badAttempts, cfg.rejoinMs, fails);
+        if (scenario.equals("hidden")) {
+            // The relay must have taken B's H and V, and the silence rule must have been held off for B while it was hidden (B stopped for 40 s).
+            boolean hid = false, front = false, held = false;
+            for (String l : relayLog) {
+                if (l.contains("Phone B is hidden (")) hid = true;
+                if (l.contains("Phone B is in front again")) front = true;
+                if (l.contains("but Phone B is hidden: not dropped")) held = true;
+            }
+            System.out.println("hidden check: control frames H taken " + hid + ", V taken " + front + ", silence rule held off for B " + held);
+            if (!hid || !front) fails.add("the relay did not take Phone B's hidden (H) and in-front (V) control frames: " + hid + " / " + front);
+            if (!held) fails.add("the silence rule was never held off for the hidden Phone B: its engine stopped while hidden, the rule should have applied");
+        }
         if (pauseScenario || scenario.equals("joinerpause")) pauseChecks(scenario, gs, relayLog, phones, ps, fails);
         if (watchScen) watchChecks(scenario, gs, relayLog, pa, watchers, fails);
         System.out.println("\nchecks: desync lines " + desyncLines + ", checksum mismatches " + mismatches + ", turns " + gs.digests.size() + ", engine exits " + exits);

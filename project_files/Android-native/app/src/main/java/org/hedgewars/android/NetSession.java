@@ -301,6 +301,7 @@ final class NetSession {
             inGame = false;
             client = null;
             releaseLocks();
+            JoinService.stop(HpApp.appContext);
             ping();
         }
     };
@@ -444,6 +445,7 @@ final class NetSession {
             target = host + ":" + port;
         }
         acquireLocks(c);
+        if (!isHost) JoinService.start(c.getApplicationContext(), host);   // keeps this app's lobby link alive while the app is hidden
         if (isHost) startTicker();
         ping();
     }
@@ -489,6 +491,7 @@ final class NetSession {
         if (p != null) p.close();
         if (rc != null) rc.close();
         releaseLocks();
+        JoinService.stop(HpApp.appContext);
     }
 
     /** Writes game.ipc and net.cfg for the game process. */

@@ -76,6 +76,13 @@
             android:foregroundServiceType="connectedDevice"
             android:stopWithTask="true" />
 
+        <!-- Keeps this phone's lobby link alive while it has joined a network game and the app is hidden (main process). -->
+        <service
+            android:name=".JoinService"
+            android:exported="false"
+            android:foregroundServiceType="connectedDevice"
+            android:stopWithTask="true" />
+
         <!-- The engine surface (SDL). -->
         <activity
             android:name=".GameActivity"

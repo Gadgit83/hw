@@ -75,6 +75,8 @@ public class RelayTests {
         static long netLossMs = 4000;
         /** How long a seat stays away (the app uses two minutes), how soon team-back is asked for again, and whether chat lines are written into the game. */
         static long rejoinMs = 120000, backResendMs = 2500;
+        /** How long a hidden phone (control frame H) is left alone by the rules; the app uses ten minutes. */
+        static long hiddenMaxMs = 600000;
         final java.util.concurrent.atomic.AtomicBoolean netUp = new java.util.concurrent.atomic.AtomicBoolean(true);
 
         Fix(long silenceMs, long graceMs) throws Exception {
@@ -95,6 +97,7 @@ public class RelayTests {
             cfg.graceMs = graceMs;
             cfg.rejoinMs = rejoinMs;
             cfg.backResendMs = backResendMs;
+            cfg.hiddenMaxMs = hiddenMaxMs;
             cfg.listener = new Relay.Listener() {
                 public void log(String line) { log.add(line); }
                 public void changed() { }
@@ -2135,6 +2138,72 @@ public class RelayTests {
         }
     }
 
+    /** The control frames of a hidden phone: \0H (its app went to the background), \0V (in front again). */
+    static final byte[] HIDE = { 0, 'H' }, SHOW = { 0, 'V' };
+
+    static void testHidden() throws Exception {
+        System.out.println("hidden: a phone whose app is in the background (control frame H) is not dropped by the rules that wait for it (phase 2)");
+        // The silence rule: B is the last to talk (its ticks), then it hides and says nothing for 4 s (silence limit 1.5 s + grace).
+        Game g = new Game(1500, 500);
+        g.ea.send("Mdigest-one");
+        g.eb.send("Mdigest-one");
+        for (int i = 0; i < 3; i++) { g.eb.send(new byte[] { '#', 0, 1 }); Thread.sleep(200); }
+        g.eb.send(HIDE);
+        check(waitFor(() -> g.f.logged("PhoneB is hidden"), 2000), "B's H is taken: the relay logs that B is hidden");
+        Thread.sleep(4000);
+        check(!dropped(g.f, "PhoneA") && !dropped(g.f, "PhoneB"), "B silent for 4 s while hidden (limit 1.5 s): nobody dropped");
+        check(g.f.logged("PhoneB is hidden: not dropped"), "  the log says the silence rule was held off for it");
+        g.eb.send(SHOW);
+        check(waitFor(() -> g.f.logged("PhoneB is in front again"), 2000), "B's V is taken: the relay logs that B is in front again");
+        check(waitFor(() -> dropped(g.f, "PhoneB"), 6000), "after V the silence rule applies again: B, silent, is dropped");
+        check(!dropped(g.f, "PhoneA"), "  and A, which had said nothing for the same time, is not blamed");
+        g.end();
+
+        // A real close while hidden drops at once, into the rejoin window as today (the limit is not what drops it).
+        Game g2 = new Game(60000, 1000);
+        g2.eb.send(HIDE);
+        check(waitFor(() -> g2.f.logged("PhoneB is hidden"), 2000), "B hides (silence limit 60 s: only a close can drop it here)");
+        g2.eb.close();
+        check(waitFor(() -> dropped(g2.f, "PhoneB"), 2000), "B's link closed while hidden: dropped at once");
+        check(Json.bool(me(g2.f, "PhoneB"), "away", false) && !Json.bool(me(g2.f, "PhoneB"), "gaveUp", false),
+                "  and kept in the rejoin window (away, not given up)");
+        check(!dropped(g2.f, "PhoneA"), "  phone A is not dropped");
+        g2.end();
+
+        // Hidden longer than the limit (2 s here, ten minutes in the app): the phone is dropped as a lost connection.
+        Fix.hiddenMaxMs = 2000;
+        try {
+            Game g3 = new Game(60000, 1000);
+            g3.eb.send(HIDE);
+            check(waitFor(() -> g3.f.logged("PhoneB is hidden"), 2000), "B hides with a 2 s limit");
+            check(waitFor(() -> dropped(g3.f, "PhoneB"), 4000), "hidden for longer than the limit: B is dropped");
+            check(g3.f.logged("in the background for more than"), "  the log says why (" + g3.f.log.stream().filter(l -> l.contains("background")).findFirst().orElse("-") + ")");
+            check(Json.bool(me(g3.f, "PhoneB"), "away", false), "  and its seat stays in the rejoin window, as after a lost connection");
+            check(!dropped(g3.f, "PhoneA"), "  phone A is not dropped");
+            g3.end();
+        } finally {
+            Fix.hiddenMaxMs = 600000;
+        }
+
+        // The link-ping check: a hidden phone that stops answering its pings is not dropped; once it is in front again it is.
+        Fix.linkDeadMs = 1000;
+        Fix.linkPingMs = 200;
+        try {
+            Game g4 = new Game(60000, 1000);
+            g4.eb.send(HIDE);
+            check(waitFor(() -> g4.f.logged("PhoneB is hidden"), 2000), "B hides (link limit 1 s)");
+            g4.eb.autoPong = false;
+            Thread.sleep(3000);
+            check(!dropped(g4.f, "PhoneB"), "hidden and answering no pings for 3 s: not dropped");
+            g4.eb.send(SHOW);
+            check(waitFor(() -> dropped(g4.f, "PhoneB"), 4000), "in front again and still silent: the link check drops it");
+            g4.end();
+        } finally {
+            Fix.linkDeadMs = 0;
+            Fix.linkPingMs = 5000;
+        }
+    }
+
     static void testHostNetworkLoss() throws Exception {
         System.out.println("host network loss: the game ends with a clear reason (phase 5)");
         Fix.netProbe = true;
@@ -2248,6 +2317,7 @@ public class RelayTests {
         testResolveQueue();
         testLinkLiveness();
         testHostNetworkLoss();
+        testHidden();
         System.out.println("\nrelay tests: " + checks + " checks, " + failures + " failed");
         System.out.println(failures == 0 ? "RESULT: PASS (the relay survived all malformed input)" : "RESULT: FAIL");
         System.exit(failures == 0 ? 0 : 1);

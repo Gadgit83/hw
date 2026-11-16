@@ -762,6 +762,34 @@ int hp_ipc_end_for_everyone(void)
     return user_quit('Z', "end for everyone");
 }
 
+/* The app went to the background ('H', GameActivity.onStop) or is in front again ('V', onStart) during a network game: control frame
+ * H or V to the relay, which then leaves this phone's silence rule alone while it is hidden (Relay.java, hiddenMaxMs). It goes
+ * through the send queue, behind the game messages and in order, so it never waits: it is called on the app's UI thread. */
+int hp_ipc_hidden(int hidden)
+{
+    unsigned char kind = hidden ? 'H' : 'V';
+    if (!g_net_up || g_net_lost) return -1;
+    struct qnode *n = malloc(sizeof *n);
+    if (!n) return -1;
+    n->next = NULL;
+    n->len = 2;
+    n->data[0] = 0;
+    n->data[1] = kind;
+    pthread_mutex_lock(&g_q_lock);
+    if (g_q_count > 200000) {
+        pthread_mutex_unlock(&g_q_lock);
+        free(n);
+        return -1;
+    }
+    if (g_q_tail) g_q_tail->next = n; else g_q_head = n;
+    g_q_tail = n;
+    g_q_count++;
+    pthread_cond_signal(&g_q_cond);
+    pthread_mutex_unlock(&g_q_lock);
+    diag("CONTROL %c (the app is %s)", kind, hidden ? "in the background" : "in front");
+    return 0;
+}
+
 #ifdef HP_HOST_TEST
 /* Test hook (host test script action "ctl:<letter>"): sends a control frame to the relay as a (buggy or hostile) launcher would,
  * e.g. "ctl:P" from a joining phone, which the relay must ignore. */

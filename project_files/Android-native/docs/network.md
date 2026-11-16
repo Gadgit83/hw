@@ -49,6 +49,43 @@ Update, 0.3.0-tv14: a phone that loses its connection in a running network game,
 
 Checked in `RelayTests.testRejoin` and `testRejoinWindow` (`scripts/net-test.sh malformed`) and in the net-test scenarios `rejoin`, `rejoinlate`, `hostleave`, `hostend`, `hostquit`.
 
+## Control frames (engine link, phone to relay)
+
+A frame whose first byte is 0 is a control frame on the engine link. The launcher sends them; the relay reads them only from the sending phone's own engine link. Anything else the launcher does not know is ignored.
+
+| Frame | From | Meaning |
+|-------|------|---------|
+| `\0K` | the relay pings, the launcher answers | liveness: the link is up (half-open check) |
+| `\0E<text>` | any phone | engine error |
+| `\0Q` | any phone | the player confirmed leaving (seat kept for the rejoin window) |
+| `\0Z` | host only | "End the game for everyone" |
+| `\0P` / `\0R` | host only | pause / resume (the relay answers to every engine) |
+| `\0H` | any joined phone, a watching phone too | the app went to the background (the game activity stopped): see below |
+| `\0V` | the same | the app is in front again |
+| `\0X<text>` | relay to phone | the relay ends the game (the reason follows) |
+
+A watching phone's launcher sends its own `\0Q`, `\0H` and `\0V` and its game over; the relay ignores its other control frames. A watching phone's `\0H` and `\0V` only affect its own liveness check (see below).
+
+## Hidden phones (0.3.0-tv17, issue 17): design
+
+**The problem.** A joining phone's lobby link lives in the app process. Android 14 and later freezes a cached background app within seconds, so a phone whose app was merely hidden (home screen, another app, screen off) stopped answering the lobby pings and the engine's pings. The relay then dropped it ("lost connection; waiting up to 2 minutes"). Only a real close should count as leaving.
+
+**What the app does.**
+- A joined phone (player or watcher) runs `JoinService`, a foreground service of type connectedDevice (a notification "In a network game on <host>"), from the join until it leaves the session (`NetSession.leave`, or the lobby link closing). The process is not frozen while the service runs, so the lobby link keeps answering. The wake lock and Wi-Fi lock are taken by `NetSession` for the same time. A finished game does not stop the service: the phone goes back to the lobby and its link must stay alive there.
+- When the game activity (`GameActivity`, the `:game` process) stops in a network game, the launcher sends `\0H` to the relay; when it starts again, `\0V`. The launcher queues these behind the game messages (it never waits, the call is on the UI thread). A local game sends nothing.
+- SDL pauses the engine thread when the activity stops, so the engine sends nothing while hidden. The launcher's send and receive threads (`hp_ipc.c`) are separate pthreads and keep answering the relay's `\0K` pings.
+
+**What the relay does** (`Relay.java`, `Config.hiddenMaxMs`, 600000 ms = ten minutes in the app).
+- While a player is hidden (`\0H` taken, no `\0V` yet, and the limit has not run out) the silence rule does not blame it, the link-ping check does not drop it, and the map-digest wait does not drop it. Its turns still wait or are skipped by the normal rules: nothing else changes.
+- A real close of its engine link still drops it at once, into the rejoin window as before.
+- Hidden for longer than `hiddenMaxMs`: the phone is dropped as a lost connection (its rejoin window applies: "its app was in the background for more than 10 min").
+- `\0V` ends the exemption at once; a phone whose link drops, or who starts a new game, is not hidden any more.
+- In the lobby nothing changes: the relay's lobby keepalive (ping every 5 s, removal after 25 s of silence) is answered by the app process, which the service keeps running.
+
+**Known limits.** The freeze of the `:game` process is not stopped by `JoinService` (it runs in the main process). The relay's tolerance is what covers a frozen game process, while its TCP link stays open (the kernel keeps accepting data for it). Whether Android keeps that socket open for ten minutes on a real phone is not verified here: it needs the owner's test. Samsung's background limits may also stop the service; the notification says what is running.
+
+**Tests.** `RelayTests.testHidden` (`scripts/net-test.sh malformed`): the silence rule is held off while hidden and applies again after `\0V`; a real close while hidden drops at once, into the rejoin window; hidden longer than the limit drops; the link-ping check is held off while hidden. The net-test scenario `hidden`: phone B hides after a few turns, its engine sends nothing for 40 s (longer than the 20 s silence rule), then it is in front again; B must not be dropped, 0 desync, a normal game over.
+
 ## How a Hedgewars network game works
 
 The engine is deterministic lockstep. Every client simulates the whole game from the same setup and the same ordered inputs; nothing about the game state is sent. That is what makes it cheap to carry over a network, and also what makes a mismatch fatal.

@@ -51,6 +51,7 @@ uses uLocale, uAmmos, uChat, uVariables, uUtils, uIO, uCaptions, uCommands, uDeb
     {$IFDEF USE_TOUCH_INTERFACE}, uTouch{$ENDIF};
 
 var TeamsGameOver: boolean;
+    LoneBack: boolean;   // set by the relay's "eloneback 1" for a phone that came back with nobody else playing (issue 22)
     NextClan: boolean;
     SwapClanPre, SwapClanReal: LongInt;
 
@@ -961,6 +962,11 @@ begin
         end;
 end;
 
+procedure chLoneBack(var s: shortstring);
+begin
+    LoneBack:= s = '1'
+end;
+
 procedure chTeamBack(var s:shortstring);
 var t: LongInt;
     isSynced: boolean;
@@ -981,7 +987,9 @@ begin
             if hasGone then
                 begin
                 AddChatString(#8 + Format('* '+shortstring(trmsg[sidTeamBack]), TeamName));
-                if not CurrentTeam^.ExtDriven then SendIPC(_S'g' + s);
+                // A phone that came back alone answers for its own team: all its teams are driven from outside, so none of them is
+                // in play to answer (issue 22). Only that phone, and only when the relay says it is alone (LoneBack).
+                if (not CurrentTeam^.ExtDriven) or (LoneBack and (Owner = UserNick)) then SendIPC(_S'g' + s);
                 hasGone:= false;
 
                 RecountTeamHealth(TeamsArray[t]);
@@ -996,7 +1004,7 @@ begin
         begin
         TeamsArray[t]^.isGoneFlagPendingToBeUnset:= true;
 
-        if not CurrentTeam^.ExtDriven then
+        if (not CurrentTeam^.ExtDriven) or (LoneBack and (TeamsArray[t]^.Owner = UserNick)) then
             ParseCommand('/teamback s' + s, true);
         end;
 end;
@@ -1090,6 +1098,7 @@ RegisterVariable('grave'   , @chGrave        , false);
 RegisterVariable('hat'     , @chSetHat       , false);
 RegisterVariable('flag'    , @chFlag         , false);
 RegisterVariable('owner'   , @chOwner        , false);
+RegisterVariable('loneback', @chLoneBack     , false);
 
 CurrentTeam:= nil;
 PreviousTeam:= nil;

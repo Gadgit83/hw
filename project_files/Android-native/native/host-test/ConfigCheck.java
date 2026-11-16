@@ -161,6 +161,8 @@ public class ConfigCheck {
             List<String> args = o.toEngineArgs();
             check(args.contains("--volume") && args.get(args.indexOf("--volume") + 1).equals("100"), "default volume is the engine's 100");
             check(args.contains("--raw-quality") && args.get(args.indexOf("--raw-quality") + 1).equals("0"), "default quality is best");
+            check(args.contains("--jump-inset") && args.get(args.indexOf("--jump-inset") + 1).equals("100"), "jump inset is 100 by default");
+            check(args.contains("--hide-idle-controls"), "controls hidden on other turns by default");
             o.mute = true;
             o.voices = false;
             o.quality = 0;

@@ -29,6 +29,9 @@ public final class Options {
     public boolean centreTurn = true;  // centre the camera on the active hedgehog when a turn starts
     public boolean zoomTurn = true;    // zoom in at turn start
     public int zoomPct = 140;          // 110 to 200: how much closer than the default zoom the turn start view is
+    public boolean hideIdle = true;    // on another player's turn hide the controls that do nothing (the weapon chest stays)
+    /** The jump button sits this percent of its own width further in from the right edge (the engine's default is 0). */
+    public static final int JUMP_INSET_PCT = 100;
     public int quality = 5;            // 0 (lowest) to 5 (best), as the desktop slider
     public boolean showFps;
     public boolean vibration = true;
@@ -77,6 +80,9 @@ public final class Options {
             a.add("--turn-zoom");
             a.add(Integer.toString(Math.max(110, Math.min(200, zoomPct))));
         }
+        a.add("--jump-inset");
+        a.add(Integer.toString(JUMP_INSET_PCT));
+        if (hideIdle) a.add("--hide-idle-controls");
         if (showFps) a.add("--showfps");
         if (!teamTags) a.add("--no-teamtag");
         if (!hogTags) a.add("--no-hogtag");
@@ -113,6 +119,7 @@ public final class Options {
         p.setProperty("centreTurn", centreTurn ? "1" : "0");
         p.setProperty("zoomTurn", zoomTurn ? "1" : "0");
         p.setProperty("zoomPct", Integer.toString(zoomPct));
+        p.setProperty("hideIdle", hideIdle ? "1" : "0");
         p.setProperty("quality", Integer.toString(quality));
         p.setProperty("showFps", showFps ? "1" : "0");
         p.setProperty("vibration", vibration ? "1" : "0");
@@ -150,6 +157,7 @@ public final class Options {
         o.centreTurn = boolOf(p, "centreTurn", o.centreTurn);
         o.zoomTurn = boolOf(p, "zoomTurn", o.zoomTurn);
         o.zoomPct = intOf(p, "zoomPct", o.zoomPct, 110, 200);
+        o.hideIdle = boolOf(p, "hideIdle", o.hideIdle);
         o.quality = intOf(p, "quality", o.quality, 0, 5);
         o.showFps = boolOf(p, "showFps", o.showFps);
         o.vibration = boolOf(p, "vibration", o.vibration);

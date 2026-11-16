@@ -205,6 +205,12 @@ public class OptionsActivity extends SetupActivity {
         cam.addView(zoomSlider);
         cam.addView(ui.hint("Only at the start of a turn; pinching or dragging during the turn is left alone."));
 
+        LinearLayout others = ui.card();
+        others.addView(ui.heading("Other players' turns"));
+        others.addView(ui.toggle("Hide controls when it is not your turn", o.hideIdle, c -> o.hideIdle = c));
+        others.addView(ui.hint("On another player's turn the arrows, jump, fire and timer buttons are hidden, because they do nothing then. "
+                + "The weapon chest stays, so you can look at your weapons; choosing one only works on your own turn."));
+
         LinearLayout look = ui.card();
         look.addView(ui.heading("Effects and feedback"));
         List<String> q = Arrays.asList(
@@ -228,6 +234,7 @@ public class OptionsActivity extends SetupActivity {
         left.addView(size);
         left.addView(edge, ui.margins(full(), 0, 8, 0, 0));
         left.addView(cam, ui.margins(full(), 0, 8, 0, 0));
+        left.addView(others, ui.margins(full(), 0, 8, 0, 0));
         twoColumns(left, look);
     }
 

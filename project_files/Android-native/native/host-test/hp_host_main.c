@@ -136,6 +136,12 @@ static void host_pause_menu(int action)
     fprintf(stderr, "[hosttest] pause menu: %s\n", action == 'q' ? "quit game" : action == 'o' ? "options" : "unknown");
 }
 
+/* --touch-layout: the engine's control places (IPC 'T', one per control) for the app's layout editor; the test logs them. */
+static void host_touch_layout(const char *entry, int len)
+{
+    fprintf(stderr, "[hosttest] touch layout %.*s\n", len, entry);
+}
+
 /* The engine calls this on a big explosion (uUtils.pas DeviceRumble); the app vibrates, the test logs it. */
 void hw_device_rumble(int32_t ms)
 {
@@ -158,6 +164,7 @@ int main(int argc, char **argv)
     int p = hp_ipc_start(argv[3]);
     if (p < 0) return 2;
     hp_ipc_set_pause_menu_handler(host_pause_menu);
+    hp_ipc_set_touch_layout_handler(host_touch_layout);
     snprintf(port, sizeof port, "%d", p);
     char *args[64] = {
         "--no-holiday-silliness", "--internal", "--port", port,

@@ -33,6 +33,8 @@ public final class Options {
     public boolean twoJump = true;     // two jump buttons: Jump (long forward jump) and High jump (one button: Jump does both)
     public boolean jumpWhileMoving = true; // one button only: Jump does the long forward jump while walking (false: as when standing)
     public boolean swapFireJump = false;   // the Fire and the Jump buttons change places, mirrored
+    /** Where the touch controls are and how big (TouchLayout, the controls editor); "" keeps the default layout. */
+    public String touchLayout = "";
     /** The jump button sits this percent of its own width further in from the right edge (the engine's default is 0). */
     public static final int JUMP_INSET_PCT = 100;
     public int quality = 5;            // 0 (lowest) to 5 (best), as the desktop slider
@@ -94,6 +96,10 @@ public final class Options {
         a.add("--refresh-weapon-ui");
         // the pause screen has Quit game and Options buttons (GameActivity.pauseMenuAction)
         a.add("--pause-menu");
+        if (!touchLayout.isEmpty()) {
+            a.add("--touch-layout");
+            a.add(touchLayout);
+        }
         if (showFps) a.add("--showfps");
         if (!teamTags) a.add("--no-teamtag");
         if (!hogTags) a.add("--no-hogtag");
@@ -134,6 +140,7 @@ public final class Options {
         p.setProperty("twoJump", twoJump ? "1" : "0");
         p.setProperty("jumpWhileMoving", jumpWhileMoving ? "1" : "0");
         p.setProperty("swapFireJump", swapFireJump ? "1" : "0");
+        p.setProperty("touchLayout", touchLayout);
         p.setProperty("quality", Integer.toString(quality));
         p.setProperty("showFps", showFps ? "1" : "0");
         p.setProperty("vibration", vibration ? "1" : "0");
@@ -175,6 +182,7 @@ public final class Options {
         o.twoJump = boolOf(p, "twoJump", o.twoJump);
         o.jumpWhileMoving = boolOf(p, "jumpWhileMoving", o.jumpWhileMoving);
         o.swapFireJump = boolOf(p, "swapFireJump", o.swapFireJump);
+        o.touchLayout = TouchLayout.sanitize(p.getProperty("touchLayout", ""));
         o.quality = intOf(p, "quality", o.quality, 0, 5);
         o.showFps = boolOf(p, "showFps", o.showFps);
         o.vibration = boolOf(p, "vibration", o.vibration);

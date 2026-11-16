@@ -140,6 +140,20 @@ JNIEXPORT jint JNICALL Java_org_hedgewars_android_GameActivity_nativeSetVolume(J
     return hp_ipc_engine_command(cmd);
 }
 
+/* GameActivity.sendTouchLayout(String): the controls editor's layout goes to the engine as the touchlayout command ("touchlayout"
+ * alone is the default layout, "touchlayout <spec>" a layout). Returns 0 when it was written, -1 when no engine is connected. */
+JNIEXPORT jint JNICALL Java_org_hedgewars_android_GameActivity_nativeTouchLayout(JNIEnv *env, jclass cls, jstring spec)
+{
+    char cmd[256];
+    const char *s = NULL;
+    (void)cls;
+    if (spec) s = (*env)->GetStringUTFChars(env, spec, NULL);
+    if (s && s[0]) snprintf(cmd, sizeof cmd, "touchlayout %s", s);
+    else snprintf(cmd, sizeof cmd, "touchlayout");
+    if (s) (*env)->ReleaseStringUTFChars(env, spec, s);
+    return hp_ipc_engine_command(cmd);
+}
+
 /* The pause screen's buttons (--pause-menu, the engine's 'k' message): 'q' is Quit game, 'o' is Options. Runs on the IPC
  * thread, which SDL attaches to the JVM. GameActivity.pauseMenuAction(int) decides what to show. */
 static void on_pause_menu(int action)
@@ -151,6 +165,31 @@ static void on_pause_menu(int action)
     jmethodID mid = cls ? (*env)->GetMethodID(env, cls, "pauseMenuAction", "(I)V") : NULL;
     if (mid) (*env)->CallVoidMethod(env, act, mid, (jint)action);
     if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
+    if (cls) (*env)->DeleteLocalRef(env, cls);
+    (*env)->DeleteLocalRef(env, act);
+}
+
+/* The controls editor (--touch-layout): one control's place from the engine ('T' message, without the 'T' and the tick). Runs on the
+ * IPC thread; GameActivity.touchLayoutReport(String) hands it to the UI thread. */
+static void on_touch_layout(const char *entry, int len)
+{
+    JNIEnv *env = (JNIEnv *)SDL_AndroidGetJNIEnv();
+    jobject act = (jobject)SDL_AndroidGetActivity();
+    char buf[200];
+    jstring js = NULL;
+    jclass cls;
+    jmethodID mid;
+    if (!env || !act) return;
+    if (len < 0) len = 0;
+    if (len > (int)sizeof buf - 1) len = (int)sizeof buf - 1;
+    memcpy(buf, entry, (size_t)len);
+    buf[len] = 0;
+    cls = (*env)->GetObjectClass(env, act);
+    mid = cls ? (*env)->GetMethodID(env, cls, "touchLayoutReport", "(Ljava/lang/String;)V") : NULL;
+    js = (*env)->NewStringUTF(env, buf);
+    if (mid && js) (*env)->CallVoidMethod(env, act, mid, js);
+    if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
+    if (js) (*env)->DeleteLocalRef(env, js);
     if (cls) (*env)->DeleteLocalRef(env, cls);
     (*env)->DeleteLocalRef(env, act);
 }
@@ -246,6 +285,7 @@ int SDL_main(int argc, char **argv)
     atexit(on_exit_hook);
     hp_ipc_set_error_handler(on_engine_error);
     hp_ipc_set_pause_menu_handler(on_pause_menu);
+    hp_ipc_set_touch_layout_handler(on_touch_layout);
 
     snprintf(config, sizeof config, "%s/game.ipc", base);
     snprintf(data, sizeof data, "%s/Data", base);

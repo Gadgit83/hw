@@ -1,6 +1,5 @@
 package org.hedgewars.android;
 
-import android.content.Intent;
 import android.content.pm.ActivityInfo;
 import android.os.Build;
 import android.os.Bundle;
@@ -153,9 +152,6 @@ public class GameActivity extends SDLActivity {
     /** The pause screen's buttons (--pause-menu): the native launcher calls this from its IPC thread with the engine's letter. */
     static final int PAUSE_QUIT = 'q', PAUSE_OPTIONS = 'o';
 
-    /** Activity request code for the options screen opened from the game (its result carries the saved options). */
-    private static final int REQUEST_OPTIONS = 1;
-
     /**
      * Called from the native launcher (hp_main.c, through JNI) when the player presses Quit game or Options on the pause screen.
      * Runs on the UI thread. Quit game opens the same question as Back ({@link #askQuit}), so the network rules stay in one place.
@@ -199,26 +195,84 @@ public class GameActivity extends SDLActivity {
         optionsDialog.show();
     }
 
+    /** How long the engine has to report where its controls are before the editor gives up. */
+    private static final long LAYOUT_REPORT_MS = 3000;
+
+    /** The controls editor (issue #21), while it is open over the game, and the places the engine reported for it. */
+    private ControlsLayoutView layoutEditor;
+    private final java.util.Map<String, TouchLayout.Place> layoutReported = new java.util.LinkedHashMap<>();
+    private boolean layoutDefaultsSet;
+    private final Runnable layoutTimedOut = () -> {
+        if (layoutEditor != null && !layoutDefaultsSet) {
+            layoutEditor.setError("The game did not report its controls, so they cannot be placed now. Cancel and try again.");
+        }
+    };
+
     /**
-     * Hook for the controls editor (issue #21), which will replace this: until then the app's Options open at the display and
-     * controls tab. Its saved options come back in the result ({@link #onActivityResult}).
+     * Controls layout (issue #21): the editor is laid over the running game. Opening it resets the engine to its default places
+     * (the engine reports them, IPC 'T', see {@link #touchLayoutReport}); Cancel puts the saved layout back, Save stores the new one
+     * and sends it to the engine at once.
      */
     private void openControlsLayout() {
-        startActivityForResult(new Intent(this, OptionsActivity.class)
-                .putExtra(OptionsActivity.EXTRA_TAB, 1)
-                .putExtra(OptionsActivity.EXTRA_OPTIONS, options.toText()), REQUEST_OPTIONS);
+        if (layoutEditor != null) return;
+        layoutReported.clear();
+        layoutDefaultsSet = false;
+        ControlsLayoutView view = new ControlsLayoutView(this, options.twoJump, new ControlsLayoutView.Listener() {
+            @Override public void onSave(String spec) { saveControlsLayout(spec); }
+            @Override public void onCancel() {
+                closeControlsLayout();
+                sendTouchLayout(options.touchLayout);
+            }
+        });
+        addContentView(view, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        layoutEditor = view;
+        sendTouchLayout("");
+        uiHandler.postDelayed(layoutTimedOut, LAYOUT_REPORT_MS);
     }
 
-    @Override
-    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
-        super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode == REQUEST_OPTIONS && resultCode == RESULT_OK && data != null) {
-            String text = data.getStringExtra(OptionsActivity.RESULT_OPTIONS);
-            if (text != null) {
-                options = Options.fromText(text);
-                applyLiveVolume();
-            }
+    /** Save: the layout is kept in the options (it is passed as --touch-layout at every game) and applied to this game now. */
+    private void saveControlsLayout(String spec) {
+        options.touchLayout = TouchLayout.sanitize(spec);
+        Store.saveOptions(this, options);
+        closeControlsLayout();
+        sendTouchLayout(options.touchLayout);
+    }
+
+    private void closeControlsLayout() {
+        uiHandler.removeCallbacks(layoutTimedOut);
+        if (layoutEditor == null) return;
+        android.view.ViewParent parent = layoutEditor.getParent();
+        if (parent instanceof ViewGroup) ((ViewGroup) parent).removeView(layoutEditor);
+        layoutEditor = null;
+    }
+
+    /** Sends a layout to the engine (the touchlayout command); "" is the default layout. Nothing happens when no game runs. */
+    private void sendTouchLayout(String spec) {
+        try {
+            nativeTouchLayout(spec);
+        } catch (Throwable e) {
+            android.util.Log.w(Diag.TAG, "nativeTouchLayout failed: " + e);
         }
+    }
+
+    /**
+     * Called from the native launcher (hp_main.c, through JNI) for each control's place the engine reports (IPC 'T', one message per
+     * control, e.g. "fire:0.920,0.850,1.000,0.120,0.210"). Runs on the IPC thread, so it hands over to the UI thread.
+     */
+    @SuppressWarnings("unused")
+    public void touchLayoutReport(String entry) {
+        uiHandler.post(() -> {
+            if (layoutEditor == null || layoutDefaultsSet) return;
+            String name = TouchLayout.reportName(entry);
+            TouchLayout.Place place = TouchLayout.reportPlace(entry);
+            if (name == null || place == null) return;
+            layoutReported.put(name, place);
+            if (layoutReported.size() >= TouchLayout.NAMES.length) {
+                layoutDefaultsSet = true;
+                uiHandler.removeCallbacks(layoutTimedOut);
+                layoutEditor.setDefaults(layoutReported, options.touchLayout);
+            }
+        });
     }
 
     /**
@@ -260,6 +314,9 @@ public class GameActivity extends SDLActivity {
 
     /** The launcher (hp_main.c): the sound levels changed during the game (see applyLiveVolume). */
     private static native int nativeSetVolume(int level, int effects, int music, int mute);
+
+    /** The launcher (hp_main.c): the touch controls' layout, sent to the engine as touchlayout (or the default when ""). */
+    private static native int nativeTouchLayout(String spec);
 
     /** The launcher (hp_ipc.c): the host chose "End the game for everyone": control frame Z to the relay, then the engine quits. */
     private static native int nativeEndForEveryone();

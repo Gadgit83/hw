@@ -3,6 +3,7 @@ package org.hedgewars.android;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 import android.app.Activity;
@@ -404,12 +405,101 @@ public class LaunchSmokeTest {
             assertNotNull("the options dialog has the Controls layout entry", controls);
             controls.performClick();
             TestSupport.settle(100);
-            org.robolectric.shadows.ShadowActivity.IntentForResult next = org.robolectric.Shadows.shadowOf(g).getNextStartedActivityForResult();
-            assertNotNull("Controls layout opens a screen", next);
-            assertEquals(OptionsActivity.class.getName(), next.intent.getComponent().getClassName());
-            assertEquals("it opens at the display and controls tab", 1, next.intent.getIntExtra(OptionsActivity.EXTRA_TAB, -1));
-            assertNotNull("the game's own options come with it", next.intent.getStringExtra(OptionsActivity.EXTRA_OPTIONS));
+            assertNull("Controls layout is the editor, not the app's Options", org.robolectric.Shadows.shadowOf(g).getNextStartedActivityForResult());
+            assertNotNull("Controls layout opens the editor over the game", findEditor(g.getWindow().getDecorView()));
             System.out.println("SDK " + android.os.Build.VERSION.SDK_INT + ": pause Options dialog and Controls layout ok");
+        } finally {
+            net.delete();
+        }
+    }
+
+    /** The controls editor (issue #21) as the engine's report sets it: the places it reports, one line per control. */
+    private static final String[] ENGINE_PLACES = {
+        "fire:0.900,0.800,1.000,0.100,0.200", "jump:0.700,0.800,1.000,0.120,0.230", "highjump:0.560,0.800,1.000,0.120,0.230",
+        "left:0.100,0.800,1.000,0.120,0.230", "right:0.200,0.800,1.000,0.120,0.230", "aim:0.300,0.500,1.000,0.100,0.200",
+        "weapons:0.950,0.150,1.000,0.080,0.120", "pause:0.500,0.040,1.000,0.060,0.100", "timer:0.150,0.600,1.000,0.080,0.120",
+        "bounce:0.250,0.600,1.000,0.080,0.120" };
+
+    private static ControlsLayoutView findEditor(android.view.View v) {
+        if (v instanceof ControlsLayoutView) return (ControlsLayoutView) v;
+        if (v instanceof android.view.ViewGroup) {
+            for (int i = 0; i < ((android.view.ViewGroup) v).getChildCount(); i++) {
+                ControlsLayoutView r = findEditor(((android.view.ViewGroup) v).getChildAt(i));
+                if (r != null) return r;
+            }
+        }
+        return null;
+    }
+
+    private static void touch(android.view.View v, int action, float x, float y) {
+        android.view.MotionEvent e = android.view.MotionEvent.obtain(1L, 1L, action, x, y, 0);
+        v.dispatchTouchEvent(e);
+        e.recycle();
+    }
+
+    /**
+     * Controls layout (issue #21): the editor opens over the game and takes the engine's places; a drag moves the fire control and
+     * Save keeps the layout, which the next game gets as --touch-layout. Cancel keeps the saved layout.
+     */
+    @Test
+    public void gameControlsLayout_dragSaves_launchPassesIt_cancelKeepsIt() throws Exception {
+        java.io.File net = new java.io.File(app().getFilesDir(), "net.cfg");
+        try {
+            writeRole("host");
+            Store.saveOptions(app(), new Options());
+            GameActivity g = gameActivity();
+            g.pauseMenuAction(GameActivity.PAUSE_OPTIONS);
+            TestSupport.settle(100);
+            android.app.AlertDialog options = org.robolectric.shadows.ShadowAlertDialog.getLatestAlertDialog();
+            findText(options.getWindow().getDecorView(), "Controls layout").performClick();
+            TestSupport.settle(100);
+            ControlsLayoutView editor = findEditor(g.getWindow().getDecorView());
+            assertNotNull("the editor opens over the game", editor);
+            for (String entry : ENGINE_PLACES) g.touchLayoutReport(entry);
+            TestSupport.settle(100);
+            editor.layout(0, 0, 1280, 720);
+            android.widget.Button save = (android.widget.Button) findText(editor, "Save");
+            assertTrue("Save is on once the engine has reported its places", save.isEnabled());
+
+            // the fire control is centred at 0.9, 0.8 of the screen: drag it 200 px left and 100 px up
+            float cx = 0.9f * 1280, cy = 0.8f * 720;
+            touch(editor, android.view.MotionEvent.ACTION_DOWN, cx, cy);
+            touch(editor, android.view.MotionEvent.ACTION_MOVE, cx - 100, cy - 50);
+            touch(editor, android.view.MotionEvent.ACTION_MOVE, cx - 200, cy - 100);
+            touch(editor, android.view.MotionEvent.ACTION_UP, cx - 200, cy - 100);
+            save.performClick();
+            TestSupport.settle(100);
+            assertNull("the editor closes on Save", findEditor(g.getWindow().getDecorView()));
+
+            Options saved = Store.loadOptions(app());
+            java.util.Map<String, double[]> places = TouchLayout.parse(saved.touchLayout);
+            assertTrue("the saved layout has the fire control", places.containsKey("fire"));
+            assertEquals("fire moved left", 0.9 - 200 / 1280.0, places.get("fire")[0], 0.002);
+            assertEquals("fire moved up", 0.8 - 100 / 720.0, places.get("fire")[1], 0.002);
+            assertEquals("the size is kept", 1.0, places.get("fire")[2], 0.002);
+            java.util.List<String> args = java.util.Arrays.asList(g.engineOptions());
+            assertTrue("the next game is launched with --touch-layout", args.contains("--touch-layout"));
+            assertEquals("the layout is the saved one", saved.touchLayout, args.get(args.indexOf("--touch-layout") + 1));
+
+            // Cancel: a drag is thrown away and the saved layout stays
+            g.pauseMenuAction(GameActivity.PAUSE_OPTIONS);
+            TestSupport.settle(100);
+            android.app.AlertDialog again = org.robolectric.shadows.ShadowAlertDialog.getLatestAlertDialog();
+            findText(again.getWindow().getDecorView(), "Controls layout").performClick();
+            TestSupport.settle(100);
+            editor = findEditor(g.getWindow().getDecorView());
+            assertNotNull("the editor opens again", editor);
+            for (String entry : ENGINE_PLACES) g.touchLayoutReport(entry);
+            TestSupport.settle(100);
+            editor.layout(0, 0, 1280, 720);
+            touch(editor, android.view.MotionEvent.ACTION_DOWN, 0.5f * 1280, 0.04f * 720);
+            touch(editor, android.view.MotionEvent.ACTION_MOVE, 0.2f * 1280, 0.5f * 720);
+            touch(editor, android.view.MotionEvent.ACTION_UP, 0.2f * 1280, 0.5f * 720);
+            findText(editor, "Cancel").performClick();
+            TestSupport.settle(100);
+            assertNull("the editor closes on Cancel", findEditor(g.getWindow().getDecorView()));
+            assertEquals("Cancel keeps the saved layout", saved.touchLayout, Store.loadOptions(app()).touchLayout);
+            System.out.println("SDK " + android.os.Build.VERSION.SDK_INT + ": controls layout drag, save, launch args and cancel ok");
         } finally {
             net.delete();
         }

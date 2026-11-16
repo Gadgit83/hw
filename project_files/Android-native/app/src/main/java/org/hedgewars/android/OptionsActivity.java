@@ -27,7 +27,7 @@ import java.util.List;
 /** Options: sound, display and controls, and the advanced and about pages. Changes apply to the next game. */
 public class OptionsActivity extends SetupActivity {
 
-    /** Intent extra: the tab to open first (0 Sound, 1 Display and controls, 2 Advanced). The game's Controls layout opens tab 1. */
+    /** Intent extra: the tab to open first (0 Sound, 1 Display and controls, 2 Advanced). */
     static final String EXTRA_TAB = "tab";
     /**
      * Intent extra: the options as the game holds them. The game process saves its own changes, which this process may not see

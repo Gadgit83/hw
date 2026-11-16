@@ -25,6 +25,9 @@ int hp_ipc_end_for_everyone(void);
 
 /* The pause screen's buttons (--pause-menu): called from the server thread with 'q' (Quit game) or 'o' (Options). Optional. */
 void hp_ipc_set_pause_menu_handler(void (*handler)(int action));
+/* The controls editor (--touch-layout): called from the server thread for each control's place the engine reports (IPC 'T', e.g.
+ * "fire:0.920,0.850,1.000,0.120,0.210"). entry is not NUL-terminated; len is its length. Optional. */
+void hp_ipc_set_touch_layout_handler(void (*handler)(const char *entry, int len));
 /* Sends one console command to the engine, e.g. "livevolume 128 100 50 0". Returns 0 when it was written. */
 int hp_ipc_engine_command(const char *cmd);
 

@@ -180,6 +180,24 @@ public class LaunchSmokeTest {
         }
     }
 
+    // The Rules tab's explanations -------------------------------------------------------------------
+
+    /** Every rule and switch on the Rules tab has an explanation, so a new setting cannot ship without one. */
+    @Test
+    public void rules_everySettingHasAnExplanation() throws Exception {
+        java.util.List<String> keys = new java.util.ArrayList<>(java.util.Arrays.asList("style", "scheme", "weapons.link", "weapons.set"));
+        for (int k = 1; k < Rules.FLAG_LABELS.length; k++) keys.add("flag." + k);
+        for (int e = 0; e < Rules.VALUE_LABELS.length; e++) keys.add("value." + (Rules.V_DAMAGE + e));
+        for (String key : keys) {
+            assertFalse("no explanation for the rule '" + key + "'", RuleHelp.text(key).trim().isEmpty());
+        }
+        // Every game style in the game data has its own description (a style not listed gets the generic one).
+        TestSupport.installData(app());
+        for (String style : new GameData(new java.io.File(app().getFilesDir(), "Data")).styles()) {
+            assertTrue("no description for the game style '" + style + "'", RuleHelp.hasStyle(style));
+        }
+    }
+
     // Held upright (the menus follow the rotation; the game stays sideways) ------------------------
 
     /** Every tab of the Setup screen opens upright on a 360 dp wide phone, with the header, tabs, Start and Options on screen. */

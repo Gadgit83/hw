@@ -320,7 +320,7 @@ public final class Ui {
     }
 
     /** Which drawing a {@link Glyph} shows. */
-    public static final int GLYPH_SLIDERS = 0, GLYPH_CROSS = 1;
+    public static final int GLYPH_SLIDERS = 0, GLYPH_CROSS = 1, GLYPH_INFO = 2;
 
     /** A small line drawing used as a button face (an icon font may not be on the phone). */
     public static final class Glyph extends View {
@@ -344,6 +344,13 @@ public final class Ui {
                 float k = 0.62f * u;
                 cv.drawLine(cx - k, cy - k, cx + k, cy + k, paint);
                 cv.drawLine(cx - k, cy + k, cx + k, cy - k, paint);
+            } else if (kind == GLYPH_INFO) {
+                // a ring with an "i" in it
+                cv.drawCircle(cx, cy, u, paint);
+                paint.setStyle(Paint.Style.FILL);
+                cv.drawCircle(cx, cy - 0.5f * u, 1.3f * density, paint);
+                paint.setStyle(Paint.Style.STROKE);
+                cv.drawLine(cx, cy - 0.1f * u, cx, cy + 0.6f * u, paint);
             } else {
                 float[] ys = { -0.62f * u, 0f, 0.62f * u };
                 float[] ks = { -0.35f, 0.4f, -0.1f };
@@ -356,6 +363,15 @@ public final class Ui {
                 paint.setStyle(Paint.Style.STROKE);
             }
         }
+    }
+
+    /** The info button beside a setting: opens a small dialog with its explanation. */
+    public Glyph infoButton(String title, String explanation) {
+        return iconButton(GLYPH_INFO, "About " + title, v -> dialog(ctx)
+                .setTitle(title)
+                .setMessage(explanation)
+                .setPositiveButton("OK", null)
+                .show());
     }
 
     /** A square button with a drawing on it: 48 dp to touch, 36 dp to look at. */

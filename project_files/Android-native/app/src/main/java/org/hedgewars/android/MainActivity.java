@@ -702,11 +702,12 @@ public class MainActivity extends SetupActivity {
         styles.add("Normal");
         for (String s : data.styles()) styles.add(GameData.styleTitle(s));
         int styleIdx = model.style.isEmpty() ? 0 : data.styles().indexOf(model.style) + 1;
-        left.addView(ui.choice("Game style", styles, styleIdx, i -> {
+        left.addView(withInfo(ui.choice("Game style", styles, styleIdx, i -> {
             model.style = i == 0 ? "" : data.styles().get(i - 1);
             showTab();
-        }));
+        }), "Game style", "style"));
         if (!model.style.isEmpty()) {
+            left.addView(ui.hint(RuleHelp.style(model.style)));
             String[] cfg = data.styleCfg(model.style);
             String note = (cfg[0].equals("locked") ? "Uses its own rules" : cfg[0].equals("*") ? "Any rules" : "Rules: " + cfg[0])
                     + ", " + (cfg[1].equals("locked") ? "its own weapons." : cfg[1].equals("*") ? "any weapons." : "weapons: " + cfg[1] + ".");
@@ -723,13 +724,13 @@ public class MainActivity extends SetupActivity {
             showTab();
         });
         enableAll(schemeRow, !schemeLocked);
-        left.addView(schemeRow);
+        left.addView(withInfo(schemeRow, "Scheme", "scheme"));
         schemeInfo = ui.hint(schemeLocked ? "The game style sets the scheme." : (model.rulesEdited() ? "Changed from " + model.schemeName + " below." : "Built-in scheme."));
         left.addView(schemeInfo);
 
         Switch link = ui.toggle("Pick the weapons that share the scheme's name", model.linkWeapons, c -> model.linkWeapons = c);
         link.setEnabled(!schemeLocked && !weaponsLocked);
-        left.addView(link);
+        left.addView(withInfo(link, "Pick the weapons that share the scheme's name", "weapons.link"));
         List<String> sets = Rules.weaponSetNames();
         String shownSet = model.effectiveWeaponSet(data);
         LinearLayout weaponsRow = ui.choice("Weapon set", sets, Math.max(0, sets.indexOf(shownSet)), i -> {
@@ -737,7 +738,7 @@ public class MainActivity extends SetupActivity {
             showTab();
         });
         enableAll(weaponsRow, !weaponsLocked);
-        left.addView(weaponsRow);
+        left.addView(withInfo(weaponsRow, "Weapon set", "weapons.set"));
         if (weaponsLocked) left.addView(ui.hint("The game style sets the weapons."));
 
         // Right: the key numbers.
@@ -788,7 +789,7 @@ public class MainActivity extends SetupActivity {
                 updateSchemeInfo();
             });
             enableAll(edge, editable);
-            vals.addView(edge);
+            vals.addView(withInfo(edge, "World edge", "value." + Rules.V_WORLD_EDGE));
             while (vals.getChildCount() > 0) {
                 View c = vals.getChildAt(0);
                 vals.removeViewAt(0);
@@ -801,7 +802,7 @@ public class MainActivity extends SetupActivity {
                     updateSchemeInfo();
                 });
                 sw.setEnabled(editable);
-                rows.add(sw);
+                rows.add(withInfo(sw, Rules.FLAG_LABELS[k], "flag." + k));
             }
             LinearLayout first = ui.card(), second = wide ? ui.card() : first;
             first.addView(ui.heading("More rules"));
@@ -830,7 +831,7 @@ public class MainActivity extends SetupActivity {
                     updateSchemeInfo();
                 });
         enableAll(row, editable);
-        into.addView(row);
+        into.addView(withInfo(row, "Turn time", "value." + Rules.V_TURN_TIME));
     }
 
     private void addValue(LinearLayout into, Rules r, int entry, String label, int min, int max, int step,
@@ -840,7 +841,26 @@ public class MainActivity extends SetupActivity {
             updateSchemeInfo();
         });
         enableAll(row, editable);
-        into.addView(row);
+        into.addView(withInfo(row, label, "value." + entry));
+    }
+
+    /**
+     * A setting with an info button at its end, which shows the explanation from RuleHelp. A choice or stepper row
+     * (a horizontal row already) takes the button in place; a switch is put in a row of its own. The button is added
+     * after the row is greyed out, so it stays usable when the setting is locked.
+     */
+    private View withInfo(View setting, String title, String key) {
+        // A fixed 48 dp square: the button's own background would otherwise stretch it and squeeze the label out.
+        View info = ui.infoButton(title, RuleHelp.text(key));
+        int touch = ui.dp(Ui.TOUCH_DP);
+        if (setting instanceof LinearLayout) {
+            ((LinearLayout) setting).addView(info, Ui.lp(touch, touch));
+            return setting;
+        }
+        LinearLayout r = ui.row();
+        r.addView(setting, ui.weight(1f));
+        r.addView(info, Ui.lp(touch, touch));
+        return r;
     }
 
     private void updateSchemeInfo() {

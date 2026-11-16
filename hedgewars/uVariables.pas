@@ -117,6 +117,7 @@ var
     cDamagePercent  : LongInt;
     cDeathBoomPercent : LongInt; // hedgehog death explosion size, percent (setup $deathboompct; 100 = unchanged)
     cLandBoomPercent  : LongInt; // radius of land removed by explosions, percent (setup $landboompct; 100 = unchanged)
+    cAimHelper        : LongInt; // aim helper preview of ballistic shots (setup $aimhelper; 0 = off, 1 = short, 2 = full; display only)
     cMineDudPercent : LongWord;
     cTemplateFilter : LongInt;
     cFeatureSize    : LongInt;
@@ -2996,6 +2997,7 @@ begin
     cDamagePercent      := 100;
     cDeathBoomPercent   := 100;
     cLandBoomPercent    := 100;
+    cAimHelper          := 0;
     cRopePercent        := 100;
     cRopeNodeStep       := 4;
     cRopeLayers         := 1;

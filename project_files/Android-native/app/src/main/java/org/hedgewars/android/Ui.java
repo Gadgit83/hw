@@ -3,6 +3,7 @@ package org.hedgewars.android;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Context;
+import android.content.res.Configuration;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
@@ -127,6 +128,17 @@ public final class Ui {
      * Draws behind the system bars and the camera cut-out; the content is then padded by the insets so
      * nothing sits under a bar or the cut-out and no black bands appear.
      */
+    /** True when the phone is held upright (or the window is square or taller): the menus stack in one column. */
+    public static boolean upright(Context c) {
+        Configuration cf = c.getResources().getConfiguration();
+        return cf.screenWidthDp <= cf.screenHeightDp;
+    }
+
+    /** True when two columns fit side by side: the window is landscape and at least minDp wide. Upright is always one column. */
+    public static boolean twoColumns(Context c, int minDp) {
+        return !upright(c) && c.getResources().getConfiguration().screenWidthDp >= minDp;
+    }
+
     public static void edgeToEdge(Activity a) {
         Window w = a.getWindow();
         w.setBackgroundDrawable(new ColorDrawable(BG));

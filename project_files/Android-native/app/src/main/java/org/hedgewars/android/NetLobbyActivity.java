@@ -239,7 +239,7 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
     }
 
     private void choose() {
-        boolean wide = getResources().getConfiguration().screenWidthDp >= 700;
+        boolean wide = Ui.twoColumns(this, 700);
         if (pinMsg != null) content.addView(pinCard(), ui.margins(full(), 0, 6, 0, 0));
         rejoinCard();
         LinearLayout start = ui.card();

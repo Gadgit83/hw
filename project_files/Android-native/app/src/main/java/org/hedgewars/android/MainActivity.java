@@ -50,7 +50,7 @@ public class MainActivity extends SetupActivity {
     private int tab = TAB_TEAMS;
     private boolean contentReady;
 
-    private LinearLayout root, topBar, bottomBar, holder, problemBox;
+    private LinearLayout root, topBar, tabRow, bottomBar, holder, problemBox;
     private ScrollView scroll;
     private Ui.Tabs tabs;
     private TextView status, summary, problemText, schemeInfo;
@@ -143,7 +143,15 @@ public class MainActivity extends SetupActivity {
             tab = i;
             showTab();
         });
-        topBar.addView(tabs.view, Ui.lp(ui.dp(270), ViewGroup.LayoutParams.WRAP_CONTENT));
+        // Held upright the tab strip gets a row of its own across the screen, so the title and Network fit beside it.
+        boolean stacked = Ui.upright(this);
+        if (stacked) {
+            tabRow = ui.row();
+            tabRow.setPadding(ui.dp(Ui.GUTTER), ui.dp(2), ui.dp(Ui.GUTTER), 0);
+            tabRow.addView(tabs.view, ui.weight(1f));
+        } else {
+            topBar.addView(tabs.view, Ui.lp(ui.dp(270), ViewGroup.LayoutParams.WRAP_CONTENT));
+        }
         LinearLayout optionsBox = new LinearLayout(this);
         optionsBox.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
         Button network = ui.button("Network", false, v -> {
@@ -157,6 +165,7 @@ public class MainActivity extends SetupActivity {
                 v -> startActivity(new Intent(this, OptionsActivity.class))), Ui.lp(ui.dp(Ui.TOUCH_DP), ui.dp(Ui.TOUCH_DP)));
         topBar.addView(optionsBox, ui.margins(Ui.lp(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT), 16, 0, 0, 0));
         root.addView(topBar);
+        if (stacked) root.addView(tabRow);
 
         problemBox = new LinearLayout(this);
         problemBox.setOrientation(LinearLayout.HORIZONTAL);
@@ -211,6 +220,7 @@ public class MainActivity extends SetupActivity {
         ui.trackInsets(root, (l, t, r, b, kb) -> {
             root.setPadding(l, t, r, b);
             topBar.setVisibility(kb ? View.GONE : View.VISIBLE);
+            if (tabRow != null) tabRow.setVisibility(kb ? View.GONE : View.VISIBLE);
             keyboardOpen = kb;
             showProblemBox();
             status.setVisibility(kb ? View.GONE : View.VISIBLE);   // keep the Start bar to one line
@@ -231,10 +241,6 @@ public class MainActivity extends SetupActivity {
             }
         });
         return root;
-    }
-
-    private int contentWidthDp() {
-        return getResources().getConfiguration().screenWidthDp;
     }
 
     /** Screen width minus the left and right padding actually applied to the list (insets and gutter). */
@@ -423,16 +429,25 @@ public class MainActivity extends SetupActivity {
             redraw();
         });
         dice.setContentDescription("Randomise teams");
-        head.addView(dice, Ui.lp(ViewGroup.LayoutParams.WRAP_CONTENT, ui.dp(Ui.TOUCH_DP)));
-        head.addView(add, ui.margins(Ui.lp(ViewGroup.LayoutParams.WRAP_CONTENT, ui.dp(Ui.TOUCH_DP)), 10, 0, 0, 0));
-        holder.addView(head);
+        if (Ui.upright(this)) {
+            // upright: the heading and count on one line, the two actions side by side on the next, so nothing is squeezed
+            holder.addView(head);
+            LinearLayout actions = ui.row();
+            actions.addView(dice, ui.weight(1f));
+            actions.addView(add, ui.margins(ui.weight(1f), 10, 0, 0, 0));
+            holder.addView(actions, ui.margins(Ui.lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT), 0, 6, 0, 0));
+        } else {
+            head.addView(dice, Ui.lp(ViewGroup.LayoutParams.WRAP_CONTENT, ui.dp(Ui.TOUCH_DP)));
+            head.addView(add, ui.margins(Ui.lp(ViewGroup.LayoutParams.WRAP_CONTENT, ui.dp(Ui.TOUCH_DP)), 10, 0, 0, 0));
+            holder.addView(head);
+        }
 
         // Three columns on a phone held sideways, so up to six teams are in view at once. The width is what
-        // is left after the insets and the list padding, not the whole screen.
+        // is left after the insets and the list padding, not the whole screen. Upright: one column.
         int w = usableWidthDp();
         int n = model.teams.size();
         // few teams fill the width; four make a square of two by two; five or more fill three columns
-        int cols = w >= 840 ? (n <= 2 ? 2 : n == 4 ? 2 : 3) : w >= 520 ? 2 : 1;
+        int cols = Ui.upright(this) ? 1 : w >= 840 ? (n <= 2 ? 2 : n == 4 ? 2 : 3) : w >= 520 ? 2 : 1;
         cols = Math.min(cols, Math.max(1, n));
         LinearLayout grid = null;
         for (int i = 0; i < model.teams.size(); i++) {
@@ -555,8 +570,8 @@ public class MainActivity extends SetupActivity {
 
     private void buildMap() {
         LinearLayout cols = new LinearLayout(this);
-        cols.setOrientation(contentWidthDp() >= 760 ? LinearLayout.HORIZONTAL : LinearLayout.VERTICAL);
-        boolean wide = contentWidthDp() >= 760;
+        boolean wide = Ui.twoColumns(this, 760);
+        cols.setOrientation(wide ? LinearLayout.HORIZONTAL : LinearLayout.VERTICAL);
 
         LinearLayout map = ui.card();
         map.addView(ui.heading("Map"));
@@ -675,7 +690,7 @@ public class MainActivity extends SetupActivity {
     // Rules tab -----------------------------------------------------------------------------------
 
     private void buildRules() {
-        boolean wide = contentWidthDp() >= 760;
+        boolean wide = Ui.twoColumns(this, 760);
         LinearLayout cols = new LinearLayout(this);
         cols.setOrientation(wide ? LinearLayout.HORIZONTAL : LinearLayout.VERTICAL);
         cols.setBaselineAligned(false);

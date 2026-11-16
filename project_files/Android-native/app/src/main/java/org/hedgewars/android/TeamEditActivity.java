@@ -97,7 +97,7 @@ public class TeamEditActivity extends SetupActivity {
     }
 
     private boolean wide() {
-        return getResources().getConfiguration().screenWidthDp >= 700;
+        return Ui.twoColumns(this, 700);
     }
 
     private void fill() {

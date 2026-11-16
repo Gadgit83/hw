@@ -20,7 +20,8 @@ import org.robolectric.annotation.Config;
 
 /**
  * Launch smoke test: every screen the user can open is created, started, resumed, laid out and destroyed on a
- * Fairphone-sized landscape screen under Android 14 and 15, and nothing may throw. It exists because 0.2.1 crashed on
+ * Fairphone-sized landscape screen under Android 14 and 15, and nothing may throw. The menus are also opened held upright
+ * on a 360 dp wide phone, and turned from landscape to upright while open (the game screen stays landscape). It exists because 0.2.1 crashed on
  * launch on every phone (Window.getInsetsController() before setContentView) and no test opened a screen.
  *
  * What it covers:
@@ -59,27 +60,75 @@ public class LaunchSmokeTest {
 
     /** Runs the whole life cycle of an activity the way the system does, with a layout pass and idle time. */
     private static <A extends Activity> String launch(Class<A> k, Intent in, long settleMillis) throws Exception {
+        return run(k, in, settleMillis, false);
+    }
+
+    /**
+     * The same with the phone held upright (TestSupport.PORTRAIT_QUALIFIERS). Each label in mustShow must be on screen
+     * and inside the window, and every button must lie inside the window's width.
+     */
+    private static <A extends Activity> String launchUpright(Class<A> k, Intent in, long settleMillis, String... mustShow) throws Exception {
+        RuntimeEnvironment.setQualifiers(TestSupport.PORTRAIT_QUALIFIERS);
+        try {
+            return run(k, in, settleMillis, true, mustShow);
+        } finally {
+            RuntimeEnvironment.setQualifiers(TestSupport.QUALIFIERS);
+        }
+    }
+
+    private static <A extends Activity> String run(Class<A> k, Intent in, long settleMillis, boolean upright, String... mustShow) throws Exception {
         ActivityController<A> ctl = Robolectric.buildActivity(k, in);
         A a = ctl.create().start().postCreate(null).resume().visible().get();
         a.onWindowFocusChanged(true);
-        TestSupport.layout(a);
+        int w = upright ? TestSupport.PW : TestSupport.W, h = upright ? TestSupport.PH : TestSupport.H;
+        if (upright) TestSupport.layoutUpright(a); else TestSupport.layout(a);
         TestSupport.settle(settleMillis);
-        TestSupport.layout(a);
-        String text = TestSupport.texts(a.getWindow().getDecorView());
-        assertNotNull(a.getWindow().getDecorView());
-        if (a instanceof MainActivity) assertNetworkButtonFits(a);
+        if (upright) TestSupport.layoutUpright(a); else TestSupport.layout(a);
+        View decor = a.getWindow().getDecorView();
+        String text = TestSupport.texts(decor);
+        assertNotNull(decor);
+        if (a instanceof MainActivity) assertNetworkButtonFits(a, w);
+        if (upright) {
+            assertTrue("upright screen is taller than wide: " + a.getClass().getSimpleName(), Ui.upright(a));
+            assertButtonsInside(decor, w);
+            for (String label : mustShow) assertShownInside(decor, label, w, h);
+        }
         ctl.pause().stop().destroy();
         return text;
     }
 
-    /** The Network button in the compact header shows its whole word and lies inside the screen. */
-    private static void assertNetworkButtonFits(Activity a) {
+    /** A control with this text or description is on screen and lies inside the window. */
+    private static void assertShownInside(View decor, String label, int w, int h) {
+        View v = TestSupport.find(decor, label);
+        assertNotNull("'" + label + "' is on the screen", v);
+        assertTrue("'" + label + "' is shown", TestSupport.shown(v));
+        int[] xy = new int[2];
+        v.getLocationOnScreen(xy);
+        assertTrue("'" + label + "' lies inside the window: x " + xy[0] + " to " + (xy[0] + v.getWidth()) + ", y " + xy[1] + " to " + (xy[1] + v.getHeight()),
+                xy[0] >= 0 && xy[0] + v.getWidth() <= w && xy[1] >= 0 && xy[1] + v.getHeight() <= h);
+    }
+
+    /** Every shown button lies inside the window's width, so nothing is cut off at the right edge. */
+    private static void assertButtonsInside(View v, int w) {
+        if (v instanceof android.widget.Button && v.getVisibility() == View.VISIBLE && v.getWidth() > 0 && TestSupport.shown(v)) {
+            int[] xy = new int[2];
+            v.getLocationOnScreen(xy);
+            assertTrue("button '" + ((android.widget.Button) v).getText() + "' is cut off: x " + xy[0] + " to " + (xy[0] + v.getWidth()),
+                    xy[0] >= 0 && xy[0] + v.getWidth() <= w);
+        }
+        if (v instanceof android.view.ViewGroup) {
+            for (int i = 0; i < ((android.view.ViewGroup) v).getChildCount(); i++) assertButtonsInside(((android.view.ViewGroup) v).getChildAt(i), w);
+        }
+    }
+
+    /** The Network button in the compact header shows its whole word and lies inside the window of the given width. */
+    private static void assertNetworkButtonFits(Activity a, int w) {
         android.widget.TextView t = findText(a.getWindow().getDecorView(), "Network");
         assertNotNull("the header has a Network button", t);
         int[] xy = new int[2];
         t.getLocationOnScreen(xy);
         assertTrue("Network is not cut off (ellipsis)", t.getLayout() == null || t.getLayout().getEllipsisCount(0) == 0);
-        assertTrue("Network lies inside the screen: x " + xy[0] + " to " + (xy[0] + t.getWidth()), xy[0] >= 0 && xy[0] + t.getWidth() <= TestSupport.W);
+        assertTrue("Network lies inside the screen: x " + xy[0] + " to " + (xy[0] + t.getWidth()), xy[0] >= 0 && xy[0] + t.getWidth() <= w);
     }
 
     private static android.widget.TextView findText(android.view.View v, String s) {
@@ -128,6 +177,84 @@ public class LaunchSmokeTest {
             assertTrue("tab " + tab + " shows the header: " + text, text.contains("Teams"));
             System.out.println("SDK " + android.os.Build.VERSION.SDK_INT + ": MainActivity first launch tab " + tab + " ok");
             TestSupport.resetStatics();
+        }
+    }
+
+    // Held upright (the menus follow the rotation; the game stays sideways) ------------------------
+
+    /** Every tab of the Setup screen opens upright on a 360 dp wide phone, with the header, tabs, Start and Options on screen. */
+    @Test
+    public void portrait_mainActivity_allTabs() throws Exception {
+        TestSupport.installData(app());
+        String[][] tabs = { { "Teams", "Add team" }, { "Map", "Theme" }, { "Rules", "Game style" } };
+        for (int tab = 0; tab < tabs.length; tab++) {
+            prefsInt("tab", tab);
+            String text = launchUpright(MainActivity.class, null, 1500, "Teams", "Map", "Rules", "Network", "Options", "Start game", tabs[tab][1]);
+            assertTrue("tab " + tab + " shows the header: " + text, text.contains("Teams") && text.contains("Rules"));
+            System.out.println("SDK " + android.os.Build.VERSION.SDK_INT + ": upright MainActivity tab " + tab + " ok");
+            TestSupport.resetStatics();
+        }
+    }
+
+    @Test
+    public void portrait_mainActivity_firstLaunch_noData() throws Exception {
+        String text = launchUpright(MainActivity.class, null, 1500, "Network", "Options");
+        assertTrue("first launch upright shows the header: " + text, text.contains("Teams"));
+    }
+
+    @Test
+    public void portrait_optionsActivity_allTabs() throws Exception {
+        TestSupport.installData(app());
+        for (int tab = 0; tab < 3; tab++) {
+            prefsInt("optionsTab", tab);
+            String text = launchUpright(OptionsActivity.class, null, 600, "\u2039 Done", "Sound", "Display", "Advanced");
+            assertFalse("upright options tab " + tab + " is empty", text.trim().isEmpty());
+            System.out.println("SDK " + android.os.Build.VERSION.SDK_INT + ": upright OptionsActivity tab " + tab + " ok");
+        }
+    }
+
+    @Test
+    public void portrait_teamEditActivity() throws Exception {
+        TestSupport.installData(app());
+        app().getSharedPreferences(Store.PREFS_NAME, Context.MODE_PRIVATE).edit().putString("setup", SETUP_0_2_0).commit();
+        Intent in = new Intent(app(), TeamEditActivity.class).putExtra("team", 1);
+        String text = launchUpright(TeamEditActivity.class, in, 600, "\u2039 Done", "Randomise team");
+        assertFalse("upright team edit is empty", text.trim().isEmpty());
+    }
+
+    @Test
+    public void portrait_netLobbyActivity_chooser() throws Exception {
+        String text = launchUpright(NetLobbyActivity.class, null, 600, "\u2039 Back");
+        assertFalse("upright network chooser is empty", text.trim().isEmpty());
+    }
+
+    /** Rotating a menu keeps the tab it was on and lays it out again for the new shape of the window. */
+    @Test
+    public void rotation_mainActivity_keepsTabAndRebuildsLayout() throws Exception {
+        TestSupport.installData(app());
+        prefsInt("tab", 1);
+        ActivityController<MainActivity> ctl = Robolectric.buildActivity(MainActivity.class);
+        MainActivity a = ctl.create().start().postCreate(null).resume().visible().get();
+        TestSupport.layout(a);
+        TestSupport.settle(1500);
+        assertTrue("landscape map tab: " + TestSupport.texts(a.getWindow().getDecorView()), TestSupport.texts(a.getWindow().getDecorView()).contains("Theme"));
+        assertFalse("landscape has no stacked tab strip", Ui.upright(a));
+
+        RuntimeEnvironment.setQualifiers(TestSupport.PORTRAIT_QUALIFIERS);
+        try {
+            MainActivity b = (MainActivity) ctl.recreate().get();
+            TestSupport.layoutUpright(b);
+            TestSupport.settle(1500);
+            TestSupport.layoutUpright(b);
+            View decor = b.getWindow().getDecorView();
+            assertTrue("upright after rotation", Ui.upright(b));
+            assertTrue("still on the map tab after rotation: " + TestSupport.texts(decor), TestSupport.texts(decor).contains("Theme"));
+            assertShownInside(decor, "Map", TestSupport.PW, TestSupport.PH);
+            assertButtonsInside(decor, TestSupport.PW);
+            assertNetworkButtonFits(b, TestSupport.PW);
+            ctl.pause().stop().destroy();
+        } finally {
+            RuntimeEnvironment.setQualifiers(TestSupport.QUALIFIERS);
         }
     }
 

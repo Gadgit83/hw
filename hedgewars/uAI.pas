@@ -34,10 +34,18 @@ uses uConsts, SDLh, uAIMisc, uAIAmmoTests, uAIActions,
     uVariables, uCommands, uUtils, uDebug, uAILandMarks,
     uGearsUtils, uAI2;
 
+// --quick-ai and --smart-ai (both off unless the launcher passes them; see ArgParsers.pas)
+const cQuickThinkTime = 3000;      // game ms: a think stops here (the desktop limit is cMaxAIThinkTime, 9 s)
+      cQuickWalkTicks = 6000;      // game ms: the walk of one plan (the desktop allows up to about 36 s)
+      cQuickWalkTrialStep = 8;     // quick: weapons are tested every 8 steps of a walk (4 otherwise)
+      cSmartLowShot = 10 * 1024;   // smart: a best shot worth under 10 points of damage is weak
+      cSmartRepeatPenalty = 2048;  // smart: 2 points of damage off for each recent shot with the same weapon
+
 var BestActions: TActions;
     CanUseAmmo: array [TAmmoType] of boolean;
     StopThinking: boolean;
     StartTicks: Longword;
+    aiThinkLimit: Longword; // how long one think may run: cMaxAIThinkTime, or the shorter quick limit
     ThreadSem: PSDL_Sem;
 
 procedure FreeActionsList;
@@ -139,7 +147,7 @@ for i:= 0 to Pred(Targets.Count) do
         SDL_delay(0); // hint to let the context switch run
         repeat
         if (CanUseAmmo[a])
-            and ((not rareChecks) or ((AmmoTests[a].flags and amtest_Rare) = 0))
+            and ((not rareChecks) or ((AmmoTests[a].flags and amtest_Rare) = 0) or (cSmartAI and (BestActions.Score < cSmartLowShot)))
             and ((i = 0) or ((AmmoTests[a].flags and amtest_NoTarget) = 0))
             and ((l = 0) or ((AmmoTests[a].flags and amtest_NoLowGravity) = 0))
             then
@@ -147,6 +155,8 @@ for i:= 0 to Pred(Targets.Count) do
 {$HINTS OFF}
             Score:= AmmoTests[a].proc(Me, Targets.ar[i], BotLevel, ap, AmmoTests[a].flags);
 {$HINTS ON}
+            if cSmartAI and (Score > BadTurn) then
+                dec(Score, cSmartRepeatPenalty * AIRecentShots(Me^.Hedgehog^.Team, a));
             if (Score > BadTurn) and (Actions.Score + Score > BestActions.Score) then
                 if (BestActions.Score < 0) or (Actions.Score + Score > BestActions.Score + Byte(BotLevel - 1) * 2048) then
                     begin
@@ -309,7 +319,7 @@ end;
 procedure Walk(Me: PGear; var Actions: TActions);
 const FallPixForBranching = cHHRadius;
 var
-    maxticks, oldticks, steps, tmp: Longword;
+    maxticks, oldticks, steps, tmp, walkTrialStep: Longword;
     BaseRate, BestRate, Rate, i: LongInt;
     GoInfo: TGoInfo;
     CanGo: boolean;
@@ -320,6 +330,8 @@ var
 begin
 Actions.ticks:= 0;
 oldticks:= 0; // avoid compiler hint
+walkTrialStep:= 4;
+if cQuickAI then walkTrialStep:= cQuickWalkTrialStep;
 Stack.Count:= 0;
 
 clearAllMarks;
@@ -334,6 +346,9 @@ if isAfterAttack then
     maxticks:= Max(0, TurnTimeLeft - 500)
 else
     maxticks:= Max(0, TurnTimeLeft - 5000 - LongWord(4000 * BotLevel));
+
+if cQuickAI and (not isAfterAttack) and (maxticks > cQuickWalkTicks) then
+    maxticks:= cQuickWalkTicks;
 
 if not isAfterAttack then
     TestAmmos(Actions, Me, false);
@@ -462,10 +477,10 @@ if ((CurrentHedgehog^.MultiShootAttacks = 0) or ((Ammoz[Me^.Hedgehog^.CurAmmoTyp
                 BestRate:= Rate;
                 isAfterAttack:= true // we have better place, go there and do not use ammo
                 end
-            else if Rate < BestRate then
+            else if (Rate < BestRate) and (not (cSmartAI and (BestActions.Score < cSmartLowShot))) then
                 break;
 
-            if (not isAfterAttack) and ((steps mod 4) = 0) then
+            if (not isAfterAttack) and ((steps mod walkTrialStep) = 0) then
                 begin
                 if (steps > 4) and checkMark(hwRound(Me^.X), hwRound(Me^.Y), markWalkedHere) then
                     break;
@@ -541,7 +556,7 @@ if ((Me^.State and gstAttacked) = 0) or isInMultiShoot or bonuses.activity or ((
             or (itHedgehog = currHedgehogIndex)
             or BestActions.isWalkingToABetterPlace;
 
-        if (StartTicks > GameTicks - 1500) and (not StopThinking) then
+        if (not cQuickAI) and (StartTicks > GameTicks - 1500) and (not StopThinking) then
             SDL_Delay(700);
 
         if (BestActions.Score < -1023) and (not BestActions.isWalkingToABetterPlace) then
@@ -597,6 +612,9 @@ else
         end
     end;
 
+// quick: no action found yet (for example something is still moving): look again in 100 ms, not every frame
+if cQuickAI and (BestActions.Count = 0) and (not StopThinking) then
+    SDL_Delay(100);
 Me^.State:= Me^.State and (not gstHHThinking);
 Think:= 0;
 SDL_SemPost(ThreadSem);
@@ -622,6 +640,8 @@ BestActions.isWalkingToABetterPlace:= false;
 
 StopThinking:= false;
 ThinkingHH:= Me;
+aiThinkLimit:= cMaxAIThinkTime;
+if cQuickAI then aiThinkLimit:= cQuickThinkTime;
 
 FillTargets;
 
@@ -672,7 +692,7 @@ with CurrentHedgehog^ do
 {$ENDIF}
                 ProcessAction(BestActions, Gear)
                 end
-        else if ((GameTicks - StartTicks) > cMaxAIThinkTime)
+        else if ((GameTicks - StartTicks) > aiThinkLimit)
             or (TurnTimeLeft <= cStopThinkTime) then
                 StopThinking:= true
 end;

@@ -37,6 +37,8 @@ procedure SetAmmo(var Hedgehog: THedgehog; ammo: TAmmoType; cnt: LongWord);
 function  HHHasAmmo(var Hedgehog: THedgehog; Ammo: TAmmoType): LongWord;
 procedure PackAmmo(Ammo: PHHAmmo; Slot: LongInt);
 procedure OnUsedAmmo(var Hedgehog: THedgehog);
+function AIRecentShots(Team: PTeam; a: TAmmoType): LongInt;
+procedure AINoteShot(Team: PTeam; a: TAmmoType);
 procedure ApplyAngleBounds(var Hedgehog: THedgehog; AmmoType: TAmmoType);
 procedure ApplyAmmoChanges(var Hedgehog: THedgehog);
 procedure SwitchNotHeldAmmo(var Hedgehog: THedgehog);
@@ -292,9 +294,52 @@ begin
 AmmoMenuInvalidated:= true;
 end;
 
+// --smart-ai: the last shots of each team, so the computer can avoid repeating a weapon. Only the AI reads it,
+// and only when the switch is on; it never changes the game.
+const cAIShotMemory = 3;
+      cAIMemTeams = 8;
+var aiMemTeam: array[0..cAIMemTeams - 1] of PTeam;
+    aiMemShots: array[0..cAIMemTeams - 1, 0..cAIShotMemory - 1] of TAmmoType;
+    aiMemCount: array[0..cAIMemTeams - 1] of LongInt;
+
+function AIRecentShots(Team: PTeam; a: TAmmoType): LongInt;
+var i, j: LongInt;
+begin
+AIRecentShots:= 0;
+if Team = nil then exit;
+for i:= 0 to cAIMemTeams - 1 do
+    if aiMemTeam[i] = Team then
+        begin
+        for j:= 0 to cAIShotMemory - 1 do
+            if (j < aiMemCount[i]) and (aiMemShots[i, j] = a) then
+                inc(AIRecentShots);
+        exit
+        end
+end;
+
+procedure AINoteShot(Team: PTeam; a: TAmmoType);
+var i, slot: LongInt;
+begin
+if Team = nil then exit;
+slot:= -1;
+for i:= 0 to cAIMemTeams - 1 do
+    if aiMemTeam[i] = Team then slot:= i;
+if slot < 0 then
+    for i:= 0 to cAIMemTeams - 1 do
+        if (slot < 0) and (aiMemTeam[i] = nil) then
+            begin
+            aiMemTeam[i]:= Team;
+            slot:= i
+            end;
+if slot < 0 then exit;
+aiMemShots[slot, aiMemCount[slot] mod cAIShotMemory]:= a;
+inc(aiMemCount[slot])
+end;
+
 procedure OnUsedAmmo(var Hedgehog: THedgehog);
 var CurWeapon: PAmmo;
 begin
+if cSmartAI then AINoteShot(Hedgehog.Team, Hedgehog.CurAmmoType);
 CurWeapon:= GetCurAmmoEntry(Hedgehog);
 with Hedgehog do
     begin

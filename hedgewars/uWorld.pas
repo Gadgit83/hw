@@ -749,7 +749,7 @@ begin
 if cTwoJumpButtons then
     begin
     highJumpButton.show:= true;
-    highJumpButton.sprite:= sprJumpWidget;
+    highJumpButton.sprite:= sprHighJumpWidget;
     highJumpButton.frame.w:= jumpWidget.frame.w;
     highJumpButton.frame.h:= jumpWidget.frame.h;
     gap:= jumpWidget.frame.w div 4;
@@ -778,6 +778,70 @@ if cSwapFireJump then
         highJumpButton.active:= highJumpButton.frame;
         end;
     end;
+{$ENDIF}
+end;
+
+// --pause-menu: while the game is paused two buttons sit under the Paused banner, Quit game and Options. Their frames are set
+// here on every frame (the coordinates are centred on the screen, Y counts down from the top, as for the other widgets); they
+// are shown only while the pause banner is, and a press only sends a message to the launcher (see uTouch).
+procedure PlacePauseMenu;
+var shown: boolean;
+    padX, padY, h, bannerH, qw, ow, gap, total, x0, y0: LongInt;
+begin
+{$IFDEF USE_TOUCH_INTERFACE}
+shown:= cPauseMenu and isPaused and (not fastUntilLag) and (not isAFK);
+pauseQuitWidget.show:= shown;
+pauseOptionsWidget.show:= shown;
+if not shown then
+    exit;
+bannerH:= PauseTexture^.h;
+if HostPauseTexture^.h > bannerH then bannerH:= HostPauseTexture^.h;
+padX:= PauseQuitTexture^.h;
+padY:= PauseQuitTexture^.h div 2;
+h:= PauseQuitTexture^.h;
+if PauseOptionsTexture^.h > h then h:= PauseOptionsTexture^.h;
+h:= h + 2 * padY;
+qw:= PauseQuitTexture^.w + 2 * padX;
+ow:= PauseOptionsTexture^.w + 2 * padX;
+gap:= padX;
+total:= qw + gap + ow;
+x0:= -(total div 2);
+y0:= (cScreenHeight shr 1) + bannerH + padY * 2;
+with pauseQuitWidget do
+    begin
+    frame.x:= x0;
+    frame.y:= y0;
+    frame.w:= qw;
+    frame.h:= h;
+    active:= frame;
+    end;
+with pauseOptionsWidget do
+    begin
+    frame.x:= x0 + qw + gap;
+    frame.y:= y0;
+    frame.w:= ow;
+    frame.h:= h;
+    active:= frame;
+    end;
+{$ENDIF}
+end;
+
+procedure DrawPauseButton(widget: POnScreenWidget; tex: PTexture);
+begin
+{$IFDEF USE_TOUCH_INTERFACE}
+if not widget^.show then
+    exit;
+DrawRect(widget^.frame, 0, 0, 0, $B0, true);
+DrawRect(widget^.frame, $FF, $FF, $FF, $FF, false);
+DrawTexture(widget^.frame.x + (widget^.frame.w - tex^.w) div 2, widget^.frame.y + (widget^.frame.h - tex^.h) div 2, tex);
+{$ENDIF}
+end;
+
+procedure DrawPauseMenu;
+begin
+{$IFDEF USE_TOUCH_INTERFACE}
+DrawPauseButton(@pauseQuitWidget, PauseQuitTexture);
+DrawPauseButton(@pauseOptionsWidget, PauseOptionsTexture);
 {$ENDIF}
 end;
 
@@ -2343,6 +2407,11 @@ else if isPaused then
     else
         DrawTextureCentered(0, (cScreenHeight shr 1), PauseTexture);
     end;
+
+{$IFDEF USE_TOUCH_INTERFACE}
+PlacePauseMenu;
+DrawPauseMenu;
+{$ENDIF}
 
 // Cursor
 if isCursorVisible and bShowAmmoMenu and (not cDirectAmmoMenu) then

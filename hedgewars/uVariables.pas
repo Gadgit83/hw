@@ -211,6 +211,8 @@ var
     cTwoJumpButtons : boolean; // touch: Jump is the long forward jump (ljump) and a second button, High jump (hjump), sits left of it (--two-jump-buttons)
     cJumpForwardWhenMoving: boolean; // touch: with one jump button, Jump does the long forward jump while a left or right move is held (--jump-forward-when-moving)
     cSwapFireJump   : boolean; // touch: the Fire and the Jump buttons swap places, mirrored (--swap-fire-jump)
+    cPauseMenu      : boolean; // touch: the pause screen shows two buttons under the Paused banner, Quit game and Options; they only send
+                               // IPC 'k' to the launcher, which asks the app (--pause-menu)
     cTurnCamPending : boolean; // a turn has started and the camera has not been moved for it yet
     cMenuTarget     : GLfloat; // wanted scale of the weapon menu (0: same as the HUD)
     cMenuScale      : GLfloat; // scale the weapon menu is drawn at right now
@@ -334,6 +336,7 @@ var
     arrowUp, arrowDown, arrowLeft, arrowRight : TOnScreenWidget;
     firebutton, jumpWidget, AMWidget          : TOnScreenWidget;
     highJumpButton                            : TOnScreenWidget; // --two-jump-buttons: the high (vertical) jump, left of jumpWidget
+    pauseQuitWidget, pauseOptionsWidget       : TOnScreenWidget; // --pause-menu: the buttons under the Paused banner (Quit game, Options)
     pauseButton, utilityWidget                : TOnScreenWidget;
     utilityWidget2                            : TOnScreenWidget;
 {$ENDIF}
@@ -548,6 +551,8 @@ const
             Width: 128; Height: 128; imageWidth: 0; imageHeight: 0; saveSurf: false; critical: true; checkSum: false; priority: tpHigh; getDimensions: false; getImageDimensions: true), // sprSwitchButton
             (FileName: 'bouncebutton'; Path: ptButtons; AltPath: ptNone; Texture: nil; Surface: nil;
             Width: 128; Height: 128; imageWidth: 0; imageHeight: 0; saveSurf: false; critical: true; checkSum: false; priority: tpHigh; getDimensions: false; getImageDimensions: true), // sprBounceButton
+            (FileName: 'highjump'; Path: ptButtons; AltPath: ptNone; Texture: nil; Surface: nil;
+            Width: 128; Height: 128; imageWidth: 0; imageHeight: 0; saveSurf: false; critical: true; checkSum: false; priority: tpHigh; getDimensions: false; getImageDimensions: true), // sprHighJumpWidget
 {$ENDIF}
             (FileName:      'Flake'; Path:ptCurrTheme; AltPath: ptNone; Texture: nil; Surface: nil;
             Width:  64; Height: 64; imageWidth: 0; imageHeight: 0; saveSurf: false; critical: true; checkSum: false; priority: tpHighest; getDimensions: false; getImageDimensions: true),// sprFlake
@@ -2668,6 +2673,8 @@ var
 
     PauseTexture,
     HostPauseTexture,
+    PauseQuitTexture,
+    PauseOptionsTexture,
     AFKTexture,
     SyncTexture,
     ConfirmTexture: PTexture;
@@ -2762,7 +2769,7 @@ end;
 function isIdleHiddenControl(widget: POnScreenWidget): boolean;
 begin
 isIdleHiddenControl:= false;
-if (widget = @AMWidget) or (widget = @pauseButton) then
+if (widget = @AMWidget) or (widget = @pauseButton) or (widget = @pauseQuitWidget) or (widget = @pauseOptionsWidget) then
     exit;
 isIdleHiddenControl:= touchIdleTurn;
 end;
@@ -2843,6 +2850,7 @@ begin
     cTwoJumpButtons:= false;
     cJumpForwardWhenMoving:= false;
     cSwapFireJump:= false;
+    cPauseMenu:= false;
     cTurnCamPending:= false;
     cCornerTL:= 0;
     cCornerTR:= 0;

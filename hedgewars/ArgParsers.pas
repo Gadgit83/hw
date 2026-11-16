@@ -120,6 +120,7 @@ begin
     WriteLn(stdout, '  --two-jump-buttons: Jump is the long forward jump and a second button, High jump, sits left of it (pressed twice quickly: back flip) (touch builds)');
     WriteLn(stdout, '  --jump-forward-when-moving: With one jump button, Jump does the long forward jump while a left or right move is held (touch builds)');
     WriteLn(stdout, '  --swap-fire-jump: Swap the places of the Fire and the Jump buttons, mirrored (touch builds)');
+    WriteLn(stdout, '  --pause-menu: The pause screen shows Quit game and Options buttons; the app is asked what to do (touch builds)');
     WriteLn(stdout, '  --screen-shape <tl,tr,bl,br,margin,ly0,ly1,ry0,ry1>: corner radii, extra edge margin and the vertical extent of the left and right cut-out, in pixels');
     WriteLn(stdout, '  --showfps: Show frames per second');
     WriteLn(stdout, '');
@@ -293,7 +294,7 @@ begin
 end;
 
 function parseParameter(cmd:string; arg:string; var paramIndex:LongInt): Boolean;
-const reallyAll: array[0..56] of shortstring = (
+const reallyAll: array[0..57] of shortstring = (
                 '--prefix', '--user-prefix', '--locale', '--fullscreen-width', '--fullscreen-height', '--width',
                 '--height', '--maximized', '--frame-interval', '--volume','--nomusic', '--nosound', '--nodampen',
                 '--fullscreen', '--showfps', '--altdmg', '--low-quality', '--raw-quality', '--stereo', '--nick',
@@ -303,7 +304,7 @@ const reallyAll: array[0..56] of shortstring = (
   {android}     '--ui-scale', '--inset-left', '--inset-top', '--inset-right', '--inset-bottom', '--menu-scale',
                 '--effects-volume', '--music-volume', '--no-voices', '--screen-shape', '--turn-centre', '--turn-zoom',
                 '--jump-inset', '--hide-idle-controls', '--direct-ammo-menu', '--refresh-weapon-ui',
-                '--two-jump-buttons', '--jump-forward-when-moving', '--swap-fire-jump');
+                '--two-jump-buttons', '--jump-forward-when-moving', '--swap-fire-jump', '--pause-menu');
 var cmdIndex: byte;
 begin
     parseParameter:= false;
@@ -373,6 +374,7 @@ begin
         {--two-jump-buttons}    54: cTwoJumpButtons    := true;
         {--jump-forward-when-moving} 55: cJumpForwardWhenMoving := true;
         {--swap-fire-jump}      56: cSwapFireJump      := true;
+        {--pause-menu}          57: cPauseMenu         := true;
     else
         begin
         //Assume the first "non parameter" is the demo file, anything else is invalid

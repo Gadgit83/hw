@@ -145,6 +145,26 @@ finger^.downWhilePaused:= isPaused;
 
 inc(buttonsDown);//inc buttonsDown, if we don't see a button down we'll dec it
 
+// --pause-menu: the Quit game and Options buttons under the Paused banner work on every phone, a watching one too. A press only
+// asks the launcher (command pausemenu, IPC 'k'); the app shows the question or the options. Nothing in the game changes.
+if isOnWidget(@pauseQuitWidget, finger^) or isOnWidget(@pauseOptionsWidget, finger^) then
+    begin
+    moveCursor:= false;
+    if isOnWidget(@pauseQuitWidget, finger^) then
+        begin
+        WriteLnToConsole('[Touch] pause menu: quit game');
+        finger^.pressedWidget:= @pauseQuitWidget;
+        ParseCommand('pausemenu q', true);
+        end
+    else
+        begin
+        WriteLnToConsole('[Touch] pause menu: options');
+        finger^.pressedWidget:= @pauseOptionsWidget;
+        ParseCommand('pausemenu o', true);
+        end;
+    exit;
+    end;
+
 // a phone that only watches a network game has no controls: every touch pans or zooms the camera
 if ((not isPaused) or isOnWidget(@pauseButton, finger^)) and ((GameType <> gmtNet) or (not cNetWatch)) then
 begin

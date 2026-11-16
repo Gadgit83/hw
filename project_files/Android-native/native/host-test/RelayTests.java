@@ -48,7 +48,8 @@ public class RelayTests {
         volatile String closed = "", notice = "";
         public void onState(Map<String, Object> s) { state = s; }
         public void onStart(RelayClient.StartInfo s) { start = s; }
-        public void onSummary(Map<String, Object> m) { }
+        volatile Map<String, Object> summary;
+        public void onSummary(Map<String, Object> m) { summary = m; }
         public void onNotice(String t) { notice = t; notices.add(t); }
         public void onClosed(String r) { closed = r; }
         volatile String refusedCode = "", refusedReason = "", rejoinToken = "", seatName = "", gaveUp = "";
@@ -77,6 +78,8 @@ public class RelayTests {
         static long rejoinMs = 120000, backResendMs = 2500;
         /** How long a hidden phone (control frame H) is left alone by the rules; the app uses ten minutes. */
         static long hiddenMaxMs = 600000;
+        /** The extra silence limit for a phone that has just come back in front (the app uses twenty seconds); 0 here for the old tests. */
+        static long returnGraceMs = 0;
         final java.util.concurrent.atomic.AtomicBoolean netUp = new java.util.concurrent.atomic.AtomicBoolean(true);
 
         Fix(long silenceMs, long graceMs) throws Exception {
@@ -98,6 +101,7 @@ public class RelayTests {
             cfg.rejoinMs = rejoinMs;
             cfg.backResendMs = backResendMs;
             cfg.hiddenMaxMs = hiddenMaxMs;
+            cfg.returnGraceMs = returnGraceMs;
             cfg.listener = new Relay.Listener() {
                 public void log(String line) { log.add(line); }
                 public void changed() { }
@@ -2193,6 +2197,96 @@ public class RelayTests {
     /** The control frames of a hidden phone: \0H (its app went to the background), \0V (in front again). */
     static final byte[] HIDE = { 0, 'H' }, SHOW = { 0, 'V' };
 
+    /**
+     * Join to watch (issue 23): a watcher that joins a running game gets the start even when every player is away (the game is kept for
+     * the rejoin windows); a watcher that joins after the game ended is told how it ended, not left in an empty lobby.
+     */
+    static void testWatchLate() throws Exception {
+        System.out.println("watch late: a watcher joining a running game with every player away gets the start; of a game that ended it is told so");
+        // (a) the game runs, both players are away (their links are gone, their seats are kept)
+        Game g = new Game(1500, 500);
+        g.eb.close(); g.b.close();
+        g.ea.close(); g.a.close();
+        check(waitFor(() -> Json.bool(me(g.f, "PhoneA"), "away", false) && Json.bool(me(g.f, "PhoneB"), "away", false), 3000), "both players are away, the game is kept");
+        check(g.f.relay.status(0) != null && "playing".equals(Json.str(g.f.relay.status(0), "state", "")), "  the game is still running");
+        P wp = new P();
+        RelayClient wc = watcher(g.f, wp, "Late");
+        check(waitFor(() -> wp.start != null, 3000), "a watcher joining while every player is away is sent the running game");
+        check(wp.start != null && wp.start.asWatcher && !wp.start.token.isEmpty(), "  as a watcher, with its own token");
+        wc.close();
+        g.end();
+
+        // (b) the window runs out: the game ends; a watcher joining now is told how it ended
+        Fix.rejoinMs = 1500;
+        try {
+            Game g2 = new Game(1500, 500);
+            g2.eb.close(); g2.b.close();
+            g2.ea.close(); g2.a.close();
+            check(waitFor(() -> g2.f.relay.lastSummary() != null, 8000), "the rejoin window runs out and the game ends");
+            P we = new P();
+            RelayClient wc2 = watcher(g2.f, we, "Late");
+            check(waitFor(() -> we.summary != null, 3000), "a watcher joining after the game ended is told how it ended");
+            String reason = we.summary == null ? "" : Json.str(we.summary, "reason", "");
+            check(!reason.isEmpty() && reason.equals(g2.f.relay.lastSummary().endReason), "  with the end reason the relay recorded (" + reason + ")");
+            check(we.start == null, "  and is not given a game that is not running");
+            check(we.state != null && "setup".equals(Json.str(we.state, "state", "")), "  its lobby shows the game is not running");
+            wc2.close();
+            g2.end();
+        } finally {
+            Fix.rejoinMs = 120000;
+        }
+    }
+
+    /**
+     * The return grace (Config.returnGraceMs): a phone that comes back in front (V) and is the one owed the turn gets its silence limit plus
+     * the grace for the first window after V. It is not dropped before silence+grace, and is dropped after it.
+     */
+    static void testReturnGrace() throws Exception {
+        System.out.println("return grace: a phone back in front (V) gets silence limit + grace for its first window, not more");
+        final long silence = 1000, grace = 2000;
+        Fix.returnGraceMs = grace;
+        try {
+            Game g = new Game(silence, 500);
+            g.eb.send("Mdigest-one");
+            g.ea.send("Mdigest-one");
+            g.ea.send(new byte[] { 'N', 0, 0, 0, 0, 0, 1 });          // A ends its turn: B is owed the next one
+            g.eb.send(HIDE);
+            check(waitFor(() -> g.f.logged("PhoneB is hidden"), 2000), "B, owed the turn, hides");
+            Thread.sleep(silence + 800);                               // its window runs out while it is hidden: held off
+            g.eb.send(SHOW);
+            check(waitFor(() -> g.f.logged("PhoneB is in front again"), 2000), "B comes back in front");
+            long backAt = System.currentTimeMillis();
+            Thread.sleep(silence + grace - 1000);                      // about 1 s before silence + grace
+            check(!dropped(g.f, "PhoneB"), "  not dropped before silence + grace (" + (silence + grace) + " ms after V)");
+            long droppedAt = -1;
+            while (System.currentTimeMillis() - backAt < 9000) {
+                if (dropped(g.f, "PhoneB")) { droppedAt = System.currentTimeMillis(); break; }
+                Thread.sleep(50);
+            }
+            check(droppedAt > 0, "  and dropped after silence + grace");
+            if (droppedAt > 0) {
+                long after = droppedAt - backAt;
+                check(after >= silence + grace - 100 && after <= silence + grace + 2000,
+                        "  dropped " + after + " ms after V (silence " + silence + " ms + grace " + grace + " ms; the relay checks every 500 ms)");
+            }
+            check(!dropped(g.f, "PhoneA"), "  phone A is not dropped");
+            g.end();
+
+            // A phone that was never hidden keeps the plain silence limit: dropped after silence, not silence + grace.
+            Game g2 = new Game(silence, 500);
+            g2.eb.send("Mdigest-one");
+            g2.ea.send("Mdigest-one");
+            g2.ea.send(new byte[] { 'N', 0, 0, 0, 0, 0, 1 });
+            long t0 = System.currentTimeMillis();
+            check(waitFor(() -> dropped(g2.f, "PhoneB"), 6000), "a phone that was never hidden is dropped by the plain silence rule");
+            long plain = System.currentTimeMillis() - t0;
+            check(plain < silence + grace, "  after " + plain + " ms, under silence + grace (" + (silence + grace) + " ms)");
+            g2.end();
+        } finally {
+            Fix.returnGraceMs = 0;
+        }
+    }
+
     static void testHidden() throws Exception {
         System.out.println("hidden: a phone whose app is in the background (control frame H) is not dropped by the rules that wait for it (phase 2)");
         // The silence rule: B is the last to talk (its ticks), then it hides and says nothing for 4 s (silence limit 1.5 s + grace).
@@ -2388,6 +2482,8 @@ public class RelayTests {
         testLinkLiveness();
         testHostNetworkLoss();
         testHidden();
+        testReturnGrace();
+        testWatchLate();
         System.out.println("\nrelay tests: " + checks + " checks, " + failures + " failed");
         System.out.println(failures == 0 ? "RESULT: PASS (the relay survived all malformed input)" : "RESULT: FAIL");
         System.exit(failures == 0 ? 0 : 1);

@@ -151,6 +151,12 @@ public final class Relay {
          */
         public long hiddenMaxMs = 600000;
         /**
+         * The extra silence limit for a phone that has just come back in front (control frame V) and is the one the silence rule would blame:
+         * for the first window after V its limit is silenceMs plus this, so a phone whose engine resumes slowly after a pause is not dropped
+         * moments after it is back. Phones that were never hidden are not affected. 0 turns it off.
+         */
+        public long returnGraceMs = 20000;
+        /**
          * How long a player's seat stays "away" after the connection was lost or the player left (the Back dialog's "Leave the game"):
          * its teams are gone (turns skipped) and the same phone may rejoin inside this time. After it the seat is given up. 0 turns rejoining off.
          */
@@ -539,6 +545,8 @@ public final class Relay {
         /** The launcher reported that the app is in the background (\0H) and not yet in front again (\0V): see {@link Config#hiddenMaxMs}. */
         boolean hidden;
         long hiddenAt;
+        /** Until this time its silence limit has {@link Config#returnGraceMs} extra (set by \0V; 0 when it was never hidden). */
+        long returnUntil;
         String fatal;
         long lastMsg;
         /** When anything last arrived on the engine link (a game message or a control frame, the pong included). */
@@ -1403,9 +1411,11 @@ public final class Relay {
         me.lobbyOut.attach(s.getOutputStream());
         log("lobby: " + me.name + " joined as a watcher (id " + me.id + ") from " + s.getRemoteSocketAddress() + ", build " + me.build);
         broadcastState();
-        // A watcher may join while a game runs: it gets the game at once.
+        // A watcher may join while a game runs: it gets the game at once. When none runs, it is told how the last game ended (the
+        // summary the players get), so its screen says "The game ended" and why, instead of an empty lobby.
         synchronized (lock) {
             if (state != S_SETUP && game != null && spectators.containsKey(me.id)) startSpectator(me);
+            else if (game == null && lastSummary != null && spectators.containsKey(me.id)) sendLastEnd(me);
         }
         try {
             for (;;) {
@@ -1418,6 +1428,14 @@ public final class Relay {
             log("lobby " + me.name + ": " + e);
         }
         spectatorLobbyLost(me);
+    }
+
+    /** Lock held. The summary of the last game, for a phone that asks to watch when no game runs. */
+    private void sendLastEnd(Spectator sp) {
+        GameSummary s = lastSummary;
+        sendLobby(sp, Json.obj("t", "summary", "game", (long) s.gameNo, "text", s.text(), "logHash", s.logHash, "logMsgs", s.logMsgs,
+                "toYouHash", "", "toYouMsgs", 0L, "reason", s.endReason));
+        log("watcher " + sp.name + " asked to watch, but no game runs: told that game " + s.gameNo + " ended (" + s.endReason + ")");
     }
 
     private void spectatorLobbyLost(Spectator sp) {
@@ -2358,6 +2376,19 @@ public final class Relay {
         }
     }
 
+    /**
+     * The name of the phone the silence rule would blame if nothing arrived now, or "" (no running game, or it cannot be told). For the
+     * test harness: it shows whose silence the rule is watching at this moment.
+     */
+    public String silenceOwner() {
+        synchronized (lock) {
+            Game g = game;
+            if (g == null || state != S_PLAYING) return "";
+            Player p = silenceCulprit(g, silenceLive());
+            return p == null ? "" : p.name;
+        }
+    }
+
     /** A running game's counters, for the host's screen. */
     public String liveText() {
         synchronized (lock) {
@@ -2534,6 +2565,9 @@ public final class Relay {
                 } else if (state == S_PLAYING) {
                     // Before the first turn ends there is extra grace: the first turn can start late on a slow phone.
                     long limit = cfg.silenceMs + (g.digests.isEmpty() ? cfg.graceMs : 0);
+                    // A phone that has just come back in front gets the return grace for its first window (see restartSilenceIfOwed).
+                    Player owed = silenceCulprit(g, silenceLive());
+                    if (owed != null && now < owed.returnUntil) limit += cfg.returnGraceMs;
                     if (now - g.lastKeptAt > limit) silence(g, now);
                 }
                 if (!g.desyncReporters.isEmpty() && now - g.desyncSince > 5000) g.desyncReporters.clear();
@@ -2595,6 +2629,7 @@ public final class Relay {
      * the clock has run out), so without this it could be dropped moments after it came back, with no time at all to speak again.
      */
     private void restartSilenceIfOwed(Game g, Player p, long now) {
+        p.returnUntil = now + cfg.silenceMs + cfg.returnGraceMs;   // the first window after V gets the grace (see the silence check)
         if (state != S_PLAYING || !g.armed || g.paused) return;
         if (silenceCulprit(g, silenceLive()) == p) {
             g.lastKeptAt = now;

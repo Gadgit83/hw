@@ -11,6 +11,7 @@ import android.app.Activity;
 import android.view.View;
 import android.content.Context;
 import android.content.Intent;
+import org.hedgewars.android.net.RelayClient;
 
 import org.junit.Before;
 import org.junit.Test;
@@ -285,6 +286,83 @@ public class LaunchSmokeTest {
         String host = launch(NetLobbyActivity.class, null, 600);
         assertTrue("the host sees how many watch and who: " + host, host.contains("Phones watching: 1") && host.contains("Tablet") && host.contains("Start game"));
         System.out.println("SDK " + android.os.Build.VERSION.SDK_INT + ": NetLobbyActivity watch path ok");
+    }
+
+    /** The relay's start for a phone that watches (what NetSession's relay handler receives), handed to the same code path as the relay's line. */
+    private static void relayStartForWatcher() throws Exception {
+        RelayClient.StartInfo s = new RelayClient.StartInfo();
+        s.you = 3;
+        s.game = 1;
+        s.token = "watch-token";
+        s.nick = "Tablet";
+        s.host = "192.168.1.20";
+        s.port = 46633;
+        s.asWatcher = true;
+        java.lang.reflect.Field hf = NetSession.class.getDeclaredField("HANDLER");
+        hf.setAccessible(true);
+        ((RelayClient.Handler) hf.get(null)).onStart(s);
+    }
+
+    /** Join to watch (issue 23): a watcher that is sent the start opens the game screen at once, with the Network screen in front. */
+    @Test
+    public void netLobbyActivity_watcherStartOpensTheGame() throws Exception {
+        TestSupport.installData(app());
+        netState(LOBBY_WATCH, false);
+        NetSession.watching = true;
+        ActivityController<NetLobbyActivity> ctl = Robolectric.buildActivity(NetLobbyActivity.class);
+        NetLobbyActivity a = ctl.create().start().postCreate(null).resume().visible().get();
+        a.onWindowFocusChanged(true);
+        TestSupport.settle(300);
+        relayStartForWatcher();
+        TestSupport.settle(600);
+        Intent next = org.robolectric.Shadows.shadowOf(a).getNextStartedActivity();
+        assertNotNull("a watcher sent the start leaves the lobby for the game screen", next);
+        assertEquals(GameActivity.class.getName(), next.getComponent().getClassName());
+        ctl.pause().stop().destroy();
+        TestSupport.resetStatics();
+        NetSession.inGame = false;
+        NetSession.pendingStart = null;
+        NetSession.lobbyVisible = false;
+    }
+
+    /** The same start while the Network screen is not in front: it waits as a pending start, and the screen opens the game when it comes back. */
+    @Test
+    public void netLobbyActivity_watcherStartWaitsForTheScreen() throws Exception {
+        TestSupport.installData(app());
+        netState(LOBBY_WATCH, false);
+        NetSession.watching = true;
+        NetSession.lobbyVisible = false;
+        relayStartForWatcher();
+        assertNotNull("the start is kept while the Network screen is not in front", NetSession.pendingStart);
+        ActivityController<NetLobbyActivity> ctl = Robolectric.buildActivity(NetLobbyActivity.class);
+        NetLobbyActivity a = ctl.create().start().postCreate(null).resume().visible().get();
+        a.onWindowFocusChanged(true);
+        TestSupport.settle(600);
+        Intent next = org.robolectric.Shadows.shadowOf(a).getNextStartedActivity();
+        assertNotNull("the Network screen opens the game for the kept start", next);
+        assertEquals(GameActivity.class.getName(), next.getComponent().getClassName());
+        assertNull("the kept start is used once", NetSession.pendingStart);
+        ctl.pause().stop().destroy();
+        TestSupport.resetStatics();
+        NetSession.inGame = false;
+        NetSession.lobbyVisible = false;
+    }
+
+    /** A watcher whose game has ended (it asked to watch after the end, or the game ended while it watched) sees "The game ended" and why, not a lobby. */
+    @Test
+    public void netLobbyActivity_watcherOfAnEndedGameSeesTheEnd() throws Exception {
+        TestSupport.installData(app());
+        netState(LOBBY_WATCH, false);
+        NetSession.watching = true;
+        NetSession.lastEndReason = "Every player left the game and nobody came back";
+        try {
+            String text = launch(NetLobbyActivity.class, null, 600);
+            assertTrue("the watcher is told the game ended, and why: " + text,
+                    text.contains("The game ended") && text.contains("Every player left the game and nobody came back") && !text.contains("game running"));
+        } finally {
+            NetSession.lastEndReason = "";
+            TestSupport.resetStatics();
+        }
     }
 
     /** "Stop watching" confirmed in the game screen (another process) leaves the relay at once: the lobby shows the chooser, not "Watching". */

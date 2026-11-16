@@ -804,6 +804,11 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
         String phase = st == null ? "connecting..." : Json.str(st, "state", "");
         boolean playing = "playing".equals(phase) || NetSession.inGame;
         card.addView(ui.hint("State: " + (playing ? "game running" : "lobby (setting up)")));
+        // A watcher whose game is over (it asked to watch after the game ended, or it was ended while it watched) is told so, and why.
+        if (NetSession.watching && !playing && !NetSession.lastEndReason.isEmpty()) {
+            card.addView(ui.heading("The game ended"));
+            card.addView(ui.text("Why: " + NetSession.lastEndReason, 16, Color.WHITE));
+        }
         NetSession.HostInfo live = NetSession.hostInfo;
         if (host && live != null && playing && !live.live.isEmpty()) card.addView(ui.hint(live.live));
         long watchingN = st == null ? 0 : Json.num(st, "watching", 0);

@@ -474,8 +474,12 @@ public class NetHarness {
                 Files.write(quitFlag, new byte[] { 1 });
                 turnsAtQuit = relay.turns();
             }
-            if (scenario.equals("hidden") && !Files.exists(root.resolve("hide.now")) && relay.turns() >= killAfterTurns) {
-                System.out.println("[harness] === hidden: phone B's app goes to the background after " + relay.turns() + " turn checksums (its engine stops for 40 s) ===");
+            // Hidden while B is the one the silence rule waits on (A ended its turn and B owes the next move): nothing then sends, so the
+            // silence window runs out while B is hidden and the rule must be held off for it. Hidden at any other time A's traffic
+            // keeps the clock moving and the check could never see the hold.
+            if (scenario.equals("hidden") && !Files.exists(root.resolve("hide.now")) && relay.turns() >= killAfterTurns
+                    && relay.silenceOwner().equals("Phone B")) {
+                System.out.println("[harness] === hidden: phone B's app goes to the background after " + relay.turns() + " turn checksums, while the silence rule waits on B (its engine stops for 40 s) ===");
                 Files.write(root.resolve("hide.now"), new byte[] { 1 });
             }
             if (!killed && (scenario.startsWith("dropout") || scenario.equals("stall")) && relay.turns() >= killAfterTurns) {
@@ -710,6 +714,8 @@ public class NetHarness {
             System.out.println("hidden check: control frames H taken " + hid + ", V taken " + front + ", silence rule held off for B " + held);
             if (!hid || !front) fails.add("the relay did not take Phone B's hidden (H) and in-front (V) control frames: " + hid + " / " + front);
             if (!held) fails.add("the silence rule was never held off for the hidden Phone B: its engine stopped while hidden, the rule should have applied");
+            boolean bDropped = relayLog.stream().anyMatch(l -> l.contains("Phone B dropped"));
+            if (bDropped) fails.add("Phone B was dropped although it came back in front (the return grace should cover its first window)");
         }
         if (pauseScenario || scenario.equals("joinerpause")) pauseChecks(scenario, gs, relayLog, phones, ps, fails);
         if (watchScen) watchChecks(scenario, gs, relayLog, pa, watchers, fails);

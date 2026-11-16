@@ -161,6 +161,12 @@ public class ConfigCheck {
             List<String> args = o.toEngineArgs();
             check(args.contains("--volume") && args.get(args.indexOf("--volume") + 1).equals("100"), "default volume is the engine's 100");
             check(args.contains("--raw-quality") && args.get(args.indexOf("--raw-quality") + 1).equals("0"), "default quality is best");
+            check(args.contains("--quick-ai") && args.contains("--smart-ai"), "default computer players are quick and smart");
+            Options classic = new Options();
+            classic.aiQuick = false;
+            List<String> ca = classic.toEngineArgs();
+            check(!ca.contains("--quick-ai") && !ca.contains("--smart-ai"), "classic computer players pass no AI option");
+            check(!Options.fromText(classic.toText()).aiQuick && Options.fromText(o.toText()).aiQuick == o.aiQuick, "computer players setting survives the options text");
             o.mute = true;
             o.voices = false;
             o.quality = 0;

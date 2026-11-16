@@ -70,6 +70,7 @@ The Options button opens three tabs. Changes apply to the next game you start.
 | Display and controls | Buttons and text on screen; Weapon menu | Automatic (about 8 mm per control from the real screen density, with the value for this screen shown) or a fixed percentage (`--ui-scale`, `--menu-scale`) |
 | Display and controls | Screen edge | Automatic: every button sits just clear of the rounding of its own corner and of the camera cut-out (`--screen-shape`, `--inset-*`). Switch Automatic off to add 0 to 10 mm of extra space at every edge on top of that |
 | Display and controls | Camera at the start of a turn | Centre on the active hedgehog (`--turn-centre`) and Zoom in (`--turn-zoom`, 110 to 200 % of the normal zoom, default 140 %), both on by default. Applied once when a turn starts or the switcher moves on; pinching or dragging during the turn is left alone, and a view you have pinched closer is not zoomed out |
+| Display and controls | Computer players | Quick and smart (the default) passes `--quick-ai --smart-ai`: a computer turn starts sooner (no pause before the first move, a think of at most 3 s, fewer walking trials) and the computer varies its weapons and walks on when its best shot is weak. Classic passes neither and plays as it did before these options |
 | Display and controls | Effects quality | Six levels as on the desktop, best to lowest (`--raw-quality`) |
 | Display and controls | Vibrate, frames per second, name tags | Vibration is a short buzz on big explosions; frames per second is `--showfps`; tags are `--no-teamtag`, `--no-hogtag`, `--no-healthtag` |
 | Advanced | Share log | Builds one report and offers it to mail and messaging apps |
@@ -353,7 +354,7 @@ No device is needed for these.
 
 | Variable | Meaning |
 |---|---|
-| `HP_TEST_SCENARIO` | What game to start (see `native/host-test/GenConfig.java`): `two` (default), `ai` (two computer teams that play alone), `ai:WEAPONSET` (the same with that weapon set, e.g. `ai:Crazy`), `humanvsai`, `mixed8x8` (8 teams of 8 hedgehogs, humans and computers of every level), `switch` (the scheme rule "Switch hedgehog in a turn" on), `scheme:NAME` (e.g. `scheme:Pro Mode`), `map:KIND` (`generated`, `maze`, `perlin`, `forts`, `wfc`, `image:NAME`), `style:NAME` |
+| `HP_TEST_SCENARIO` | What game to start (see `native/host-test/GenConfig.java`): `two` (default), `ai` (two computer teams that play alone), `ai4` (the same at computer level 4), `ai:WEAPONSET` (the same with that weapon set, e.g. `ai:Crazy`), `humanvsai`, `mixed8x8` (8 teams of 8 hedgehogs, humans and computers of every level), `switch` (the scheme rule "Switch hedgehog in a turn" on), `scheme:NAME` (e.g. `scheme:Pro Mode`), `map:KIND` (`generated`, `maze`, `perlin`, `forts`, `wfc`, `image:NAME`), `style:NAME` |
 | `HP_TEST_SEED` | A fixed map seed |
 | `ASAN=ON` | Build with AddressSanitizer (needs `libclang-rt-dev`), which reports the out-of-bounds accesses that the phone's MTE and hardened allocator turn into crashes |
 | `HP_TEST_RESTORE=1,3,6,14` | Post `SDL_WINDOWEVENT_RESTORED` at those seconds; the phone sends it right after start-up and after every pause, and the engine answers with `fullscr`, which reloads the video state, the chat lines and every texture |

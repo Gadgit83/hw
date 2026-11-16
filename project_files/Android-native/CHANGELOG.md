@@ -4,6 +4,16 @@ All notable changes to the native Android app (`project_files/Android-native`), 
 
 Only some builds were put on a phone, so a version below is a build that was made, not necessarily one that was released. Releases are tags on `android-master` with the APK attached; there is none yet.
 
+## Unreleased: quicker and smarter computer players
+
+### Added
+
+- Options, Display and controls: **Computer players**, Quick and smart (the default) or Classic. Quick and smart pass `--quick-ai --smart-ai` to the engine.
+  - `--quick-ai`: no 700 ms pause before a computer turn's first move, a think of at most 3 s (9 s before), and fewer weapon tests while walking, with a walk budget of 6 s.
+  - `--smart-ai`: a computer team is less likely to repeat one of its last shots, and when its best shot is weak (under 10 points of damage) it tests the rare weapons too and keeps walking past the bonus crates.
+  - Without the options the engine plays as it did before.
+- Host test scenario `ai4`: two computer teams at level 4.
+
 ## 0.3.0-tv16 (120): 32-bit ARM phones; chat line fix (test build)
 
 `HP_PROFILE=test`, versionName `0.3.0-tv16-test`. Built for arm64-v8a **and armeabi-v7a** (32-bit ARM phones such as the Moto G6 on Android 9).

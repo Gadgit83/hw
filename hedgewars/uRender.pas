@@ -1729,7 +1729,11 @@ with widget^ do
     if show or (fadeAnimStart <> 0) then
         begin
         Tint($FF, $FF, $FF, alpha);
-        DrawTexture(frame.x, frame.y, spritesData[sprite].Texture, buttonScale);
+        // --touch-layout may give the control its own size (layoutScale per mille of the default)
+        if layoutScale > 0 then
+            DrawTexture(frame.x, frame.y, spritesData[sprite].Texture, buttonScale * (layoutScale * 0.001))
+        else
+            DrawTexture(frame.x, frame.y, spritesData[sprite].Texture, buttonScale);
         untint;
         end;
     end;

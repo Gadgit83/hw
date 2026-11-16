@@ -733,6 +733,16 @@ if cPauseMenu and isPaused and ((s = 'q') or (s = 'o')) then
     SendIPC('k' + s);
 end;
 
+// The touchlayout command (the app's controls editor, launcher channel only, never chat): 'touchlayout <spec>' applies a layout at
+// once, 'touchlayout' alone puts the default back, and 'touchlayout ?' only reports the current places (IPC 'T', see ReportTouchLayout).
+procedure chTouchLayout(var s: shortstring);
+begin
+if s = '?' then
+    ReportTouchLayout
+else
+    SetTouchLayout(s);
+end;
+
 // Network games: the launcher pauses ('1') or resumes ('0') this engine when the relay says the host did. A real pause
 // (game time stops, the Paused banner shows), not the AFK toggle. Game time only moves by ticks, never by the wall
 // clock, so pausing at different moments on each phone cannot change what any phone computes.
@@ -1157,6 +1167,7 @@ begin
     RegisterVariable('netpausereq', @chNetPauseReq, true );
     RegisterVariable('livevolume', @chLiveVolume, false);  // only the launcher's trusted channel (never chat)
     RegisterVariable('pausemenu', @chPauseMenu, false);    // only the touch controls (trusted) and the launcher
+    RegisterVariable('touchlayout', @chTouchLayout, false); // only the launcher's trusted channel (never chat)
     RegisterVariable('+cur_u'  , @chCurU_p       , true );
     RegisterVariable('-cur_u'  , @chCurU_m       , true );
     RegisterVariable('+cur_d'  , @chCurD_p       , true );

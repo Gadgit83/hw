@@ -37,6 +37,8 @@ procedure SetAmmoTexts(ammoType: TAmmoType; name: ansistring; caption: ansistrin
 procedure ShakeCamera(amount: LongInt);
 procedure InitCameraBorders;
 procedure InitTouchInterface;
+procedure SetTouchLayout(spec: shortstring);
+procedure ReportTouchLayout;
 procedure SetUtilityWidgetState(ammoType: TAmmoType);
 procedure animateWidget(widget: POnScreenWidget; fade, showWidget: boolean);
 procedure MoveCamera;
@@ -845,6 +847,278 @@ DrawPauseButton(@pauseOptionsWidget, PauseOptionsTexture);
 {$ENDIF}
 end;
 
+// --touch-layout and the touchlayout command: a layout is "name:x,y,s;name:x,y,s;...". x and y are the centre of the control as
+// fractions of the screen width and height (x from the left, y from the top) and s is its size as a fraction of the default
+// size. Each number is read as thousandths (0.92 is 920), since pas2c has no real number parsing here. The names are fire,
+// jump, highjump, left, right, aim (the two aim buttons, which share a place), weapons, pause, timer and bounce. A control that
+// is not named keeps its default place. Only where the controls are drawn and where they answer a touch changes; the
+// simulation never reads these values, so nothing here reaches the network.
+
+// Reads a non-negative decimal number, such as 0.92, 1 or .5, as thousandths. Anything else is not a number.
+function touchNumber(str: shortstring; var v: LongInt): boolean;
+var p, ip, fp, fd, c: LongInt;
+    seenDot, anyDigit: boolean;
+    ch: char;
+begin
+touchNumber:= false;
+v:= 0;
+ip:= 0;
+fp:= 0;
+fd:= 0;
+seenDot:= false;
+anyDigit:= false;
+for p:= 1 to Length(str) do
+    begin
+    ch:= str[p];
+    if (ch >= '0') and (ch <= '9') then
+        begin
+        anyDigit:= true;
+        c:= ord(ch) - ord('0');
+        if not seenDot then
+            begin
+            if ip < 100000 then
+                ip:= ip * 10 + c;
+            end
+        else if fd < 3 then
+            begin
+            fp:= fp * 10 + c;
+            fd:= fd + 1;
+            end;
+        end
+    else if (ch = '.') and (not seenDot) then
+        seenDot:= true
+    else
+        exit;
+    end;
+if not anyDigit then
+    exit;
+while fd < 3 do
+    begin
+    fp:= fp * 10;
+    fd:= fd + 1;
+    end;
+v:= ip * 1000 + fp;
+touchNumber:= true;
+end;
+
+// One "name:x,y,s" entry: true when it names the control and its three numbers are valid.
+function touchSegment(seg: shortstring; name: shortstring; var x, y, s: LongInt): boolean;
+var colon, c1, c2: LongInt;
+    nums, rest: shortstring;
+begin
+touchSegment:= false;
+colon:= Pos(':', seg);
+if colon < 2 then
+    exit;
+if Copy(seg, 1, colon - 1) <> name then
+    exit;
+nums:= Copy(seg, colon + 1, Length(seg) - colon);
+c1:= Pos(',', nums);
+if c1 < 2 then
+    exit;
+rest:= Copy(nums, c1 + 1, Length(nums) - c1);
+c2:= Pos(',', rest);
+if c2 < 2 then
+    exit;
+if not touchNumber(Copy(nums, 1, c1 - 1), x) then
+    exit;
+if not touchNumber(Copy(rest, 1, c2 - 1), y) then
+    exit;
+if not touchNumber(Copy(rest, c2 + 1, Length(rest) - c2), s) then
+    exit;
+touchSegment:= true;
+end;
+
+// Looks for one control in the layout. Found: true, with its numbers in x, y and s (the first entry for it counts).
+function touchLayoutFind(spec: shortstring; name: shortstring; var x, y, s: LongInt): boolean;
+var i: LongInt;
+    seg: shortstring;
+    ch: char;
+begin
+touchLayoutFind:= false;
+seg:= '';
+for i:= 1 to Length(spec) + 1 do
+    begin
+    if i > Length(spec) then
+        ch:= ';'
+    else
+        ch:= spec[i];
+    if ch = ';' then
+        begin
+        if touchSegment(seg, name, x, y, s) then
+            begin
+            touchLayoutFind:= true;
+            exit;
+            end;
+        seg:= '';
+        end
+    else
+        seg:= seg + ch;
+    end;
+end;
+
+{$IFDEF USE_TOUCH_INTERFACE}
+// Puts one control at its place and size. It stays on the screen. An aim button or the timer slides in from its own place,
+// so its slide moves with it. Called after the default placement, so it wins over --swap-fire-jump.
+procedure placeTouchControl(widget: POnScreenWidget; x, y, s: LongInt);
+var sw, sh, nw, nh, fx, fy, dx, dy: LongInt;
+begin
+sw:= cScreenWidth;
+sh:= cScreenHeight;
+if x > 1000 then
+    x:= 1000;
+if y > 1000 then
+    y:= 1000;
+if s < 400 then
+    s:= 400;
+if s > 2500 then
+    s:= 2500;
+nw:= Round(spritesData[widget^.sprite].Texture^.w * buttonScale * s * 0.001);
+nh:= Round(spritesData[widget^.sprite].Texture^.h * buttonScale * s * 0.001);
+fx:= (x * sw) div 1000 - (sw shr 1) - (nw shr 1);
+fy:= (y * sh) div 1000 - (nh shr 1);
+if fx < -(sw shr 1) then
+    fx:= -(sw shr 1);
+if fx > (sw shr 1) - nw then
+    fx:= (sw shr 1) - nw;
+if fy < 0 then
+    fy:= 0;
+if fy > sh - nh then
+    fy:= sh - nh;
+with widget^ do
+    begin
+    dx:= fx - frame.x;
+    dy:= fy - frame.y;
+    moveAnim.source.x:= moveAnim.source.x + dx;
+    moveAnim.source.y:= moveAnim.source.y + dy;
+    moveAnim.target.x:= moveAnim.target.x + dx;
+    moveAnim.target.y:= moveAnim.target.y + dy;
+    frame.x:= fx;
+    frame.y:= fy;
+    frame.w:= nw;
+    frame.h:= nh;
+    active:= frame;
+    layoutScale:= s;
+    end;
+end;
+
+// Puts every control the layout names in its place (see placeTouchControl).
+procedure ApplyTouchLayout;
+var x, y, s: LongInt;
+begin
+if touchLayoutFind(cTouchLayout, 'fire', x, y, s) then
+    placeTouchControl(@firebutton, x, y, s);
+if touchLayoutFind(cTouchLayout, 'jump', x, y, s) then
+    placeTouchControl(@jumpWidget, x, y, s);
+// the high jump button only exists with --two-jump-buttons (its picture is set there)
+if cTwoJumpButtons then
+    if touchLayoutFind(cTouchLayout, 'highjump', x, y, s) then
+        placeTouchControl(@highJumpButton, x, y, s);
+if touchLayoutFind(cTouchLayout, 'left', x, y, s) then
+    placeTouchControl(@arrowLeft, x, y, s);
+if touchLayoutFind(cTouchLayout, 'right', x, y, s) then
+    placeTouchControl(@arrowRight, x, y, s);
+if touchLayoutFind(cTouchLayout, 'aim', x, y, s) then
+    begin
+    placeTouchControl(@arrowUp, x, y, s);
+    placeTouchControl(@arrowDown, x, y, s);
+    end;
+if touchLayoutFind(cTouchLayout, 'weapons', x, y, s) then
+    placeTouchControl(@AMWidget, x, y, s);
+if touchLayoutFind(cTouchLayout, 'pause', x, y, s) then
+    placeTouchControl(@pauseButton, x, y, s);
+if touchLayoutFind(cTouchLayout, 'timer', x, y, s) then
+    placeTouchControl(@utilityWidget, x, y, s);
+if touchLayoutFind(cTouchLayout, 'bounce', x, y, s) then
+    placeTouchControl(@utilityWidget2, x, y, s);
+end;
+
+// A thousandth as a decimal fraction with three digits, e.g. 920 is 0.920
+function touchFraction(v: LongInt): shortstring;
+var f: shortstring;
+begin
+if v < 0 then
+    v:= 0;
+f:= IntToStr(v mod 1000);
+while Length(f) < 3 do
+    f:= '0' + f;
+touchFraction:= IntToStr(v div 1000) + '.' + f;
+end;
+
+// Sends one control's place, size and drawn width and height (fractions of the screen) to the launcher as IPC 'T', e.g.
+// "Tfire:0.920,0.850,1.000,0.120,0.210", for the app's layout editor.
+procedure reportTouchControl(name: shortstring; widget: POnScreenWidget);
+var sc, cx, cy, dw, dh: LongInt;
+begin
+with widget^ do
+    begin
+    if layoutScale > 0 then
+        sc:= layoutScale
+    else
+        sc:= 1000;
+    cx:= (frame.x + (frame.w shr 1) + (cScreenWidth shr 1)) * 1000 div cScreenWidth;
+    cy:= (frame.y + (frame.h shr 1)) * 1000 div cScreenHeight;
+    dw:= frame.w * 1000 div cScreenWidth;
+    dh:= frame.h * 1000 div cScreenHeight;
+    SendIPC('T' + name + ':' + touchFraction(cx) + ',' + touchFraction(cy) + ',' + touchFraction(sc) + ','
+        + touchFraction(dw) + ',' + touchFraction(dh));
+    end;
+end;
+{$ENDIF}
+
+// Reports where every control is now (IPC 'T', one message per control), so the layout editor shows the real places.
+procedure ReportTouchLayout;
+begin
+{$IFDEF USE_TOUCH_INTERFACE}
+reportTouchControl('fire', @firebutton);
+reportTouchControl('jump', @jumpWidget);
+reportTouchControl('highjump', @highJumpButton);
+reportTouchControl('left', @arrowLeft);
+reportTouchControl('right', @arrowRight);
+reportTouchControl('aim', @arrowUp);
+reportTouchControl('weapons', @AMWidget);
+reportTouchControl('pause', @pauseButton);
+reportTouchControl('timer', @utilityWidget);
+reportTouchControl('bounce', @utilityWidget2);
+{$ENDIF}
+end;
+
+// The new layout applies at once (the touchlayout command, and --touch-layout at start). The controls that are shown now stay
+// shown: the placement sets the show flags again, so they are kept across it.
+procedure SetTouchLayout(spec: shortstring);
+{$IFDEF USE_TOUCH_INTERFACE}
+var k1, k2, k3, k4, k5, k6, k7, k8, k9, k10, k11: boolean;
+{$ENDIF}
+begin
+{$IFDEF USE_TOUCH_INTERFACE}
+k1:= firebutton.show;
+k2:= jumpWidget.show;
+k3:= highJumpButton.show;
+k4:= arrowLeft.show;
+k5:= arrowRight.show;
+k6:= arrowUp.show;
+k7:= arrowDown.show;
+k8:= AMWidget.show;
+k9:= pauseButton.show;
+k10:= utilityWidget.show;
+k11:= utilityWidget2.show;
+cTouchLayout:= spec;
+InitTouchInterface;
+firebutton.show:= k1;
+jumpWidget.show:= k2;
+highJumpButton.show:= k3;
+arrowLeft.show:= k4;
+arrowRight.show:= k5;
+arrowUp.show:= k6;
+arrowDown.show:= k7;
+AMWidget.show:= k8;
+pauseButton.show:= k9;
+utilityWidget.show:= k10;
+utilityWidget2.show:= k11;
+ReportTouchLayout;
+{$ENDIF}
+end;
+
 procedure InitTouchInterface;
 var noShape: boolean;
 begin
@@ -859,6 +1133,7 @@ if noShape then
 else
     InitTouchPlaced;
 PlaceJumpPair;
+ApplyTouchLayout;
 UISwapOut;
 {$ENDIF}
 end;

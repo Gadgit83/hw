@@ -205,6 +205,7 @@ var
     cTurnCentre     : boolean; // touch: centre the camera on the active hedgehog when a turn starts
     cTurnZoom       : LongInt; // touch: zoom in to this percent of the default zoom when a turn starts, 0: off
     cJumpInset      : LongInt; // touch: move the jump button this percent of its own width further in from the right edge, 0: off
+    cTouchLayout    : shortstring; // touch: where each control is and how big, "name:x,y,s;..." (--touch-layout, the touchlayout command, see SetTouchLayout)
     cHideIdleControls: boolean; // touch: hide the controls that do nothing when it is not this phone's turn (the weapon chest stays)
     cDirectAmmoMenu : boolean; // touch: the weapon drawer follows the finger: the slot under it is highlighted, lifting on a weapon picks it (--direct-ammo-menu)
     cRefreshWeaponUI: boolean; // touch: at the start of a turn (and when the hedgehog changes) show the aim buttons of its weapon and mark that weapon in the drawer (--refresh-weapon-ui)
@@ -2844,6 +2845,7 @@ begin
     cTurnCentre:= false;
     cTurnZoom:= 0;
     cJumpInset:= 0;
+    cTouchLayout:= '';
     cHideIdleControls:= false;
     cDirectAmmoMenu:= false;
     cRefreshWeaponUI:= false;

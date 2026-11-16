@@ -569,6 +569,7 @@ type
         fadeAnimStart : Longword;           // time the fade started
                                             //     (0 means do not fade)
         moveAnim      : TWidgetMovement;    // animation associated to widget
+        layoutScale   : LongInt;            // --touch-layout: the size per mille of the default size (0: the default size)
         end;
 
     PTouch_Data = ^TTouch_Data;

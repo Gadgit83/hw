@@ -114,7 +114,24 @@ public class GameActivity extends SDLActivity {
 
     private android.app.AlertDialog backDialog;
     private boolean quitting;
+    private boolean returnedToLobby;
     private final android.os.Handler uiHandler = new android.os.Handler(android.os.Looper.getMainLooper());
+
+    /**
+     * Every way out of the game ends here (the player left, the engine quit, the 10 second fallback, a fatal error). A network
+     * game goes back to its Network lobby, which shows the game still running, the Rejoin card while the seat is kept, Watch and
+     * leaving the host; it used to fall through to the setup screen. This process cannot read NetSession (that is the main
+     * process), so the net.cfg the lobby wrote for this game says whether it is a network game. A local game finishes as before.
+     */
+    @Override
+    public void finish() {
+        if (!returnedToLobby && BackConfirm.role(getFilesDir()) != BackConfirm.LOCAL) {
+            returnedToLobby = true;
+            startActivity(new android.content.Intent(this, NetLobbyActivity.class)
+                    .addFlags(android.content.Intent.FLAG_ACTIVITY_REORDER_TO_FRONT));
+        }
+        super.finish();
+    }
 
     /**
      * The engine has no Android back button handling. In a local game the system Back key is forwarded as Escape, which

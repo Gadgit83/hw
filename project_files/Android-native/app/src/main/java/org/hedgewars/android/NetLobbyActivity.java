@@ -36,7 +36,18 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
     private ScrollView scroll;
     private EditText nameField, addressField;
     private String name = "";
+    /** The address last used (kept in the preferences); "" until one was typed. */
     private String address = "";
+    /** The person typed in the address field, so what it shows is theirs to keep (otherwise it is only the guess below). */
+    private boolean addressTyped;
+    /** Set while the phone fills the address field itself, so that this does not count as typing. */
+    private boolean settingAddress;
+    /** The Wi-Fi prefix of this phone's own address ("192.168.1." for 192.168.1.143); "" until the look-up has run. */
+    private String subnetPrefix = "";
+    /** Where this phone's own addresses come from. The phone uses NetSession.localAddresses; tests replace it. */
+    static volatile java.util.function.Supplier<List<String>> ownAddresses = NetSession::localAddresses;
+    /** What the address field starts with when no address was used before and the phone's own address is not known. */
+    static final String DEFAULT_PREFIX = "192.168.1.";
     /** A host or join connect is running. Shared by every Network screen, so a reopened screen cannot start a second one. */
     private static volatile boolean connecting;
     private String problem = "";
@@ -91,7 +102,55 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
         setContentView(root);
         ui.trackInsets(root, (l, t, r, bt, kb) -> root.setPadding(l, t, r, bt));
         NetSession.listener = this;
+        findOwnPrefix();
         render();
+    }
+
+    /**
+     * Reads this phone's own address on a background thread (it is not for the UI thread), then, if the person has not typed an
+     * address and none was used before, shows its Wi-Fi prefix in the address field.
+     */
+    private void findOwnPrefix() {
+        new Thread(() -> {
+            String found;
+            try {
+                found = subnetPrefix(ownAddresses.get());
+            } catch (RuntimeException e) {
+                found = "";
+            }
+            final String prefix = found;
+            runOnUiThread(() -> {
+                if (destroyed) return;
+                subnetPrefix = prefix;
+                if (addressField != null && !addressTyped && address.isEmpty()) fillAddress(addressToShow());
+            });
+        }, "own-address").start();
+    }
+
+    /** The Wi-Fi prefix of the first IPv4 address ("192.168.1.143" gives "192.168.1."), or "" when there is none. */
+    static String subnetPrefix(List<String> addresses) {
+        if (addresses == null) return "";
+        for (String a : addresses) {
+            String[] parts = a == null ? new String[0] : a.split("\\.");
+            if (parts.length == 4) return parts[0] + "." + parts[1] + "." + parts[2] + ".";
+        }
+        return "";
+    }
+
+    /** What the address field starts with: the address used before, else this phone's Wi-Fi prefix, else the usual one. */
+    private String addressToShow() {
+        if (!address.isEmpty()) return address;
+        return subnetPrefix.isEmpty() ? DEFAULT_PREFIX : subnetPrefix;
+    }
+
+    private void fillAddress(String text) {
+        settingAddress = true;
+        try {
+            addressField.setText(text);
+            addressField.setSelection(text.length());
+        } finally {
+            settingAddress = false;
+        }
     }
 
     @Override
@@ -166,7 +225,7 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
 
     private void saveFields() {
         if (nameField != null) name = nameField.getText().toString().trim();
-        if (addressField != null) address = addressField.getText().toString().trim();
+        if (addressField != null && addressTyped) address = addressField.getText().toString().trim();
         getSharedPreferences(Store.PREFS_NAME, MODE_PRIVATE).edit().putString("netaddr", address).apply();
     }
 
@@ -201,7 +260,7 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
     private void render() {
         // Keep what has been typed: a rebuild (a state change) must not wipe the name or the address.
         if (nameField != null) name = nameField.getText().toString().trim();
-        if (addressField != null) address = addressField.getText().toString().trim();
+        if (addressField != null && addressTyped) address = addressField.getText().toString().trim();
         if (pinField != null) pinText = pinField.getText().toString().trim();
         content.removeAllViews();
         hostsBox = null;
@@ -277,8 +336,13 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
         renderHosts();
         LinearLayout join = ui.card();
         join.addView(ui.heading("Join by address"));
-        addressField = ui.field(address, "Host address, for example 192.168.1.20:46633");
+        addressField = ui.field(addressToShow(), "Host address, for example 192.168.1.20:46633");
         addressField.setInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
+        addressField.addTextChangedListener(new android.text.TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int a, int b, int c) { }
+            @Override public void onTextChanged(CharSequence s, int a, int b, int c) { }
+            @Override public void afterTextChanged(android.text.Editable e) { if (!settingAddress) addressTyped = true; }
+        });
         join.addView(addressField);
         join.addView(ui.hint("Play joins with your teams. Watch joins without any: you see the game on this phone, with no controls, "
                 + "and you do not count as a player."));
@@ -917,9 +981,15 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
     private void join(final boolean watch) {
         saveFields();
         problem = "";
-        String a = address.trim();
+        // What the field shows, which may be the phone's own prefix that the person has not finished.
+        String a = (addressField != null ? addressField.getText().toString() : address).trim();
         if (a.isEmpty()) {
             problem = "Type the host's address first, for example 192.168.1.20:" + Relay.PHONE_PORT + ".";
+            render();
+            return;
+        }
+        if (a.endsWith(".")) {
+            problem = "Add the last number of the host's address, for example " + a + "20.";
             render();
             return;
         }

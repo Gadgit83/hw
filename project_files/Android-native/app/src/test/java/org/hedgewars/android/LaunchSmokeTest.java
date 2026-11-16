@@ -1,8 +1,11 @@
 package org.hedgewars.android;
 
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 import android.app.Activity;
 import android.view.View;
@@ -332,6 +335,89 @@ public class LaunchSmokeTest {
         gd.dismiss();
         new java.io.File(dir, "net.cfg").delete();
         System.out.println("SDK " + android.os.Build.VERSION.SDK_INT + ": spectator game screen state ok");
+    }
+
+    private static void editTexts(android.view.View v, java.util.List<android.widget.EditText> out) {
+        if (v instanceof android.widget.EditText) out.add((android.widget.EditText) v);
+        if (v instanceof android.view.ViewGroup) {
+            for (int i = 0; i < ((android.view.ViewGroup) v).getChildCount(); i++) editTexts(((android.view.ViewGroup) v).getChildAt(i), out);
+        }
+    }
+
+    /** The text of the Join by address field on a freshly opened Network screen, once the phone's own address has been looked up. */
+    private static String joinAddressText() throws Exception {
+        Activity a = Robolectric.buildActivity(NetLobbyActivity.class, null).create().start().postCreate(null).resume().visible().get();
+        TestSupport.layout(a);
+        TestSupport.settle(400);
+        java.util.List<android.widget.EditText> fields = new java.util.ArrayList<>();
+        editTexts(a.getWindow().getDecorView(), fields);
+        for (android.widget.EditText e : fields) {
+            if (e.getHint() != null && e.getHint().toString().startsWith("Host address")) return e.getText().toString();
+        }
+        fail("the Join by address field is not on the Network screen");
+        return null;
+    }
+
+    /** The phone's own Wi-Fi prefix is the start of the address field: the person types only the last number. */
+    @Test
+    public void netLobbyActivity_addressFieldStartsWithOwnSubnet() throws Exception {
+        TestSupport.installData(app());
+        app().getSharedPreferences(Store.PREFS_NAME, Context.MODE_PRIVATE).edit().remove("netaddr").commit();
+        NetLobbyActivity.ownAddresses = () -> java.util.Arrays.asList("192.168.1.143");
+        try {
+            assertEquals("192.168.1.", joinAddressText());
+        } finally {
+            NetLobbyActivity.ownAddresses = NetSession::localAddresses;
+        }
+        System.out.println("SDK " + android.os.Build.VERSION.SDK_INT + ": address field prefilled with the Wi-Fi prefix ok");
+    }
+
+    /** No address of the phone's own to go by: the field starts with the usual prefix. A last address used comes first. */
+    @Test
+    public void netLobbyActivity_addressFieldFallsBackAndKeepsTheLastAddress() throws Exception {
+        TestSupport.installData(app());
+        android.content.SharedPreferences p = app().getSharedPreferences(Store.PREFS_NAME, Context.MODE_PRIVATE);
+        p.edit().remove("netaddr").commit();
+        NetLobbyActivity.ownAddresses = java.util.Collections::emptyList;
+        try {
+            assertEquals("192.168.1.", joinAddressText());
+            p.edit().putString("netaddr", "10.0.0.5:46633").commit();
+            assertEquals("10.0.0.5:46633", joinAddressText());
+        } finally {
+            NetLobbyActivity.ownAddresses = NetSession::localAddresses;
+            p.edit().remove("netaddr").commit();
+        }
+    }
+
+    @Test
+    public void subnetPrefix_isTheWifiPrefixOfTheFirstAddress() {
+        assertEquals("192.168.1.", NetLobbyActivity.subnetPrefix(java.util.Arrays.asList("192.168.1.143")));
+        assertEquals("10.0.0.", NetLobbyActivity.subnetPrefix(java.util.Arrays.asList("garbage", "10.0.0.7")));
+        assertEquals("", NetLobbyActivity.subnetPrefix(java.util.Collections.<String>emptyList()));
+    }
+
+    private static GameActivity gameActivity() {
+        org.robolectric.android.controller.ActivityController<GameActivity> c = Robolectric.buildActivity(GameActivity.class);
+        try { return c.create().get(); } catch (Throwable e) { return c.get(); }
+    }
+
+    /** Leaving a network game (Back, then Leave the game or Stop watching) starts the Network lobby again; a local game does not. */
+    @Test
+    public void gameFinish_networkGameReturnsToTheLobby() throws Exception {
+        TestSupport.installData(app());
+        java.io.File dir = app().getFilesDir();
+        java.nio.file.Files.write(new java.io.File(dir, "net.cfg").toPath(), "role=player\n".getBytes("UTF-8"));
+        GameActivity g = gameActivity();
+        g.finish();
+        Intent next = org.robolectric.Shadows.shadowOf(g).getNextStartedActivity();
+        assertNotNull("a network game starts the lobby when it finishes", next);
+        assertEquals(NetLobbyActivity.class.getName(), next.getComponent().getClassName());
+        assertTrue("the lobby is brought to the front", (next.getFlags() & Intent.FLAG_ACTIVITY_REORDER_TO_FRONT) != 0);
+        new java.io.File(dir, "net.cfg").delete();
+        GameActivity local = gameActivity();
+        local.finish();
+        assertNull("a local game finishes as before", org.robolectric.Shadows.shadowOf(local).getNextStartedActivity());
+        System.out.println("SDK " + android.os.Build.VERSION.SDK_INT + ": network game returns to the lobby ok");
     }
 
     @Test

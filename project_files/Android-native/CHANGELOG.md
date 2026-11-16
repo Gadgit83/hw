@@ -4,6 +4,12 @@ All notable changes to the native Android app (`project_files/Android-native`), 
 
 Only some builds were put on a phone, so a version below is a build that was made, not necessarily one that was released. Releases are tags on `android-master` with the APK attached; there is none yet.
 
+## Unreleased: finding hosts when NSD misses them (issue #15)
+
+### Fixed
+
+- Find games: a phone whose NSD search finds no host after 3 s (a VPN on the default network, or multicast filtered) also probes its Wi-Fi (or Ethernet) subnet for hosts on the phone port, bound to the Wi-Fi network. Hosts found both ways are listed once. The search log says when the probe starts, each host it finds, and when it ends.
+
 ## Unreleased: quicker and smarter computer players
 
 ### Added

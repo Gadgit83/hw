@@ -73,7 +73,7 @@ final class NsdHost {
             NsdManager nsd = (NsdManager) c.getApplicationContext().getSystemService(Context.NSD_SERVICE);
             if (nsd == null) { NetSession.setNsdStatus("This phone has no NSD service: others must type the address."); return; }
             NsdServiceInfo info = new NsdServiceInfo();
-            info.setServiceName(("HedgeParty " + hostName).replaceAll("[^A-Za-z0-9 ._-]", "").trim());
+            info.setServiceName(HostAdvert.serviceName(hostName));
             info.setServiceType(HostAdvert.SERVICE_TYPE_BARE);
             info.setPort(port);
             // Announce on the Wi-Fi (or Ethernet) network, not the default one: with a VPN on, the default is the tunnel. Android 14 and

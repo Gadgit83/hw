@@ -151,6 +151,19 @@ final class NetworkPicker {
         return false;
     }
 
+    /**
+     * The interface whose subnet the search probes (issue #15): the first Wi-Fi interface, else the first Ethernet one, else null.
+     * VPN, hotspot and USB addresses are not probed.
+     */
+    static Iface lanIface(List<Iface> ifaces) {
+        Iface eth = null;
+        for (Iface i : ifaces) {
+            if ("Wi-Fi".equals(i.kind)) return i;
+            if (eth == null && "Ethernet".equals(i.kind)) eth = i;
+        }
+        return eth;
+    }
+
     // The saved choice -------------------------------------------------------------------------
 
     /** The interface name the user chose, or {@link #AUTO}. */

@@ -56,4 +56,16 @@ public class NetworkPickerTest {
         assertTrue(NetworkPicker.onVpnRoute("10.8.0.9", withVpn, true));
         assertFalse(NetworkPicker.onVpnRoute("192.168.43.10", withVpn, true));
     }
+
+    @Test
+    public void theSubnetSearchProbesTheWifiThenEthernetNeverAVpnOrHotspot() {
+        NetworkPicker.Iface vpn = new NetworkPicker.Iface("tun0", "10.8.0.2", "VPN", 24);
+        NetworkPicker.Iface hotspot = new NetworkPicker.Iface("swlan0", "192.168.43.1", "Hotspot", 24);
+        NetworkPicker.Iface eth = new NetworkPicker.Iface("eth0", "10.2.0.7", "Ethernet", 24);
+        NetworkPicker.Iface wifi = new NetworkPicker.Iface("wlan0", "192.168.1.62", "Wi-Fi", 24);
+        assertEquals(wifi, NetworkPicker.lanIface(Arrays.asList(vpn, eth, wifi)));
+        assertEquals("Ethernet when there is no Wi-Fi", eth, NetworkPicker.lanIface(Arrays.asList(hotspot, vpn, eth)));
+        assertNull("nothing to probe with only a VPN and a hotspot", NetworkPicker.lanIface(Arrays.asList(vpn, hotspot)));
+        assertNull(NetworkPicker.lanIface(Arrays.asList()));
+    }
 }

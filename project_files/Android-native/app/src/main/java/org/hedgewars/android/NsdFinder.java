@@ -21,7 +21,8 @@ import java.util.Map;
  * Discovery of {@code _hedgeparty._tcp} hosts with NsdManager (docs/tv-viewer-plan.md section 5.1). Resolving is serialised and
  * retried by {@link ResolveQueue}, because resolveService is unreliable (a second resolve at once fails with
  * FAILURE_ALREADY_ACTIVE, a resolve may fail once and work later, a callback may never come). The search stops by itself after
- * {@link #SEARCH_MS} so it does not run for ever; the screen offers "Search again". Only IPv4 addresses are used.
+ * {@link #SEARCH_MS} so it does not run for ever; the screen offers "Search again". Only IPv4 addresses are used. When NSD has found no
+ * host after {@link #FALLBACK_MS}, the phone's Wi-Fi subnet is probed as well ({@link SubnetFinder}, issue #15); its hosts are merged in.
  * NSD cannot run on the build machine: only the parsing and the queue are unit-tested; this class is for the device test.
  */
 final class NsdFinder implements HostDiscovery {
@@ -34,6 +35,11 @@ final class NsdFinder implements HostDiscovery {
     private Listener listener;
     private final Map<String, HostAdvert.Found> found = new LinkedHashMap<>();
     private final Map<String, NsdServiceInfo> seen = new LinkedHashMap<>();
+    /** The fallback (issue #15): NSD found nothing after {@link #FALLBACK_MS}, so the Wi-Fi subnet is probed too. Guarded by this. */
+    static final long FALLBACK_MS = 3000;
+    private SubnetFinder subnet;
+    /** The hosts the subnet probe found, by address and port. Shown with the NSD hosts, each host once. Guarded by this. */
+    private final Map<String, HostAdvert.Found> probed = new LinkedHashMap<>();
     private volatile boolean running;
     /** Held while searching: some phones (Samsung, Android 16 among them) drop multicast DNS answers without it. Not reference-counted. */
     private WifiManager.MulticastLock multicast;
@@ -49,8 +55,33 @@ final class NsdFinder implements HostDiscovery {
         if (l != null) l.status(shown == 0 ? "No host found on this Wi-Fi." : "Search finished.", true);
     };
 
+    /** The fallback check: starts the subnet probe if NSD has still found no host {@link #FALLBACK_MS} after the search began. */
+    private final Runnable fallback = () -> {
+        synchronized (this) {
+            if (!running || subnet != null || !found.isEmpty()) return;
+        }
+        Log.i(Diag.TAG, "nsd: no host found after " + (FALLBACK_MS / 1000) + " s, probing the Wi-Fi subnet as well");
+        startSubnet();
+    };
+
     NsdFinder(Context c) {
         this.app = c.getApplicationContext();
+    }
+
+    /** Main thread. Starts the subnet probe unless one is running, the search has ended, or NSD has found a host meanwhile. */
+    private void startSubnet() {
+        final SubnetFinder scan = new SubnetFinder(app);
+        synchronized (this) {
+            if (!running || subnet != null || !found.isEmpty()) return;
+            subnet = scan;
+        }
+        scan.start(h -> {
+            synchronized (NsdFinder.this) {
+                if (!running || subnet != scan) return;      // a scan that was stopped or replaced
+                probed.put(h.address(), h);
+                publish();
+            }
+        });
     }
 
     @Override
@@ -59,6 +90,7 @@ final class NsdFinder implements HostDiscovery {
         listener = l;
         found.clear();
         seen.clear();
+        probed.clear();
         try {
             nsd = (NsdManager) app.getSystemService(Context.NSD_SERVICE);
         } catch (RuntimeException e) {
@@ -148,23 +180,33 @@ final class NsdFinder implements HostDiscovery {
         Log.i(Diag.TAG, "nsd: searching for " + HostAdvert.SERVICE_TYPE_BARE + " for " + (SEARCH_MS / 1000) + " s");
         l.status("Searching for hosts on this Wi-Fi...", false);
         main.postDelayed(timeout, SEARCH_MS);
+        main.postDelayed(fallback, FALLBACK_MS);
     }
 
-    /** Lock held. Hosts shown: every one found except this phone's own. */
+    /**
+     * Lock held. The hosts shown: the ones NSD found, then the ones the subnet probe found that NSD did not (same address and port),
+     * every one except this phone's own. A phone cannot join itself; after Stop hosting its own advert can linger in the NSD cache for
+     * a few seconds.
+     */
+    private List<HostAdvert.Found> shown() {
+        Map<String, HostAdvert.Found> all = new LinkedHashMap<>();
+        for (HostAdvert.Found h : found.values()) all.putIfAbsent(h.address(), h);
+        for (HostAdvert.Found h : probed.values()) all.putIfAbsent(h.address(), h);
+        ArrayList<HostAdvert.Found> list = new ArrayList<>();
+        for (HostAdvert.Found h : all.values()) if (!own.contains(h.host)) list.add(h);
+        return list;
+    }
+
+    /** Lock held. */
     private int visible() {
-        int n = 0;
-        for (HostAdvert.Found h : found.values()) if (!own.contains(h.host)) n++;
-        return n;
+        return shown().size();
     }
 
     /** Lock held. */
     private void publish() {
         Listener l = listener;
         if (l == null) return;
-        // A phone cannot join itself; after Stop hosting its own advert can linger in the NSD cache for a few seconds.
-        ArrayList<HostAdvert.Found> list = new ArrayList<>();
-        for (HostAdvert.Found h : found.values()) if (!own.contains(h.host)) list.add(h);
-        l.hosts(list);
+        l.hosts(shown());
     }
 
     private void resolveOne(String key, ResolveQueue.Done done) {
@@ -218,6 +260,9 @@ final class NsdFinder implements HostDiscovery {
         running = false;
         releaseMulticastLock();
         main.removeCallbacks(timeout);
+        main.removeCallbacks(fallback);
+        if (subnet != null) subnet.stop();
+        subnet = null;
         if (queue != null) queue.stop();
         queue = null;
         NsdManager m = nsd;

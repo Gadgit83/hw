@@ -102,6 +102,7 @@ public class GameActivity extends SDLActivity {
         if (new java.io.File(getFilesDir(), "net.cfg").exists()) {
             getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         }
+        if (Build.VERSION.SDK_INT >= 33) registerBackGesture();
         super.onCreate(savedInstanceState);
     }
 
@@ -116,39 +117,52 @@ public class GameActivity extends SDLActivity {
     private boolean quitting;
     private final android.os.Handler uiHandler = new android.os.Handler(android.os.Looper.getMainLooper());
 
+    /** A second Back this soon after the first is the same press reaching us twice (gesture and key), so it is ignored. */
+    private static final long BACK_GAP_MS = 400;
+    private long lastBackAt = -1000000L;
+
     /**
-     * The engine has no Android back button handling. In a local game the system Back key is forwarded as Escape, which
-     * opens the engine's own quit question. In a network game that question is easy to miss and the pause button does
-     * nothing useful, so Back asks in the app ({@link BackConfirm}); on "yes" the engine is quit the way a player does
-     * it, Escape then Y, so it sends its quit message and ends cleanly. The game keeps running while the question is up
-     * unless the host has paused it.
+     * Back asks the question for this phone's role ({@link BackConfirm}): "Quit the game?" in a local game, the network
+     * question in a network game. The engine has no Back handling of its own, so the app asks first; on "yes" the engine is
+     * quit the way a player does it (see {@link #quitEngine}). The game keeps running while the question is up unless the host
+     * has paused it. Back with the question already up means "keep playing".
      */
-    @Override
-    public void onBackPressed() {
-        int role = BackConfirm.role(getFilesDir());
-        if (role == BackConfirm.LOCAL) {
-            SDLActivity.onNativeKeyDown(KeyEvent.KEYCODE_ESCAPE);
-            SDLActivity.onNativeKeyUp(KeyEvent.KEYCODE_ESCAPE);
-            return;
-        }
+    private void onBack() {
+        long now = android.os.SystemClock.uptimeMillis();
+        if (now - lastBackAt < BACK_GAP_MS) return;
+        lastBackAt = now;
         if (quitting) return;
         if (backDialog != null && backDialog.isShowing()) {
-            backDialog.dismiss();                    // Back again means "keep playing"
+            backDialog.dismiss();
             return;
         }
-        backDialog = BackConfirm.show(this, role, () -> quitEngine(false), () -> quitEngine(true));
+        backDialog = BackConfirm.show(this, BackConfirm.role(getFilesDir()), () -> quitEngine(false), () -> quitEngine(true));
+    }
+
+    @Override
+    public void onBackPressed() {
+        onBack();
     }
 
     /**
-     * SDLActivity consumes the Back key in its own dispatchKeyEvent and forwards it to the engine as a key, so
-     * {@link #onBackPressed} is never reached (device test of 0.3.0-tv4: no dialog in a network game). In a network game Back is
-     * taken here, before SDL sees it: the dialog opens when the key goes up (a held key does not repeat it). A local game
-     * still forwards Back to the engine as before. The soft keyboard handles its own Back before the activity sees it.
+     * Back on Android 13 and later with gesture navigation: the system calls this callback and does not send the Back key,
+     * so {@link #dispatchKeyEvent} never sees the gesture. Three-button navigation still sends the key.
+     */
+    @android.annotation.TargetApi(33)
+    private void registerBackGesture() {
+        getOnBackInvokedDispatcher().registerOnBackInvokedCallback(
+                android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT, this::onBack);
+    }
+
+    /**
+     * SDLActivity consumes the Back key in its own dispatchKeyEvent and forwards it to the engine as a key (device test of
+     * 0.3.0-tv4: no dialog in a network game), so the key is taken here, before SDL sees it, for every game. The question opens
+     * when the key goes up (a held key does not repeat it). The soft keyboard handles its own Back before the activity sees it.
      */
     @Override
     public boolean dispatchKeyEvent(KeyEvent event) {
-        if (event.getKeyCode() == KeyEvent.KEYCODE_BACK && BackConfirm.role(getFilesDir()) != BackConfirm.LOCAL) {
-            if (event.getAction() == KeyEvent.ACTION_UP && !event.isCanceled()) onBackPressed();
+        if (event.getKeyCode() == KeyEvent.KEYCODE_BACK) {
+            if (event.getAction() == KeyEvent.ACTION_UP && !event.isCanceled()) onBack();
             return true;
         }
         return super.dispatchKeyEvent(event);

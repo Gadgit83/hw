@@ -112,6 +112,20 @@ public final class SetupModel {
         return false;
     }
 
+    /**
+     * Another random team name for {@code self}: different from its current name and from the name of every other team in
+     * {@code teams} (ignoring case), from the same list as {@link #randomTeam}. Null when no free name turns up.
+     */
+    public static String otherTeamName(GameData d, Random rnd, Team self, List<Team> teams) {
+        List<Team> others = new ArrayList<>();
+        for (Team t : teams) if (t != self) others.add(t);
+        for (int tries = 0; tries < 50; tries++) {
+            String n = d.randomTeamName(-1, rnd);
+            if (!n.equalsIgnoreCase(self.name) && !nameTaken(others, n)) return n;
+        }
+        return null;
+    }
+
     /** Gives every hedgehog slot a hat-appropriate random name that differs from the others where possible. */
     public static void fillHogNames(GameData d, Random rnd, Team t) {
         List<String> taken = new ArrayList<>();

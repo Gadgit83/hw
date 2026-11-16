@@ -816,6 +816,147 @@ public class LaunchSmokeTest {
         System.out.println("SDK " + android.os.Build.VERSION.SDK_INT + ": Back key opens the dialog in a network game ok");
     }
 
+    private static GameActivity newGame() {
+        ActivityController<GameActivity> c = Robolectric.buildActivity(GameActivity.class);
+        try {
+            return c.create().get();
+        } catch (Throwable e) {
+            return c.get();                               // SDL's onCreate needs its native library; the Back handling does not
+        }
+    }
+
+    /** A local game (no net.cfg): Back asks "Quit the game?" by the key and by the Android 13 gesture callback, and nothing else. */
+    @Test
+    public void gameBack_localGameAsksToQuit_keyAndGesture() throws Exception {
+        TestSupport.installData(app());
+        java.io.File dir = app().getFilesDir();
+        new java.io.File(dir, "net.cfg").delete();
+        GameActivity a = newGame();
+        assertTrue("Back down is consumed", a.dispatchKeyEvent(new android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN, android.view.KeyEvent.KEYCODE_BACK)));
+        assertTrue("Back up is consumed", a.dispatchKeyEvent(new android.view.KeyEvent(android.view.KeyEvent.ACTION_UP, android.view.KeyEvent.KEYCODE_BACK)));
+        TestSupport.settle(100);
+        android.app.AlertDialog d = org.robolectric.shadows.ShadowAlertDialog.getLatestAlertDialog();
+        assertTrue("the local quit question is up", d != null && d.isShowing());
+        org.robolectric.shadows.ShadowAlertDialog sd = org.robolectric.Shadows.shadowOf(d);
+        assertTrue(String.valueOf(sd.getTitle()).equals("Quit the game?"));
+        assertTrue(String.valueOf(sd.getMessage()).contains("setup screen"));
+        assertTrue(d.getButton(android.content.DialogInterface.BUTTON_POSITIVE).getText().toString().equals("Quit the game"));
+        assertTrue(d.getButton(android.content.DialogInterface.BUTTON_NEGATIVE).getText().toString().equals("Keep playing"));
+        d.dismiss();
+        if (android.os.Build.VERSION.SDK_INT >= 33) {
+            // a fresh game screen: the gesture callback is registered and asks the same question
+            predictiveBack(true);
+            try {
+                GameActivity g = newGame();
+                java.util.List<Object> callbacks = registeredBackCallbacks(g.getOnBackInvokedDispatcher());
+                assertTrue("the Back gesture callback is registered on Android 13 and later", !callbacks.isEmpty());
+                ((android.window.OnBackInvokedCallback) callbacks.get(0)).onBackInvoked();
+                TestSupport.settle(100);
+                android.app.AlertDialog gd = org.robolectric.shadows.ShadowAlertDialog.getLatestAlertDialog();
+                assertTrue("the gesture asks the local quit question", gd != null && gd.isShowing()
+                        && String.valueOf(org.robolectric.Shadows.shadowOf(gd).getTitle()).equals("Quit the game?"));
+                gd.dismiss();
+            } finally {
+                predictiveBack(false);
+            }
+        }
+        System.out.println("SDK " + android.os.Build.VERSION.SDK_INT + ": local game Back asks to quit ok");
+    }
+
+    /**
+     * Robolectric keeps Back callbacks only with predictive back switched on (its shadow's setting; the framework's own check is
+     * the app's manifest flag, which the test does not go through). Off restores the default with the shadow's reset.
+     */
+    private static void predictiveBack(boolean on) throws Exception {
+        Class<?> shadow = Class.forName("org.robolectric.shadows.ShadowWindowOnBackInvokedDispatcher");
+        if (on) {
+            java.lang.reflect.Method m = shadow.getDeclaredMethod("setEnablePredictiveBack", boolean.class);
+            m.setAccessible(true);
+            m.invoke(null, true);
+        } else {
+            shadow.getMethod("reset").invoke(null);
+        }
+        // The framework also asks the context (Robolectric does not read the activity's flag there): this makes it accept the callback.
+        org.robolectric.util.ReflectionHelpers.setStaticField(Class.forName("android.window.WindowOnBackInvokedDispatcher"),
+                "ALWAYS_ENFORCE_PREDICTIVE_BACK", on);
+    }
+
+    /**
+     * The callbacks registered on a window's Back dispatcher (Robolectric's proxy keeps them until the window takes them over,
+     * then the real dispatcher holds them by priority in the public mOnBackInvokedCallbacks map).
+     */
+    private static java.util.List<Object> registeredBackCallbacks(Object dispatcher) throws Exception {
+        java.util.List<Object> out = new java.util.ArrayList<>();
+        java.lang.reflect.Field fp = dispatcher.getClass().getDeclaredField("mCallbacks");
+        fp.setAccessible(true);
+        for (Object pair : (java.util.List<?>) fp.get(dispatcher)) out.add(((android.util.Pair<?, ?>) pair).first);
+        java.lang.reflect.Field fa = dispatcher.getClass().getDeclaredField("mActualDispatcher");
+        fa.setAccessible(true);
+        Object actual = fa.get(dispatcher);
+        if (actual != null) {
+            java.util.Map<?, ?> byPriority = (java.util.Map<?, ?>) actual.getClass().getField("mOnBackInvokedCallbacks").get(actual);
+            for (Object list : byPriority.values()) out.addAll((java.util.Collection<?>) list);
+        }
+        return out;
+    }
+
+    private static String teamNameField(android.view.View v) {
+        if (v instanceof android.widget.EditText && "Team name".contentEquals(((android.widget.EditText) v).getHint())) {
+            return ((android.widget.EditText) v).getText().toString();
+        }
+        if (v instanceof android.view.ViewGroup) {
+            for (int i = 0; i < ((android.view.ViewGroup) v).getChildCount(); i++) {
+                String r = teamNameField(((android.view.ViewGroup) v).getChildAt(i));
+                if (r != null) return r;
+            }
+        }
+        return null;
+    }
+
+    /** The dice beside the team name: a new name each time, never the name of another team or the same name, and nothing else changes. */
+    @Test
+    public void teamEditActivity_diceChangesOnlyTheName_neverAnotherTeamsName() throws Exception {
+        TestSupport.installData(app());
+        app().getSharedPreferences(Store.PREFS_NAME, Context.MODE_PRIVATE).edit().putString("setup", SETUP_0_2_0).commit();
+        GameData data = Store.data(app());
+        SetupModel before = Store.loadSetup(app(), data);
+        // The 0.2.0 setup has no hedgehog names, so loading fills them at random: save them, so the editor loads the same ones.
+        Store.saveSetup(app(), before);
+        SetupModel.Team start = before.teams.get(0);
+        String previous = start.name;
+        Intent in = new Intent(app(), TeamEditActivity.class).putExtra("team", 0);
+        ActivityController<TeamEditActivity> ctl = Robolectric.buildActivity(TeamEditActivity.class, in);
+        TeamEditActivity a = ctl.create().start().postCreate(null).resume().visible().get();
+        a.onWindowFocusChanged(true);
+        TestSupport.layout(a);
+        TestSupport.settle(300);
+        for (int i = 0; i < 25; i++) {
+            android.view.View dice = TestSupport.find(a.getWindow().getDecorView(), "Pick another team name");
+            assertTrue("the dice button is there at step " + i, dice instanceof android.widget.Button
+                    && "🎲".contentEquals(((android.widget.Button) dice).getText()));
+            dice.performClick();
+            TestSupport.settle(50);
+            String now = teamNameField(a.getWindow().getDecorView());
+            assertTrue("the name field shows a name at step " + i, now != null && !now.isEmpty());
+            assertFalse("the dice changes the name at step " + i + ": " + now, now.equalsIgnoreCase(previous));
+            assertFalse("the dice never picks another team's name at step " + i + ": " + now, now.equalsIgnoreCase(before.teams.get(1).name));
+            previous = now;
+        }
+        ctl.pause().stop().destroy();                     // leaving the editor saves the setup, as after a typed name
+        SetupModel after = Store.loadSetup(app(), data);
+        SetupModel.Team t = after.teams.get(0);
+        assertTrue("the last name is saved: " + previous, previous.equals(t.name));
+        assertTrue("the other team keeps its name", before.teams.get(1).name.equals(after.teams.get(1).name));
+        assertTrue("colour, level, hogs, fort, grave and voice are kept", t.color == start.color && t.level == start.level && t.hogs == start.hogs
+                && t.fort.equals(start.fort) && t.grave.equals(start.grave) && t.voice.equals(start.voice));
+        // the setup file keeps only the team's own hedgehogs, so the slots past its hog count are not compared
+        for (int h = 0; h < t.hogs; h++) {
+            assertTrue("hedgehog " + h + " keeps its hat and name", java.util.Objects.equals(t.hogHat[h], start.hogHat[h])
+                    && java.util.Objects.equals(t.hogName[h], start.hogName[h]));
+        }
+        System.out.println("SDK " + android.os.Build.VERSION.SDK_INT + ": team dice changes only the name ok");
+    }
+
     /** What each phone is told when the game ends or it leaves, and the interface filter. */
     @Test
     public void netSession_wordingAndInterfaces() {

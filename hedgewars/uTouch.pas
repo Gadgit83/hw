@@ -58,7 +58,7 @@ function getSecondFinger(finger: TTouch_Data): PTouch_Data;
 function isOnRect(rect: TSDL_Rect; finger: TTouch_Data): boolean;
 function isOnRect(x,y,w,h: LongInt; finger: TTouch_Data): boolean;
 function isOnUIRect(rect: TSDL_Rect; finger: TTouch_Data; scale: GLfloat): boolean;
-function isOnWidget(widget: TOnScreenWidget; finger: TTouch_Data): boolean;
+function isOnWidget(widget: POnScreenWidget; finger: TTouch_Data): boolean;
 procedure printFinger(finger: TTouch_Data);
 implementation
 
@@ -119,23 +119,23 @@ finger^.downWhilePaused:= isPaused;
 inc(buttonsDown);//inc buttonsDown, if we don't see a button down we'll dec it
 
 // a phone that only watches a network game has no controls: every touch pans or zooms the camera
-if ((not isPaused) or isOnWidget(pauseButton, finger^)) and ((GameType <> gmtNet) or (not cNetWatch)) then
+if ((not isPaused) or isOnWidget(@pauseButton, finger^)) and ((GameType <> gmtNet) or (not cNetWatch)) then
 begin
-if isOnWidget(fireButton, finger^) then
+if isOnWidget(@fireButton, finger^) then
     begin
     TouchTeamCommand('+attack');
     moveCursor:= false;
     finger^.pressedWidget:= @fireButton;
     exit;
     end;
-if isOnWidget(arrowLeft, finger^) then
+if isOnWidget(@arrowLeft, finger^) then
     begin
     TouchTeamCommand('+left');
     moveCursor:= false;
     finger^.pressedWidget:= @arrowLeft;
     exit;
     end;
-if isOnWidget(arrowRight, finger^) then
+if isOnWidget(@arrowRight, finger^) then
     begin
     TouchTeamCommand('+right');
     if (CurrentHedgehog <> nil) and (CurrentHedgehog^.Gear <> nil) then WriteLnToConsole('[Touch] +right, hedgehog x ' + inttostr(hwRound(CurrentHedgehog^.Gear^.X)));
@@ -143,7 +143,7 @@ if isOnWidget(arrowRight, finger^) then
     finger^.pressedWidget:= @arrowRight;
     exit;
     end;
-if isOnWidget(arrowUp, finger^) then
+if isOnWidget(@arrowUp, finger^) then
     begin
     TouchTeamCommand('+up');
     aimingUp:= true;
@@ -151,7 +151,7 @@ if isOnWidget(arrowUp, finger^) then
     finger^.pressedWidget:= @arrowUp;
     exit;
     end;
-if isOnWidget(arrowDown, finger^) then
+if isOnWidget(@arrowDown, finger^) then
     begin
     TouchTeamCommand('+down');
     aimingDown:= true;
@@ -162,7 +162,7 @@ if isOnWidget(arrowDown, finger^) then
 
 // A network game cannot pause locally (the pause command only toggles away-from-keyboard there): the button is drawn
 // for the host only, and asks the launcher/relay to pause or resume everybody; leaving goes through the Back key.
-if isOnWidget(pauseButton, finger^) then
+if isOnWidget(@pauseButton, finger^) then
     begin
     if GameType <> gmtNet then
         begin
@@ -183,7 +183,7 @@ if isOnWidget(pauseButton, finger^) then
     exit;
     end;
 
-if isOnWidget(utilityWidget, finger^) then
+if isOnWidget(@utilityWidget, finger^) then
     begin
     finger^.pressedWidget:= @utilityWidget;
     moveCursor:= false;
@@ -199,7 +199,7 @@ if isOnWidget(utilityWidget, finger^) then
     exit;
     end;
 
-if isOnWidget(utilityWidget2, finger^) then
+if isOnWidget(@utilityWidget2, finger^) then
     begin
     finger^.pressedWidget:= @utilityWidget2;
     moveCursor:= false;
@@ -239,7 +239,7 @@ if buttonsDown = 0 then
     case pointerCount of
         1:
             targetting:= not(targetted) and (CurrentHedgehog <> nil) and (Ammoz[CurrentHedgehog^.CurAmmoType].Ammo.Propz and ammoprop_NeedTarget <> 0)
-                and ((GameType <> gmtNet) or (not cNetWatch));
+                and ((GameType <> gmtNet) or (not cNetWatch)) and (not touchIdleTurn);
         2:
             begin
             moveCursor:= false;
@@ -421,7 +421,7 @@ end;
 procedure onTouchLongClick(finger: TTouch_Data);
 begin
 if (GameType = gmtNet) and cNetWatch then exit;
-if isOnWidget(jumpWidget, finger) then
+if isOnWidget(@jumpWidget, finger) then
     begin
     TouchTeamCommand('ljump');
     exit;
@@ -436,23 +436,27 @@ if bShowAmmoMenu then
     begin
     if isOnUIRect(AmmoRect, finger, cMenuScale) then
         begin
-        CursorPoint.X:= round(finger.x / cMenuScale);
-        CursorPoint.Y:= round(finger.y / cMenuScale);
-        TouchTeamCommand('put');
+        // another team's turn (--hide-idle-controls): the menu only shows, a tap picks no weapon
+        if not touchIdleTurn then
+            begin
+            CursorPoint.X:= round(finger.x / cMenuScale);
+            CursorPoint.Y:= round(finger.y / cMenuScale);
+            TouchTeamCommand('put');
+            end;
         end
     else
         bShowAmmoMenu:= false;
     exit;
     end;
 
-if isOnCurrentHog(finger) or isOnWidget(AMWidget, finger) then
+if isOnCurrentHog(finger) or isOnWidget(@AMWidget, finger) then
     begin
-    if isOnWidget(AMWidget, finger) then WriteLnToConsole('[Touch] tapped weapon chest');
+    if isOnWidget(@AMWidget, finger) then WriteLnToConsole('[Touch] tapped weapon chest');
     bShowAmmoMenu := true;
     exit;
     end;
 
-if isOnWidget(jumpWidget, finger) then
+if isOnWidget(@jumpWidget, finger) then
     begin
     WriteLnToConsole('[Touch] tapped jump');
     TouchTeamCommand('hjump');
@@ -719,6 +723,8 @@ end;
 function isOnCrosshair(finger: TTouch_Data): boolean;
 begin
     isOnCrosshair:= false;
+    if touchIdleTurn then
+        exit;
     if (CurrentHedgehog = nil) or (CurrentHedgehog^.Gear = nil) or (CrosshairGear = nil) or
        (CrosshairGear <> CurrentHedgehog^.Gear) then
         exit;
@@ -797,9 +803,10 @@ begin
                  (fy > rect.y) and (fy < rect.y + rect.h);
 end;
 
-function isOnWidget(widget: TOnScreenWidget; finger: TTouch_Data): boolean;
+function isOnWidget(widget: POnScreenWidget; finger: TTouch_Data): boolean;
 begin
-    isOnWidget:= widget.show and isOnUIRect(widget.active, finger, cUIScale);
+    // the playing controls are not touchable on another team's turn (--hide-idle-controls)
+    isOnWidget:= widget^.show and isOnUIRect(widget^.active, finger, cUIScale) and (not isIdleHiddenControl(widget));
 end;
 
 procedure printFinger(finger: TTouch_Data);

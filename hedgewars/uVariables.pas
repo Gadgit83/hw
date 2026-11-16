@@ -204,6 +204,8 @@ var
     cCutLY0, cCutLY1, cCutRY0, cCutRY1: LongInt; // vertical extent (pixels from the top) of the cut-out at the left and right edge, 0,0: the whole height
     cTurnCentre     : boolean; // touch: centre the camera on the active hedgehog when a turn starts
     cTurnZoom       : LongInt; // touch: zoom in to this percent of the default zoom when a turn starts, 0: off
+    cJumpInset      : LongInt; // touch: move the jump button this percent of its own width further in from the right edge, 0: off
+    cHideIdleControls: boolean; // touch: hide the controls that do nothing when it is not this phone's turn (the weapon chest stays)
     cTurnCamPending : boolean; // a turn has started and the camera has not been moved for it yet
     cMenuTarget     : GLfloat; // wanted scale of the weapon menu (0: same as the HUD)
     cMenuScale      : GLfloat; // scale the weapon menu is drawn at right now
@@ -2722,12 +2724,39 @@ var trammo:  array[TAmmoStrId] of ansistring;   // name of the weapon
     trcmd:   array[TCmdHelpStrId] of ansistring; // chat command help
     cTestLua : Boolean;
 
+// Touch controls on another team's turn (see --hide-idle-controls): true when the playing controls must not be shown
+// or touched, because the game is paused or over, no team or hedgehog is playing, or the current one is not this phone's.
+function touchIdleTurn: boolean;
+// True when this touch widget is one of the playing controls hidden by touchIdleTurn (the weapon chest and the pause button stay).
+function isIdleHiddenControl(widget: POnScreenWidget): boolean;
+
 procedure preInitModule;
 procedure initModule;
 procedure freeModule;
 
 implementation
 uses uRust;
+
+function touchIdleTurn: boolean;
+begin
+touchIdleTurn:= false;
+if not cHideIdleControls then
+    exit;
+if isPaused or GameOver then
+    touchIdleTurn:= true
+else if (CurrentTeam = nil) or (CurrentHedgehog = nil) then
+    touchIdleTurn:= true
+else
+    touchIdleTurn:= CurrentTeam^.ExtDriven or (CurrentHedgehog^.BotLevel > 0);
+end;
+
+function isIdleHiddenControl(widget: POnScreenWidget): boolean;
+begin
+isIdleHiddenControl:= false;
+if (widget = @AMWidget) or (widget = @pauseButton) then
+    exit;
+isIdleHiddenControl:= touchIdleTurn;
+end;
 
 procedure preInitModule;
 begin
@@ -2798,6 +2827,8 @@ begin
     cSafeInsetB:= 0;
     cTurnCentre:= false;
     cTurnZoom:= 0;
+    cJumpInset:= 0;
+    cHideIdleControls:= false;
     cTurnCamPending:= false;
     cCornerTL:= 0;
     cCornerTR:= 0;

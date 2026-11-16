@@ -379,7 +379,7 @@ with JumpWidget do
     sprite:= sprJumpWidget;
     frame.w:= Round(spritesData[sprite].Texture^.w * buttonScale);
     frame.h:= Round(spritesData[sprite].Texture^.h * buttonScale);
-    frame.x:= (cScreenWidth shr 1) - Round(frame.w * 1.2) - sr;
+    frame.x:= (cScreenWidth shr 1) - Round(frame.w * 1.2) - sr - (frame.w * cJumpInset) div 100;
     frame.y:= cScreenHeight - frame.h * 2 - sb;
     active.x:= frame.x;
     active.y:= frame.y;
@@ -567,7 +567,7 @@ with JumpWidget do
     pad:= HInset(false, false, frame.y, frame.y + frame.h);
     if pad < Round(frame.w * 0.2) then
         pad:= Round(frame.w * 0.2);
-    frame.x:= (cScreenWidth shr 1) - frame.w - pad;
+    frame.x:= (cScreenWidth shr 1) - frame.w - pad - (frame.w * cJumpInset) div 100;
     active.x:= frame.x;
     active.y:= frame.y;
     active.w:= frame.w;
@@ -939,7 +939,9 @@ var Slot, Pos: LongInt;
     c,i,g,t,STurns: LongInt;
     tipScale: GLfloat;
 begin
-if TurnTimeLeft = 0 then bShowAmmoMenu:= false;
+// the menu stays open when another team's turn runs out (--hide-idle-controls); it is view-only then
+if (TurnTimeLeft = 0) and (not touchIdleTurn) then bShowAmmoMenu:= false;
+if touchIdleTurn then bSelected:= false;
 
 // give the assigned ammo to hedgehog
 Ammo:= nil;
@@ -2197,16 +2199,23 @@ if CinematicSteps > 0 then
 // a phone that only watches a network game plays no team: no controls are drawn
 if (GameType <> gmtNet) or (not cNetWatch) then
     begin
-    DrawScreenWidget(@arrowLeft);
-    DrawScreenWidget(@arrowRight);
-    DrawScreenWidget(@arrowUp);
-    DrawScreenWidget(@arrowDown);
+    // on another team's turn the controls that do nothing are not drawn (--hide-idle-controls); the weapon chest stays
+    if not touchIdleTurn then
+        begin
+        DrawScreenWidget(@arrowLeft);
+        DrawScreenWidget(@arrowRight);
+        DrawScreenWidget(@arrowUp);
+        DrawScreenWidget(@arrowDown);
 
-    DrawScreenWidget(@fireButton);
-    DrawScreenWidget(@jumpWidget);
+        DrawScreenWidget(@fireButton);
+        DrawScreenWidget(@jumpWidget);
+        end;
     DrawScreenWidget(@AMWidget);
-    DrawScreenWidget(@utilityWidget);
-    DrawScreenWidget(@utilityWidget2);
+    if not touchIdleTurn then
+        begin
+        DrawScreenWidget(@utilityWidget);
+        DrawScreenWidget(@utilityWidget2);
+        end;
     if (GameType <> gmtNet) or cNetHost then DrawScreenWidget(@pauseButton);
     end;
 {$ENDIF}

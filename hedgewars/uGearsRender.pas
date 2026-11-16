@@ -313,7 +313,7 @@ begin
         exit;
 
     // render crosshair
-    if (CrosshairGear <> nil) and (Gear = CrosshairGear) then
+    if (CrosshairGear <> nil) and (Gear = CrosshairGear) and (not touchIdleTurn) then
         begin
         hogLR:= 1;
         if IsHogFacingLeft(Gear) then

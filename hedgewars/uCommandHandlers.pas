@@ -880,6 +880,16 @@ begin
 cDamagePercent:= StrToInt(s)
 end;
 
+procedure chDeathBoomPercent(var s: shortstring);
+begin
+cDeathBoomPercent:= StrToInt(s)
+end;
+
+procedure chLandBoomPercent(var s: shortstring);
+begin
+cLandBoomPercent:= StrToInt(s)
+end;
+
 procedure chRopePercent(var s: shortstring);
 begin
 cRopePercent:= StrToInt(s)
@@ -1077,6 +1087,8 @@ begin
     RegisterVariable('healthdec', @chHealthDecrease, false);
     RegisterVariable('inithealth',@chInitHealth, false);
     RegisterVariable('damagepct',@chDamagePercent , false);
+    RegisterVariable('deathboompct',@chDeathBoomPercent, false);
+    RegisterVariable('landboompct',@chLandBoomPercent, false);
     RegisterVariable('ropepct' , @chRopePercent   , false);
     RegisterVariable('getawaytime' , @chGetAwayTime , false);
     RegisterVariable('minedudpct',@chMineDudPercent, false);

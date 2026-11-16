@@ -92,6 +92,8 @@ public final class Options {
         // the weapon drawer follows the finger, and the weapon controls are refreshed at the start of a turn: always on
         a.add("--direct-ammo-menu");
         a.add("--refresh-weapon-ui");
+        // the pause screen has Quit game and Options buttons (GameActivity.pauseMenuAction)
+        a.add("--pause-menu");
         if (showFps) a.add("--showfps");
         if (!teamTags) a.add("--no-teamtag");
         if (!hogTags) a.add("--no-hogtag");

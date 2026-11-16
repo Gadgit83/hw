@@ -27,6 +27,16 @@ import java.util.List;
 /** Options: sound, display and controls, and the advanced and about pages. Changes apply to the next game. */
 public class OptionsActivity extends SetupActivity {
 
+    /** Intent extra: the tab to open first (0 Sound, 1 Display and controls, 2 Advanced). The game's Controls layout opens tab 1. */
+    static final String EXTRA_TAB = "tab";
+    /**
+     * Intent extra: the options as the game holds them. The game process saves its own changes, which this process may not see
+     * yet in its preferences, so the game's copy is the one to start from.
+     */
+    static final String EXTRA_OPTIONS = "gameOptions";
+    /** Result extra: the options as they were saved, so a game that opened this screen gets the changes (see GameActivity). */
+    static final String RESULT_OPTIONS = "options";
+
     private Ui ui;
     private Options o;
     private int tab;
@@ -39,11 +49,25 @@ public class OptionsActivity extends SetupActivity {
         super.onCreate(b);
         ui = new Ui(this);
         Ui.edgeToEdge(this);
-        o = Store.loadOptions(this);
+        String fromGame = getIntent() == null ? null : getIntent().getStringExtra(EXTRA_OPTIONS);
+        o = fromGame != null ? Options.fromText(fromGame) : Store.loadOptions(this);
         tab = getSharedPreferences(Store.PREFS_NAME, MODE_PRIVATE).getInt("optionsTab", 0);
         if (tab < 0 || tab > 2) tab = 0;
+        int asked = getIntent() == null ? -1 : getIntent().getIntExtra(EXTRA_TAB, -1);
+        if (asked >= 0 && asked <= 2) tab = asked;
         setContentView(buildFrame());
         show();
+    }
+
+    /** The result must be set before the screen finishes (finish() sends it at once), so Done and Back both set it. */
+    private void reportOptions() {
+        setResult(RESULT_OK, new Intent().putExtra(RESULT_OPTIONS, o.toText()));
+    }
+
+    @Override
+    public void onBackPressed() {
+        reportOptions();
+        super.onBackPressed();
     }
 
     @Override
@@ -60,7 +84,10 @@ public class OptionsActivity extends SetupActivity {
 
         topBar = ui.row();
         topBar.setPadding(ui.dp(Ui.GUTTER), ui.dp(2), ui.dp(Ui.GUTTER), 0);
-        topBar.addView(ui.button("‹ Done", true, v -> finish()), Ui.lp(ViewGroup.LayoutParams.WRAP_CONTENT, ui.dp(Ui.TOUCH_DP)));
+        topBar.addView(ui.button("‹ Done", true, v -> {
+            reportOptions();
+            finish();
+        }), Ui.lp(ViewGroup.LayoutParams.WRAP_CONTENT, ui.dp(Ui.TOUCH_DP)));
         TextView title = ui.text("Options", 18, Color.WHITE);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         title.setSingleLine(true);

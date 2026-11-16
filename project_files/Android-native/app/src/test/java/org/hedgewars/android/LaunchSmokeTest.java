@@ -1,5 +1,6 @@
 package org.hedgewars.android;
 
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
@@ -332,6 +333,86 @@ public class LaunchSmokeTest {
         gd.dismiss();
         new java.io.File(dir, "net.cfg").delete();
         System.out.println("SDK " + android.os.Build.VERSION.SDK_INT + ": spectator game screen state ok");
+    }
+
+    /** Writes the role of this phone's network game the way the Network screen does (net.cfg); "player" is a joined phone. */
+    private static void writeRole(String role) throws Exception {
+        java.nio.file.Files.write(new java.io.File(app().getFilesDir(), "net.cfg").toPath(),
+                ("role=" + role + "\n").getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    }
+
+    /** A game screen as the system creates it; the native library is not loaded under Robolectric, the screen still works. */
+    private static GameActivity gameActivity() {
+        org.robolectric.android.controller.ActivityController<GameActivity> c = Robolectric.buildActivity(GameActivity.class);
+        try {
+            return c.create().get();
+        } catch (Throwable e) {
+            return c.get();
+        }
+    }
+
+    /** Title, message and the buttons of a question dialog, to compare two questions word for word. */
+    private static String questionOf(android.app.AlertDialog d) {
+        org.robolectric.shadows.ShadowAlertDialog sd = org.robolectric.Shadows.shadowOf(d);
+        StringBuilder sb = new StringBuilder(String.valueOf(sd.getTitle())).append('|').append(String.valueOf(sd.getMessage()));
+        for (int which : new int[] { android.content.DialogInterface.BUTTON_POSITIVE, android.content.DialogInterface.BUTTON_NEUTRAL,
+                android.content.DialogInterface.BUTTON_NEGATIVE }) {
+            android.widget.Button b = d.getButton(which);
+            boolean shown = b != null && b.getVisibility() == android.view.View.VISIBLE;
+            sb.append('|').append(shown ? b.getText().toString() : "-");
+        }
+        return sb.toString();
+    }
+
+    /**
+     * The pause screen's Quit game asks the same question as the Back key, for a joined phone, the host and a watcher (a local game
+     * quits through the engine's own question, which is not a dialog here). Options opens the options dialog with the way to the
+     * display and controls options, which opens the app's Options at the display tab.
+     */
+    @Test
+    public void gamePauseMenu_quitAsksTheBackQuestion_optionsOpen() throws Exception {
+        java.io.File net = new java.io.File(app().getFilesDir(), "net.cfg");
+        try {
+            for (String role : new String[] { "host", "player", "watch" }) {
+                writeRole(role);
+                GameActivity g = gameActivity();
+                g.dispatchKeyEvent(new android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN, android.view.KeyEvent.KEYCODE_BACK));
+                g.dispatchKeyEvent(new android.view.KeyEvent(android.view.KeyEvent.ACTION_UP, android.view.KeyEvent.KEYCODE_BACK));
+                TestSupport.settle(100);
+                android.app.AlertDialog byBack = org.robolectric.shadows.ShadowAlertDialog.getLatestAlertDialog();
+                assertTrue(role + ": Back opens the question", byBack != null && byBack.isShowing());
+                String backText = questionOf(byBack);
+                byBack.dismiss();
+
+                g.pauseMenuAction(GameActivity.PAUSE_QUIT);
+                TestSupport.settle(100);
+                android.app.AlertDialog byPause = org.robolectric.shadows.ShadowAlertDialog.getLatestAlertDialog();
+                assertTrue(role + ": Quit game opens the question", byPause != null && byPause.isShowing());
+                assertEquals(role + ": Quit game asks the same question as Back", backText, questionOf(byPause));
+                byPause.dismiss();
+                System.out.println("SDK " + android.os.Build.VERSION.SDK_INT + ": pause Quit game (" + role + ") asks: " + backText);
+            }
+
+            writeRole("host");
+            GameActivity g = gameActivity();
+            g.pauseMenuAction(GameActivity.PAUSE_OPTIONS);
+            TestSupport.settle(100);
+            android.app.AlertDialog options = org.robolectric.shadows.ShadowAlertDialog.getLatestAlertDialog();
+            assertTrue("Options opens a dialog", options != null && options.isShowing());
+            assertEquals("Options", String.valueOf(org.robolectric.Shadows.shadowOf(options).getTitle()));
+            android.widget.TextView controls = findText(options.getWindow().getDecorView(), "Controls layout");
+            assertNotNull("the options dialog has the Controls layout entry", controls);
+            controls.performClick();
+            TestSupport.settle(100);
+            org.robolectric.shadows.ShadowActivity.IntentForResult next = org.robolectric.Shadows.shadowOf(g).getNextStartedActivityForResult();
+            assertNotNull("Controls layout opens a screen", next);
+            assertEquals(OptionsActivity.class.getName(), next.intent.getComponent().getClassName());
+            assertEquals("it opens at the display and controls tab", 1, next.intent.getIntExtra(OptionsActivity.EXTRA_TAB, -1));
+            assertNotNull("the game's own options come with it", next.intent.getStringExtra(OptionsActivity.EXTRA_OPTIONS));
+            System.out.println("SDK " + android.os.Build.VERSION.SDK_INT + ": pause Options dialog and Controls layout ok");
+        } finally {
+            net.delete();
+        }
     }
 
     @Test

@@ -1,9 +1,12 @@
 package org.hedgewars.android;
 
+import android.content.Intent;
 import android.content.pm.ActivityInfo;
 import android.os.Build;
 import android.os.Bundle;
 import android.view.KeyEvent;
+import android.widget.LinearLayout;
+import android.view.ViewGroup;
 
 import org.libsdl.app.SDLActivity;
 
@@ -125,6 +128,14 @@ public class GameActivity extends SDLActivity {
      */
     @Override
     public void onBackPressed() {
+        askQuit();
+    }
+
+    /**
+     * The question Back asks, also what the pause screen's Quit game asks: a local game quits the engine's own way (Escape,
+     * which opens its quit question), a network game shows {@link BackConfirm}. Kept in one place so both stay the same.
+     */
+    private void askQuit() {
         int role = BackConfirm.role(getFilesDir());
         if (role == BackConfirm.LOCAL) {
             SDLActivity.onNativeKeyDown(KeyEvent.KEYCODE_ESCAPE);
@@ -137,6 +148,91 @@ public class GameActivity extends SDLActivity {
             return;
         }
         backDialog = BackConfirm.show(this, role, () -> quitEngine(false), () -> quitEngine(true));
+    }
+
+    /** The pause screen's buttons (--pause-menu): the native launcher calls this from its IPC thread with the engine's letter. */
+    static final int PAUSE_QUIT = 'q', PAUSE_OPTIONS = 'o';
+
+    /** Activity request code for the options screen opened from the game (its result carries the saved options). */
+    private static final int REQUEST_OPTIONS = 1;
+
+    /**
+     * Called from the native launcher (hp_main.c, through JNI) when the player presses Quit game or Options on the pause screen.
+     * Runs on the UI thread. Quit game opens the same question as Back ({@link #askQuit}), so the network rules stay in one place.
+     */
+    @SuppressWarnings("unused")
+    public void pauseMenuAction(int action) {
+        uiHandler.post(() -> {
+            if (isFinishing()) return;
+            if (action == PAUSE_QUIT) askQuit();
+            else if (action == PAUSE_OPTIONS) showPauseOptions();
+        });
+    }
+
+    private android.app.AlertDialog optionsDialog;
+
+    /**
+     * Options during a game: the sound settings, which take effect at once (the engine gets them as livevolume), and the way to the
+     * display and controls options. The dialog saves what it changed when it closes. The rest of the options wait for the next game.
+     */
+    private void showPauseOptions() {
+        if (optionsDialog != null && optionsDialog.isShowing()) return;
+        Ui ui = new Ui(this);
+        LinearLayout body = new LinearLayout(this);
+        body.setOrientation(LinearLayout.VERTICAL);
+        body.setPadding(ui.dp(Ui.GUTTER), ui.dp(8), ui.dp(Ui.GUTTER), ui.dp(8));
+        body.addView(ui.slider("Master volume", 0, 100, options.master, n -> n + "%", n -> { options.master = n; applyLiveVolume(); }));
+        body.addView(ui.slider("Sound effects", 0, 100, options.effects, n -> n + "%", n -> { options.effects = n; applyLiveVolume(); }));
+        body.addView(ui.slider("Music", 0, 100, options.music, n -> n + "%", n -> { options.music = n; applyLiveVolume(); }));
+        body.addView(ui.toggle("Mute all sound and music", options.mute, c -> { options.mute = c; applyLiveVolume(); }));
+        body.addView(ui.hint("Sound changes at once. A game that started muted has no sound until the next game."));
+        body.addView(ui.button("Controls layout", false, v -> {
+            if (optionsDialog != null) optionsDialog.dismiss();
+            openControlsLayout();
+        }), ui.margins(Ui.lp(ViewGroup.LayoutParams.WRAP_CONTENT, ui.dp(Ui.TOUCH_DP)), 0, 8, 0, 0));
+        optionsDialog = Ui.dialog(this)
+                .setTitle("Options")
+                .setView(body)
+                .setPositiveButton("Done", null)
+                .setOnDismissListener(d -> Store.saveOptions(this, options))
+                .create();
+        optionsDialog.show();
+    }
+
+    /**
+     * Hook for the controls editor (issue #21), which will replace this: until then the app's Options open at the display and
+     * controls tab. Its saved options come back in the result ({@link #onActivityResult}).
+     */
+    private void openControlsLayout() {
+        startActivityForResult(new Intent(this, OptionsActivity.class)
+                .putExtra(OptionsActivity.EXTRA_TAB, 1)
+                .putExtra(OptionsActivity.EXTRA_OPTIONS, options.toText()), REQUEST_OPTIONS);
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQUEST_OPTIONS && resultCode == RESULT_OK && data != null) {
+            String text = data.getStringExtra(OptionsActivity.RESULT_OPTIONS);
+            if (text != null) {
+                options = Options.fromText(text);
+                applyLiveVolume();
+            }
+        }
+    }
+
+    /**
+     * The sound of the game that is running follows the options at once: the level as the engine's master volume (0 to 128),
+     * the effects and music shares, and mute. The launcher passes it to the engine (the command livevolume). Nothing happens
+     * when no game runs or sound is off for it.
+     */
+    private void applyLiveVolume() {
+        try {
+            nativeSetVolume(Math.round(Math.max(0, Math.min(100, options.master)) * 128f / 100f),
+                    Math.max(0, Math.min(100, options.effects)), Math.max(0, Math.min(100, options.music)), options.mute ? 1 : 0);
+        } catch (Throwable e) {
+            android.util.Log.w(Diag.TAG, "nativeSetVolume failed: " + e);
+        }
     }
 
     /**
@@ -161,6 +257,9 @@ public class GameActivity extends SDLActivity {
 
     /** The launcher (hp_ipc.c): tells the relay the player is leaving and makes the engine quit whatever its UI state. */
     private static native int nativeUserQuit();
+
+    /** The launcher (hp_main.c): the sound levels changed during the game (see applyLiveVolume). */
+    private static native int nativeSetVolume(int level, int effects, int music, int mute);
 
     /** The launcher (hp_ipc.c): the host chose "End the game for everyone": control frame Z to the relay, then the engine quits. */
     private static native int nativeEndForEveryone();

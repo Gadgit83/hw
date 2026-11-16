@@ -128,6 +128,33 @@ JNIEXPORT jint JNICALL Java_org_hedgewars_android_GameActivity_nativeEndForEvery
     return hp_ipc_end_for_everyone();
 }
 
+/* GameActivity.nativeSetVolume(): the options menu changed the sound during a game (level as the engine's 0..128 master
+ * volume, the effects and music percentages, mute 0 or 1). Sent to the engine as the command livevolume. */
+JNIEXPORT jint JNICALL Java_org_hedgewars_android_GameActivity_nativeSetVolume(JNIEnv *env, jclass cls, jint level, jint effects,
+                                                                              jint music, jint mute)
+{
+    char cmd[80];
+    (void)env;
+    (void)cls;
+    snprintf(cmd, sizeof cmd, "livevolume %d %d %d %d", (int)level, (int)effects, (int)music, mute ? 1 : 0);
+    return hp_ipc_engine_command(cmd);
+}
+
+/* The pause screen's buttons (--pause-menu, the engine's 'k' message): 'q' is Quit game, 'o' is Options. Runs on the IPC
+ * thread, which SDL attaches to the JVM. GameActivity.pauseMenuAction(int) decides what to show. */
+static void on_pause_menu(int action)
+{
+    JNIEnv *env = (JNIEnv *)SDL_AndroidGetJNIEnv();
+    jobject act = (jobject)SDL_AndroidGetActivity();
+    if (!env || !act) return;
+    jclass cls = (*env)->GetObjectClass(env, act);
+    jmethodID mid = cls ? (*env)->GetMethodID(env, cls, "pauseMenuAction", "(I)V") : NULL;
+    if (mid) (*env)->CallVoidMethod(env, act, mid, (jint)action);
+    if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
+    if (cls) (*env)->DeleteLocalRef(env, cls);
+    (*env)->DeleteLocalRef(env, act);
+}
+
 /* Asks GameActivity.engineDisplayInfo() (see there) for the HUD scale, the weapon menu scale and the
  * safe area insets. On any failure the defaults stay (scale 100 %, no insets, which is the desktop layout). */
 static void query_display(int out[15])
@@ -218,6 +245,7 @@ int SDL_main(int argc, char **argv)
     snprintf(g_marker_path, sizeof g_marker_path, "%s/logs/game_running", base);
     atexit(on_exit_hook);
     hp_ipc_set_error_handler(on_engine_error);
+    hp_ipc_set_pause_menu_handler(on_pause_menu);
 
     snprintf(config, sizeof config, "%s/game.ipc", base);
     snprintf(data, sizeof data, "%s/Data", base);

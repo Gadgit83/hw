@@ -23,6 +23,11 @@ int hp_ipc_user_quit(void);
 /* The host phone only: ends the game for everyone (control frame Z), then quits the engine. */
 int hp_ipc_end_for_everyone(void);
 
+/* The pause screen's buttons (--pause-menu): called from the server thread with 'q' (Quit game) or 'o' (Options). Optional. */
+void hp_ipc_set_pause_menu_handler(void (*handler)(int action));
+/* Sends one console command to the engine, e.g. "livevolume 128 100 50 0". Returns 0 when it was written. */
+int hp_ipc_engine_command(const char *cmd);
+
 #ifdef HP_HOST_TEST
 /* Test hook for the host test: send one message to the engine, e.g. "Fteamname". Returns 0 when sent. */
 int hp_ipc_send(const char *payload);

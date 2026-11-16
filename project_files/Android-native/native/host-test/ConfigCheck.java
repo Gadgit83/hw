@@ -168,6 +168,7 @@ public class ConfigCheck {
             check(!args.contains("--swap-fire-jump"), "fire and jump are not swapped by default");
             check(args.contains("--direct-ammo-menu"), "weapon drawer follows the finger by default");
             check(args.contains("--refresh-weapon-ui"), "weapon controls refresh at the start of a turn by default");
+            check(args.contains("--pause-menu"), "the pause screen has Quit game and Options by default");
             o.mute = true;
             o.voices = false;
             o.quality = 0;

@@ -211,6 +211,24 @@ public class OptionsActivity extends SetupActivity {
         others.addView(ui.hint("On another player's turn the arrows, jump, fire and timer buttons are hidden, because they do nothing then. "
                 + "The weapon chest stays, so you can look at your weapons; choosing one only works on your own turn."));
 
+        LinearLayout buttons = ui.card();
+        buttons.addView(ui.heading("Jump and fire buttons"));
+        LinearLayout walk = new LinearLayout(this);   // declared first: the two-button switch below enables or disables it
+        walk.setOrientation(LinearLayout.VERTICAL);
+        buttons.addView(ui.toggle("Two jump buttons: Jump (forward) and High jump", o.twoJump, c -> {
+            o.twoJump = c;
+            enableAll(walk, !c);
+        }));
+        buttons.addView(ui.hint("The High jump button sits left of Jump. Press it twice quickly for a back flip."));
+        buttons.addView(ui.toggle("Swap Fire and Jump", o.swapFireJump, c -> o.swapFireJump = c));
+        buttons.addView(ui.hint("Puts Jump where Fire is, and Fire where Jump is, mirrored."));
+        walk.addView(ui.toggle("With one jump button: Jump while walking does the long forward jump", o.jumpWhileMoving,
+                c -> o.jumpWhileMoving = c));
+        walk.addView(ui.hint("Only with one jump button. While a left or right move is held, Jump jumps forward. "
+                + "Off, Jump is the high jump, as when standing still."));
+        enableAll(walk, !o.twoJump);
+        buttons.addView(walk);
+
         LinearLayout look = ui.card();
         look.addView(ui.heading("Effects and feedback"));
         List<String> q = Arrays.asList(
@@ -235,6 +253,7 @@ public class OptionsActivity extends SetupActivity {
         left.addView(edge, ui.margins(full(), 0, 8, 0, 0));
         left.addView(cam, ui.margins(full(), 0, 8, 0, 0));
         left.addView(others, ui.margins(full(), 0, 8, 0, 0));
+        left.addView(buttons, ui.margins(full(), 0, 8, 0, 0));
         twoColumns(left, look);
     }
 

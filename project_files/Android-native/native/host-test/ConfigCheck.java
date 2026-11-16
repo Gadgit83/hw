@@ -163,6 +163,9 @@ public class ConfigCheck {
             check(args.contains("--raw-quality") && args.get(args.indexOf("--raw-quality") + 1).equals("0"), "default quality is best");
             check(args.contains("--jump-inset") && args.get(args.indexOf("--jump-inset") + 1).equals("100"), "jump inset is 100 by default");
             check(args.contains("--hide-idle-controls"), "controls hidden on other turns by default");
+            check(args.contains("--two-jump-buttons"), "two jump buttons by default");
+            check(args.contains("--jump-forward-when-moving"), "jump while walking is the forward jump by default");
+            check(!args.contains("--swap-fire-jump"), "fire and jump are not swapped by default");
             check(args.contains("--direct-ammo-menu"), "weapon drawer follows the finger by default");
             check(args.contains("--refresh-weapon-ui"), "weapon controls refresh at the start of a turn by default");
             o.mute = true;

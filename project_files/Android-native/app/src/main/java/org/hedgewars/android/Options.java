@@ -30,6 +30,9 @@ public final class Options {
     public boolean zoomTurn = true;    // zoom in at turn start
     public int zoomPct = 140;          // 110 to 200: how much closer than the default zoom the turn start view is
     public boolean hideIdle = true;    // on another player's turn hide the controls that do nothing (the weapon chest stays)
+    public boolean twoJump = true;     // two jump buttons: Jump (long forward jump) and High jump (one button: Jump does both)
+    public boolean jumpWhileMoving = true; // one button only: Jump does the long forward jump while walking (false: as when standing)
+    public boolean swapFireJump = false;   // the Fire and the Jump buttons change places, mirrored
     /** The jump button sits this percent of its own width further in from the right edge (the engine's default is 0). */
     public static final int JUMP_INSET_PCT = 100;
     public int quality = 5;            // 0 (lowest) to 5 (best), as the desktop slider
@@ -83,6 +86,9 @@ public final class Options {
         a.add("--jump-inset");
         a.add(Integer.toString(JUMP_INSET_PCT));
         if (hideIdle) a.add("--hide-idle-controls");
+        if (twoJump) a.add("--two-jump-buttons");
+        if (jumpWhileMoving) a.add("--jump-forward-when-moving");
+        if (swapFireJump) a.add("--swap-fire-jump");
         // the weapon drawer follows the finger, and the weapon controls are refreshed at the start of a turn: always on
         a.add("--direct-ammo-menu");
         a.add("--refresh-weapon-ui");
@@ -123,6 +129,9 @@ public final class Options {
         p.setProperty("zoomTurn", zoomTurn ? "1" : "0");
         p.setProperty("zoomPct", Integer.toString(zoomPct));
         p.setProperty("hideIdle", hideIdle ? "1" : "0");
+        p.setProperty("twoJump", twoJump ? "1" : "0");
+        p.setProperty("jumpWhileMoving", jumpWhileMoving ? "1" : "0");
+        p.setProperty("swapFireJump", swapFireJump ? "1" : "0");
         p.setProperty("quality", Integer.toString(quality));
         p.setProperty("showFps", showFps ? "1" : "0");
         p.setProperty("vibration", vibration ? "1" : "0");
@@ -161,6 +170,9 @@ public final class Options {
         o.zoomTurn = boolOf(p, "zoomTurn", o.zoomTurn);
         o.zoomPct = intOf(p, "zoomPct", o.zoomPct, 110, 200);
         o.hideIdle = boolOf(p, "hideIdle", o.hideIdle);
+        o.twoJump = boolOf(p, "twoJump", o.twoJump);
+        o.jumpWhileMoving = boolOf(p, "jumpWhileMoving", o.jumpWhileMoving);
+        o.swapFireJump = boolOf(p, "swapFireJump", o.swapFireJump);
         o.quality = intOf(p, "quality", o.quality, 0, 5);
         o.showFps = boolOf(p, "showFps", o.showFps);
         o.vibration = boolOf(p, "vibration", o.vibration);

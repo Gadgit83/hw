@@ -4,6 +4,18 @@ All notable changes to the native Android app (`project_files/Android-native`), 
 
 Only some builds were put on a phone, so a version below is a build that was made, not necessarily one that was released. Releases are tags on `android-master` with the APK attached; there is none yet.
 
+## 0.3.0-tv16 (120): 32-bit ARM phones; chat line fix (test build)
+
+`HP_PROFILE=test`, versionName `0.3.0-tv16-test`. Built for arm64-v8a **and armeabi-v7a** (32-bit ARM phones such as the Moto G6 on Android 9).
+
+### Fixed
+
+- The chat lines the relay writes into a game ("X lost connection...", "X is back") ended in two stray characters in 0.3.0-tv15: the engine draws the two time bytes as text. They are zero again (drawn as nothing).
+
+### Changed
+
+- The Rust engine library builds for 32-bit ARM (`armv7-linux-androideabi`); `ABIS="arm64-v8a armeabi-v7a"` builds both. A 32-bit phone playing with 64-bit phones has not been tested yet: the game's desync check would report it if the two disagreed.
+
 ## 0.3.0-tv15 (119): fixes from the tv14 device test (test build)
 
 `HP_PROFILE=test`, versionName `0.3.0-tv15-test`. From RESULT 23 on the device testing issue (Fairphone 4 host, Fairphone 3, TV).

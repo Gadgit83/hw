@@ -82,6 +82,8 @@ var
     baseZoomValue: GLFloat;
     switcherShown: boolean;
     lastTouchHog: PHedgehog;
+    weaponUIPending: boolean; // --refresh-weapon-ui: the weapon controls are due a refresh (a turn started or the hedgehog changed)
+    lastWeaponUIHog: PHedgehog;
 
     //aiming
     aimingCrosshair: boolean;
@@ -609,6 +611,7 @@ begin
 targetted:= false;
 targetting:= false;
 cTurnCamPending:= true;
+weaponUIPending:= true;
 SetUtilityWidgetState(amNothing);
 end;
 
@@ -636,11 +639,32 @@ if (CurrentHedgehog <> lastTouchHog) then
 end;
 
 
+// --refresh-weapon-ui: the engine keeps the hedgehog's weapon from one turn to the next, but the touch controls only follow
+// a weapon selection. At the start of a turn, and when the hedgehog changes, run the same update a selection runs (the aim
+// buttons of its weapon, the utility buttons); the drawer marks the weapon (ShowAmmoMenuBody). Done once per turn. With
+// --hide-idle-controls a turn that is not this phone's (touchIdleTurn) waits, and the refresh runs when it becomes ours.
+procedure RefreshWeaponUI;
+begin
+if CurrentHedgehog <> lastWeaponUIHog then
+    begin
+    lastWeaponUIHog:= CurrentHedgehog;
+    weaponUIPending:= true;
+    end;
+if weaponUIPending and (CurrentHedgehog <> nil) and (not touchIdleTurn) then
+    begin
+    weaponUIPending:= false;
+    updateTouchWidgets(CurrentHedgehog^.CurAmmoType);
+    SetUtilityWidgetState(amNothing);
+    WriteLnToConsole('[Touch] weapon controls refreshed for hedgehog ' + CurrentHedgehog^.Name);
+    end;
+end;
+
 procedure ProcessTouch;
 var
     deltaAngle: LongInt;
 begin
 UpdateSwitchButton;
+if cRefreshWeaponUI then RefreshWeaponUI;
 invertCursor := not(bShowAmmoMenu or targetting);
 if aimingCrosshair and ((CurrentHedgehog = nil) or (CurrentHedgehog^.Gear = nil)) then
     begin

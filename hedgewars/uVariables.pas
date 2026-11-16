@@ -207,6 +207,7 @@ var
     cJumpInset      : LongInt; // touch: move the jump button this percent of its own width further in from the right edge, 0: off
     cHideIdleControls: boolean; // touch: hide the controls that do nothing when it is not this phone's turn (the weapon chest stays)
     cDirectAmmoMenu : boolean; // touch: the weapon drawer follows the finger: the slot under it is highlighted, lifting on a weapon picks it (--direct-ammo-menu)
+    cRefreshWeaponUI: boolean; // touch: at the start of a turn (and when the hedgehog changes) show the aim buttons of its weapon and mark that weapon in the drawer (--refresh-weapon-ui)
     cTurnCamPending : boolean; // a turn has started and the camera has not been moved for it yet
     cMenuTarget     : GLfloat; // wanted scale of the weapon menu (0: same as the HUD)
     cMenuScale      : GLfloat; // scale the weapon menu is drawn at right now
@@ -2834,6 +2835,7 @@ begin
     cJumpInset:= 0;
     cHideIdleControls:= false;
     cDirectAmmoMenu:= false;
+    cRefreshWeaponUI:= false;
     cTurnCamPending:= false;
     cCornerTL:= 0;
     cCornerTR:= 0;

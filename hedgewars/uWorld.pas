@@ -1107,6 +1107,9 @@ c:= -1;
             for t:=0 to cMaxSlotAmmoIndex do
                 if (Ammo^[i, t].Count > 0) and (Ammo^[i, t].AmmoType <> amNothing) then
                     begin
+                    // --refresh-weapon-ui: the weapon the hedgehog holds is marked in the drawer
+                    if cRefreshWeaponUI and (CurrentHedgehog <> nil) and (Ammo^[i, t].AmmoType = CurrentHedgehog^.CurAmmoType) and (AMShiftX = 0) and (AMShiftY = 0) then
+                        DrawSprite(sprAMSlot, AmmoRect.x + BORDERSIZE + (c * (AMSlotSize+1)) + AMSlotPadding, AmmoRect.y + BORDERSIZE + (g * (AMSlotSize+1)) + AMSlotPadding -1, 0);
                     if hitOn and (hit.Y <= (cScreenHeight - AmmoRect.y) - ( g    * (AMSlotSize+1))) and
                        (hit.Y >  (cScreenHeight - AmmoRect.y) - ((g+1) * (AMSlotSize+1))) and
                        (hit.X >  AmmoRect.x                   + ( c    * (AMSlotSize+1))) and
@@ -1137,6 +1140,9 @@ c:= -1;
             for t:=0 to cMaxSlotAmmoIndex do
                 if (Ammo^[i, t].Count > 0) and (Ammo^[i, t].AmmoType <> amNothing) then
                     begin
+                    // --refresh-weapon-ui: the weapon the hedgehog holds is marked in the drawer
+                    if cRefreshWeaponUI and (CurrentHedgehog <> nil) and (Ammo^[i, t].AmmoType = CurrentHedgehog^.CurAmmoType) and (AMShiftX = 0) and (AMShiftY = 0) then
+                        DrawSprite(sprAMSlot, AmmoRect.x + BORDERSIZE + (g * (AMSlotSize+1)) + AMSlotPadding, AmmoRect.y + BORDERSIZE + (c * (AMSlotSize+1)) + AMSlotPadding -1, 0);
                     if hitOn and (hit.Y <= (cScreenHeight - AmmoRect.y) - ( c    * (AMSlotSize+1))) and
                        (hit.Y >  (cScreenHeight - AmmoRect.y) - ((c+1) * (AMSlotSize+1))) and
                        (hit.X >  AmmoRect.x                   + ( g    * (AMSlotSize+1))) and

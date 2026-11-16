@@ -83,6 +83,9 @@ public final class Options {
         a.add("--jump-inset");
         a.add(Integer.toString(JUMP_INSET_PCT));
         if (hideIdle) a.add("--hide-idle-controls");
+        // the weapon drawer follows the finger, and the weapon controls are refreshed at the start of a turn: always on
+        a.add("--direct-ammo-menu");
+        a.add("--refresh-weapon-ui");
         if (showFps) a.add("--showfps");
         if (!teamTags) a.add("--no-teamtag");
         if (!hogTags) a.add("--no-hogtag");

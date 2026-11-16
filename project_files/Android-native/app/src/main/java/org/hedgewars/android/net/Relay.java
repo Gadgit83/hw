@@ -1146,8 +1146,8 @@ public final class Relay {
         byte[] f = new byte[tb.length + 3];
         f[0] = 's';
         System.arraycopy(tb, 0, f, 1, tb.length);
-        f[f.length - 2] = g.lastStamp0;          // the time of the latest engine message (the engine ignores it for s)
-        f[f.length - 1] = g.lastStamp1;
+        // The last two bytes stay 0: the engine shows a chat line's text up to its end, so real time bytes appear as stray
+        // characters (seen on a phone with 0.3.0-tv15). Readers that follow the game time must skip s (the TV viewer does).
         List<Runnable> after = new ArrayList<>();
         appendAndForward(g, f, null, after);
         for (Runnable r : after) r.run();

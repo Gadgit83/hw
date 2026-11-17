@@ -10,7 +10,7 @@ import java.util.Set;
  * Game style row. One place for all of it: a new setting adds its text here, and LaunchSmokeTest fails if one is missing.
  *
  * Keys: "style", "scheme", "weapons.link", "weapons.set", "flag.N" (a switch, Qt scheme entry N from 1 to 25) and
- * "value.N" (a number, entry 26 to 43; see Rules.java). The wording follows the Qt frontend's tooltips
+ * "value.N" (a number, entry 26 to 46; see Rules.java). The wording follows the Qt frontend's tooltips
  * (QTfrontend/ui/page/pagescheme.cpp), in British English. The game styles are keyed by script name, as in
  * Scripts/Multiplayer. Pure Java, so it runs on a plain JVM.
  */

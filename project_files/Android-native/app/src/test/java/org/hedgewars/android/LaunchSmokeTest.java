@@ -24,7 +24,8 @@ import org.robolectric.annotation.Config;
 
 /**
  * Launch smoke test: every screen the user can open is created, started, resumed, laid out and destroyed on a
- * Fairphone-sized landscape screen under Android 14 and 15, and nothing may throw. It exists because 0.2.1 crashed on
+ * Fairphone-sized landscape screen under Android 14 and 15, and nothing may throw. The menus are also opened held upright
+ * on a 360 dp wide phone, and turned from landscape to upright while open (the game screen stays landscape). It exists because 0.2.1 crashed on
  * launch on every phone (Window.getInsetsController() before setContentView) and no test opened a screen.
  *
  * What it covers:
@@ -63,27 +64,75 @@ public class LaunchSmokeTest {
 
     /** Runs the whole life cycle of an activity the way the system does, with a layout pass and idle time. */
     private static <A extends Activity> String launch(Class<A> k, Intent in, long settleMillis) throws Exception {
+        return run(k, in, settleMillis, false);
+    }
+
+    /**
+     * The same with the phone held upright (TestSupport.PORTRAIT_QUALIFIERS). Each label in mustShow must be on screen
+     * and inside the window, and every button must lie inside the window's width.
+     */
+    private static <A extends Activity> String launchUpright(Class<A> k, Intent in, long settleMillis, String... mustShow) throws Exception {
+        RuntimeEnvironment.setQualifiers(TestSupport.PORTRAIT_QUALIFIERS);
+        try {
+            return run(k, in, settleMillis, true, mustShow);
+        } finally {
+            RuntimeEnvironment.setQualifiers(TestSupport.QUALIFIERS);
+        }
+    }
+
+    private static <A extends Activity> String run(Class<A> k, Intent in, long settleMillis, boolean upright, String... mustShow) throws Exception {
         ActivityController<A> ctl = Robolectric.buildActivity(k, in);
         A a = ctl.create().start().postCreate(null).resume().visible().get();
         a.onWindowFocusChanged(true);
-        TestSupport.layout(a);
+        int w = upright ? TestSupport.PW : TestSupport.W, h = upright ? TestSupport.PH : TestSupport.H;
+        if (upright) TestSupport.layoutUpright(a); else TestSupport.layout(a);
         TestSupport.settle(settleMillis);
-        TestSupport.layout(a);
-        String text = TestSupport.texts(a.getWindow().getDecorView());
-        assertNotNull(a.getWindow().getDecorView());
-        if (a instanceof MainActivity) assertNetworkButtonFits(a);
+        if (upright) TestSupport.layoutUpright(a); else TestSupport.layout(a);
+        View decor = a.getWindow().getDecorView();
+        String text = TestSupport.texts(decor);
+        assertNotNull(decor);
+        if (a instanceof MainActivity) assertNetworkButtonFits(a, w);
+        if (upright) {
+            assertTrue("upright screen is taller than wide: " + a.getClass().getSimpleName(), Ui.upright(a));
+            assertButtonsInside(decor, w);
+            for (String label : mustShow) assertShownInside(decor, label, w, h);
+        }
         ctl.pause().stop().destroy();
         return text;
     }
 
-    /** The Network button in the compact header shows its whole word and lies inside the screen. */
-    private static void assertNetworkButtonFits(Activity a) {
+    /** A control with this text or description is on screen and lies inside the window. */
+    private static void assertShownInside(View decor, String label, int w, int h) {
+        View v = TestSupport.find(decor, label);
+        assertNotNull("'" + label + "' is on the screen", v);
+        assertTrue("'" + label + "' is shown", TestSupport.shown(v));
+        int[] xy = new int[2];
+        v.getLocationOnScreen(xy);
+        assertTrue("'" + label + "' lies inside the window: x " + xy[0] + " to " + (xy[0] + v.getWidth()) + ", y " + xy[1] + " to " + (xy[1] + v.getHeight()),
+                xy[0] >= 0 && xy[0] + v.getWidth() <= w && xy[1] >= 0 && xy[1] + v.getHeight() <= h);
+    }
+
+    /** Every shown button lies inside the window's width, so nothing is cut off at the right edge. */
+    private static void assertButtonsInside(View v, int w) {
+        if (v instanceof android.widget.Button && v.getVisibility() == View.VISIBLE && v.getWidth() > 0 && TestSupport.shown(v)) {
+            int[] xy = new int[2];
+            v.getLocationOnScreen(xy);
+            assertTrue("button '" + ((android.widget.Button) v).getText() + "' is cut off: x " + xy[0] + " to " + (xy[0] + v.getWidth()),
+                    xy[0] >= 0 && xy[0] + v.getWidth() <= w);
+        }
+        if (v instanceof android.view.ViewGroup) {
+            for (int i = 0; i < ((android.view.ViewGroup) v).getChildCount(); i++) assertButtonsInside(((android.view.ViewGroup) v).getChildAt(i), w);
+        }
+    }
+
+    /** The Network button in the compact header shows its whole word and lies inside the window of the given width. */
+    private static void assertNetworkButtonFits(Activity a, int w) {
         android.widget.TextView t = findText(a.getWindow().getDecorView(), "Network");
         assertNotNull("the header has a Network button", t);
         int[] xy = new int[2];
         t.getLocationOnScreen(xy);
         assertTrue("Network is not cut off (ellipsis)", t.getLayout() == null || t.getLayout().getEllipsisCount(0) == 0);
-        assertTrue("Network lies inside the screen: x " + xy[0] + " to " + (xy[0] + t.getWidth()), xy[0] >= 0 && xy[0] + t.getWidth() <= TestSupport.W);
+        assertTrue("Network lies inside the screen: x " + xy[0] + " to " + (xy[0] + t.getWidth()), xy[0] >= 0 && xy[0] + t.getWidth() <= w);
     }
 
     private static android.widget.TextView findText(android.view.View v, String s) {
@@ -132,6 +181,102 @@ public class LaunchSmokeTest {
             assertTrue("tab " + tab + " shows the header: " + text, text.contains("Teams"));
             System.out.println("SDK " + android.os.Build.VERSION.SDK_INT + ": MainActivity first launch tab " + tab + " ok");
             TestSupport.resetStatics();
+        }
+    }
+
+    // The Rules tab's explanations -------------------------------------------------------------------
+
+    /** Every rule and switch on the Rules tab has an explanation, so a new setting cannot ship without one. */
+    @Test
+    public void rules_everySettingHasAnExplanation() throws Exception {
+        java.util.List<String> keys = new java.util.ArrayList<>(java.util.Arrays.asList("style", "scheme", "weapons.link", "weapons.set"));
+        for (int k = 1; k < Rules.FLAG_LABELS.length; k++) keys.add("flag." + k);
+        for (int e = 0; e < Rules.VALUE_LABELS.length; e++) keys.add("value." + (Rules.V_DAMAGE + e));
+        for (String key : keys) {
+            assertFalse("no explanation for the rule '" + key + "'", RuleHelp.text(key).trim().isEmpty());
+        }
+        // Every game style in the game data has its own description (a style not listed gets the generic one).
+        TestSupport.installData(app());
+        for (String style : new GameData(new java.io.File(app().getFilesDir(), "Data")).styles()) {
+            assertTrue("no description for the game style '" + style + "'", RuleHelp.hasStyle(style));
+        }
+    }
+
+    // Held upright (the menus follow the rotation; the game stays sideways) ------------------------
+
+    /** Every tab of the Setup screen opens upright on a 360 dp wide phone, with the header, tabs, Start and Options on screen. */
+    @Test
+    public void portrait_mainActivity_allTabs() throws Exception {
+        TestSupport.installData(app());
+        String[][] tabs = { { "Teams", "Add team" }, { "Map", "Theme" }, { "Rules", "Game style" } };
+        for (int tab = 0; tab < tabs.length; tab++) {
+            prefsInt("tab", tab);
+            String text = launchUpright(MainActivity.class, null, 1500, "Teams", "Map", "Rules", "Network", "Options", "Start game", tabs[tab][1]);
+            assertTrue("tab " + tab + " shows the header: " + text, text.contains("Teams") && text.contains("Rules"));
+            System.out.println("SDK " + android.os.Build.VERSION.SDK_INT + ": upright MainActivity tab " + tab + " ok");
+            TestSupport.resetStatics();
+        }
+    }
+
+    @Test
+    public void portrait_mainActivity_firstLaunch_noData() throws Exception {
+        String text = launchUpright(MainActivity.class, null, 1500, "Network", "Options");
+        assertTrue("first launch upright shows the header: " + text, text.contains("Teams"));
+    }
+
+    @Test
+    public void portrait_optionsActivity_allTabs() throws Exception {
+        TestSupport.installData(app());
+        for (int tab = 0; tab < 3; tab++) {
+            prefsInt("optionsTab", tab);
+            String text = launchUpright(OptionsActivity.class, null, 600, "\u2039 Done", "Sound", "Display", "Advanced");
+            assertFalse("upright options tab " + tab + " is empty", text.trim().isEmpty());
+            System.out.println("SDK " + android.os.Build.VERSION.SDK_INT + ": upright OptionsActivity tab " + tab + " ok");
+        }
+    }
+
+    @Test
+    public void portrait_teamEditActivity() throws Exception {
+        TestSupport.installData(app());
+        app().getSharedPreferences(Store.PREFS_NAME, Context.MODE_PRIVATE).edit().putString("setup", SETUP_0_2_0).commit();
+        Intent in = new Intent(app(), TeamEditActivity.class).putExtra("team", 1);
+        String text = launchUpright(TeamEditActivity.class, in, 600, "\u2039 Done", "Randomise team");
+        assertFalse("upright team edit is empty", text.trim().isEmpty());
+    }
+
+    @Test
+    public void portrait_netLobbyActivity_chooser() throws Exception {
+        String text = launchUpright(NetLobbyActivity.class, null, 600, "\u2039 Back");
+        assertFalse("upright network chooser is empty", text.trim().isEmpty());
+    }
+
+    /** Rotating a menu keeps the tab it was on and lays it out again for the new shape of the window. */
+    @Test
+    public void rotation_mainActivity_keepsTabAndRebuildsLayout() throws Exception {
+        TestSupport.installData(app());
+        prefsInt("tab", 1);
+        ActivityController<MainActivity> ctl = Robolectric.buildActivity(MainActivity.class);
+        MainActivity a = ctl.create().start().postCreate(null).resume().visible().get();
+        TestSupport.layout(a);
+        TestSupport.settle(1500);
+        assertTrue("landscape map tab: " + TestSupport.texts(a.getWindow().getDecorView()), TestSupport.texts(a.getWindow().getDecorView()).contains("Theme"));
+        assertFalse("landscape has no stacked tab strip", Ui.upright(a));
+
+        RuntimeEnvironment.setQualifiers(TestSupport.PORTRAIT_QUALIFIERS);
+        try {
+            MainActivity b = (MainActivity) ctl.recreate().get();
+            TestSupport.layoutUpright(b);
+            TestSupport.settle(1500);
+            TestSupport.layoutUpright(b);
+            View decor = b.getWindow().getDecorView();
+            assertTrue("upright after rotation", Ui.upright(b));
+            assertTrue("still on the map tab after rotation: " + TestSupport.texts(decor), TestSupport.texts(decor).contains("Theme"));
+            assertShownInside(decor, "Map", TestSupport.PW, TestSupport.PH);
+            assertButtonsInside(decor, TestSupport.PW);
+            assertNetworkButtonFits(b, TestSupport.PW);
+            ctl.pause().stop().destroy();
+        } finally {
+            RuntimeEnvironment.setQualifiers(TestSupport.QUALIFIERS);
         }
     }
 
@@ -659,6 +804,39 @@ public class LaunchSmokeTest {
     }
 
     @Test
+    public void netLobbyActivity_networkToUseOffered_vpnHintWhenAVpnIsOn() throws Exception {
+        TestSupport.installData(app());
+        NetworkPicker.save(app(), NetworkPicker.AUTO);
+        NetworkPicker.interfaces = () -> java.util.Arrays.asList(
+                new NetworkPicker.Iface("wlan0", "192.168.1.62", "Wi-Fi", 24),
+                new NetworkPicker.Iface("tun0", "100.64.0.4", "VPN", 32));
+        try {
+            Activity a = Robolectric.buildActivity(NetLobbyActivity.class, null).create().start().postCreate(null).resume().visible().get();
+            TestSupport.settle(800);
+            TestSupport.layout(a);
+            String text = TestSupport.texts(a.getWindow().getDecorView());
+            assertTrue("the Network to use option is shown: " + text, text.contains("Network to use") && text.contains("Automatic"));
+            android.widget.TextView hint = findText(a.getWindow().getDecorView(), NetworkPicker.VPN_HINT);
+            assertTrue("the VPN hint is shown with Automatic: " + text, hint != null && hint.getVisibility() == android.view.View.VISIBLE);
+        } finally {
+            NetworkPicker.interfaces = null;
+            NetworkPicker.save(app(), NetworkPicker.AUTO);
+        }
+        NetworkPicker.interfaces = () -> java.util.Arrays.asList(new NetworkPicker.Iface("wlan0", "192.168.1.62", "Wi-Fi", 24));
+        try {
+            Activity a = Robolectric.buildActivity(NetLobbyActivity.class, null).create().start().postCreate(null).resume().visible().get();
+            TestSupport.settle(800);
+            String text = TestSupport.texts(a.getWindow().getDecorView());
+            android.widget.TextView hint = findText(a.getWindow().getDecorView(), NetworkPicker.VPN_HINT);
+            assertTrue("the option is there: " + text, text.contains("Network to use"));
+            assertTrue("no VPN, no hint (the text stays in the tree, hidden): " + text, hint != null && hint.getVisibility() == android.view.View.GONE);
+        } finally {
+            NetworkPicker.interfaces = null;
+        }
+        System.out.println("SDK " + android.os.Build.VERSION.SDK_INT + ": network to use and VPN hint ok");
+    }
+
+    @Test
     public void netSession_locksFollowHosting() throws Exception {
         NetSession.acquireLocks(app());
         java.lang.reflect.Field wf = NetSession.class.getDeclaredField("wifi");
@@ -1015,6 +1193,147 @@ public class LaunchSmokeTest {
         }
         new java.io.File(dir, "net.cfg").delete();
         System.out.println("SDK " + android.os.Build.VERSION.SDK_INT + ": Back key opens the dialog in a network game ok");
+    }
+
+    private static GameActivity newGame() {
+        ActivityController<GameActivity> c = Robolectric.buildActivity(GameActivity.class);
+        try {
+            return c.create().get();
+        } catch (Throwable e) {
+            return c.get();                               // SDL's onCreate needs its native library; the Back handling does not
+        }
+    }
+
+    /** A local game (no net.cfg): Back asks "Quit the game?" by the key and by the Android 13 gesture callback, and nothing else. */
+    @Test
+    public void gameBack_localGameAsksToQuit_keyAndGesture() throws Exception {
+        TestSupport.installData(app());
+        java.io.File dir = app().getFilesDir();
+        new java.io.File(dir, "net.cfg").delete();
+        GameActivity a = newGame();
+        assertTrue("Back down is consumed", a.dispatchKeyEvent(new android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN, android.view.KeyEvent.KEYCODE_BACK)));
+        assertTrue("Back up is consumed", a.dispatchKeyEvent(new android.view.KeyEvent(android.view.KeyEvent.ACTION_UP, android.view.KeyEvent.KEYCODE_BACK)));
+        TestSupport.settle(100);
+        android.app.AlertDialog d = org.robolectric.shadows.ShadowAlertDialog.getLatestAlertDialog();
+        assertTrue("the local quit question is up", d != null && d.isShowing());
+        org.robolectric.shadows.ShadowAlertDialog sd = org.robolectric.Shadows.shadowOf(d);
+        assertTrue(String.valueOf(sd.getTitle()).equals("Quit the game?"));
+        assertTrue(String.valueOf(sd.getMessage()).contains("setup screen"));
+        assertTrue(d.getButton(android.content.DialogInterface.BUTTON_POSITIVE).getText().toString().equals("Quit the game"));
+        assertTrue(d.getButton(android.content.DialogInterface.BUTTON_NEGATIVE).getText().toString().equals("Keep playing"));
+        d.dismiss();
+        if (android.os.Build.VERSION.SDK_INT >= 33) {
+            // a fresh game screen: the gesture callback is registered and asks the same question
+            predictiveBack(true);
+            try {
+                GameActivity g = newGame();
+                java.util.List<Object> callbacks = registeredBackCallbacks(g.getOnBackInvokedDispatcher());
+                assertTrue("the Back gesture callback is registered on Android 13 and later", !callbacks.isEmpty());
+                ((android.window.OnBackInvokedCallback) callbacks.get(0)).onBackInvoked();
+                TestSupport.settle(100);
+                android.app.AlertDialog gd = org.robolectric.shadows.ShadowAlertDialog.getLatestAlertDialog();
+                assertTrue("the gesture asks the local quit question", gd != null && gd.isShowing()
+                        && String.valueOf(org.robolectric.Shadows.shadowOf(gd).getTitle()).equals("Quit the game?"));
+                gd.dismiss();
+            } finally {
+                predictiveBack(false);
+            }
+        }
+        System.out.println("SDK " + android.os.Build.VERSION.SDK_INT + ": local game Back asks to quit ok");
+    }
+
+    /**
+     * Robolectric keeps Back callbacks only with predictive back switched on (its shadow's setting; the framework's own check is
+     * the app's manifest flag, which the test does not go through). Off restores the default with the shadow's reset.
+     */
+    private static void predictiveBack(boolean on) throws Exception {
+        Class<?> shadow = Class.forName("org.robolectric.shadows.ShadowWindowOnBackInvokedDispatcher");
+        if (on) {
+            java.lang.reflect.Method m = shadow.getDeclaredMethod("setEnablePredictiveBack", boolean.class);
+            m.setAccessible(true);
+            m.invoke(null, true);
+        } else {
+            shadow.getMethod("reset").invoke(null);
+        }
+        // The framework also asks the context (Robolectric does not read the activity's flag there): this makes it accept the callback.
+        org.robolectric.util.ReflectionHelpers.setStaticField(Class.forName("android.window.WindowOnBackInvokedDispatcher"),
+                "ALWAYS_ENFORCE_PREDICTIVE_BACK", on);
+    }
+
+    /**
+     * The callbacks registered on a window's Back dispatcher (Robolectric's proxy keeps them until the window takes them over,
+     * then the real dispatcher holds them by priority in the public mOnBackInvokedCallbacks map).
+     */
+    private static java.util.List<Object> registeredBackCallbacks(Object dispatcher) throws Exception {
+        java.util.List<Object> out = new java.util.ArrayList<>();
+        java.lang.reflect.Field fp = dispatcher.getClass().getDeclaredField("mCallbacks");
+        fp.setAccessible(true);
+        for (Object pair : (java.util.List<?>) fp.get(dispatcher)) out.add(((android.util.Pair<?, ?>) pair).first);
+        java.lang.reflect.Field fa = dispatcher.getClass().getDeclaredField("mActualDispatcher");
+        fa.setAccessible(true);
+        Object actual = fa.get(dispatcher);
+        if (actual != null) {
+            java.util.Map<?, ?> byPriority = (java.util.Map<?, ?>) actual.getClass().getField("mOnBackInvokedCallbacks").get(actual);
+            for (Object list : byPriority.values()) out.addAll((java.util.Collection<?>) list);
+        }
+        return out;
+    }
+
+    private static String teamNameField(android.view.View v) {
+        if (v instanceof android.widget.EditText && "Team name".contentEquals(((android.widget.EditText) v).getHint())) {
+            return ((android.widget.EditText) v).getText().toString();
+        }
+        if (v instanceof android.view.ViewGroup) {
+            for (int i = 0; i < ((android.view.ViewGroup) v).getChildCount(); i++) {
+                String r = teamNameField(((android.view.ViewGroup) v).getChildAt(i));
+                if (r != null) return r;
+            }
+        }
+        return null;
+    }
+
+    /** The dice beside the team name: a new name each time, never the name of another team or the same name, and nothing else changes. */
+    @Test
+    public void teamEditActivity_diceChangesOnlyTheName_neverAnotherTeamsName() throws Exception {
+        TestSupport.installData(app());
+        app().getSharedPreferences(Store.PREFS_NAME, Context.MODE_PRIVATE).edit().putString("setup", SETUP_0_2_0).commit();
+        GameData data = Store.data(app());
+        SetupModel before = Store.loadSetup(app(), data);
+        // The 0.2.0 setup has no hedgehog names, so loading fills them at random: save them, so the editor loads the same ones.
+        Store.saveSetup(app(), before);
+        SetupModel.Team start = before.teams.get(0);
+        String previous = start.name;
+        Intent in = new Intent(app(), TeamEditActivity.class).putExtra("team", 0);
+        ActivityController<TeamEditActivity> ctl = Robolectric.buildActivity(TeamEditActivity.class, in);
+        TeamEditActivity a = ctl.create().start().postCreate(null).resume().visible().get();
+        a.onWindowFocusChanged(true);
+        TestSupport.layout(a);
+        TestSupport.settle(300);
+        for (int i = 0; i < 25; i++) {
+            android.view.View dice = TestSupport.find(a.getWindow().getDecorView(), "Pick another team name");
+            assertTrue("the dice button is there at step " + i, dice instanceof android.widget.Button
+                    && "🎲".contentEquals(((android.widget.Button) dice).getText()));
+            dice.performClick();
+            TestSupport.settle(50);
+            String now = teamNameField(a.getWindow().getDecorView());
+            assertTrue("the name field shows a name at step " + i, now != null && !now.isEmpty());
+            assertFalse("the dice changes the name at step " + i + ": " + now, now.equalsIgnoreCase(previous));
+            assertFalse("the dice never picks another team's name at step " + i + ": " + now, now.equalsIgnoreCase(before.teams.get(1).name));
+            previous = now;
+        }
+        ctl.pause().stop().destroy();                     // leaving the editor saves the setup, as after a typed name
+        SetupModel after = Store.loadSetup(app(), data);
+        SetupModel.Team t = after.teams.get(0);
+        assertTrue("the last name is saved: " + previous, previous.equals(t.name));
+        assertTrue("the other team keeps its name", before.teams.get(1).name.equals(after.teams.get(1).name));
+        assertTrue("colour, level, hogs, fort, grave and voice are kept", t.color == start.color && t.level == start.level && t.hogs == start.hogs
+                && t.fort.equals(start.fort) && t.grave.equals(start.grave) && t.voice.equals(start.voice));
+        // the setup file keeps only the team's own hedgehogs, so the slots past its hog count are not compared
+        for (int h = 0; h < t.hogs; h++) {
+            assertTrue("hedgehog " + h + " keeps its hat and name", java.util.Objects.equals(t.hogHat[h], start.hogHat[h])
+                    && java.util.Objects.equals(t.hogName[h], start.hogName[h]));
+        }
+        System.out.println("SDK " + android.os.Build.VERSION.SDK_INT + ": team dice changes only the name ok");
     }
 
     /** What each phone is told when the game ends or it leaves, and the interface filter. */

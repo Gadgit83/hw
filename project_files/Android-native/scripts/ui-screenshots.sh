@@ -4,8 +4,9 @@
 #   HP_PROFILE=test|full   which staged game data to show (default full; BUILD_DIR/assets must be staged for it, see stage-assets.sh)
 #   SCREENSHOT_DIR=dir     where the PNGs go (default BUILD_DIR/screenshots/<profile>)
 #   ROBOLECTRIC_DEPS, HP_MAVEN_MIRROR, GRADLE_OFFLINE   as for ui-smoke-test.sh
-# Two devices are drawn: fp4 (Fairphone 4 sideways, 2340 x 1080 px at 409 dpi, cut-out on the left) and narrow
-# (780 x 360 dp at xxhdpi, also 2340 x 1080 px). Files are <device>-<screen>.png.
+# Four devices are drawn: fp4 (Fairphone 4 sideways, 2340 x 1080 px at 409 dpi, cut-out on the left), narrow
+# (780 x 360 dp at xxhdpi, also 2340 x 1080 px), and the two upright: fp4-portrait (422 x 915 dp) and small-portrait
+# (360 x 740 dp, the narrowest phone). Files are <device>-<screen>.png.
 . "$(dirname "$0")/common.sh"
 "$HOST_DIR/scripts/fetch-robolectric.sh"
 cd "$HOST_DIR"

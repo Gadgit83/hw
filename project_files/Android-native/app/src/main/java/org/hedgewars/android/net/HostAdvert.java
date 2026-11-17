@@ -22,6 +22,54 @@ public final class HostAdvert {
     public static final String SERVICE_TYPE = "_hedgeparty._tcp.";
     public static final String SERVICE_TYPE_BARE = "_hedgeparty._tcp";
 
+    /**
+     * The probe of the subnet search (issue #15, used when NSD finds nothing): a phone sends {@link #PROBE_HELLO} to a host's phone
+     * port, the relay answers with {@link #probeReply} as one line and closes. A probe is not a player and gets no password check.
+     */
+    public static final String PROBE_ROLE = "probe";
+    public static final String PROBE_HELLO = "{\"t\":\"hello\",\"role\":\"probe\"}";
+    /** The marker in a probe reply, so that another service's JSON is not taken for a host. */
+    public static final String PROBE_APP = "hedgeparty";
+    /** The longest probe reply a phone reads. */
+    public static final int PROBE_MAX_LINE = 4096;
+
+    /** The NSD service name a host registers under (and a probe reply is listed under): "HedgeParty" and the host's name, cleaned. */
+    public static String serviceName(String hostName) {
+        return ("HedgeParty " + hostName).replaceAll("[^A-Za-z0-9 ._-]", "").trim();
+    }
+
+    /** The relay's answer to a probe: the TXT record of {@link #txt} as one JSON line, with "t":"here" and the marker. */
+    public static String probeReply(Map<String, String> record) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("t", "here");
+        m.put("app", PROBE_APP);
+        m.putAll(record);
+        return Json.write(m);
+    }
+
+    /**
+     * Reads a probe reply as the host at {@code host}:{@code port}. Null for anything that is not a Hedge Party relay's reply (not JSON,
+     * a refusal, another service, a line over {@link #PROBE_MAX_LINE}) or whose record is not complete enough to join (see
+     * {@link Found#parsedOk}), so the search never lists a stranger.
+     */
+    public static Found parseProbe(String line, String host, int port) {
+        if (line == null || line.length() > PROBE_MAX_LINE) return null;
+        Map<String, Object> m;
+        try {
+            m = Json.parseObject(line);
+        } catch (RuntimeException e) {
+            return null;
+        }
+        if (m == null || !"here".equals(Json.str(m, "t", "")) || !PROBE_APP.equals(Json.str(m, "app", ""))) return null;
+        Map<String, byte[]> attrs = new LinkedHashMap<>();
+        for (String k : new String[] { "v", "compat", "proto", "name", "tv", "data", "lp", "pin" }) {
+            Object o = m.get(k);
+            if (o instanceof String) attrs.put(k, ((String) o).getBytes(StandardCharsets.UTF_8));
+        }
+        Found f = parse(serviceName(Json.str(m, "name", "")), host, port, attrs);
+        return f.parsedOk ? f : null;
+    }
+
     public static Map<String, String> txt(String version, String compat, int protocol, String hostName, int tvPort, String dataDigest) {
         return txt(version, compat, protocol, hostName, tvPort, dataDigest, false);
     }

@@ -13,7 +13,7 @@ import java.nio.charset.StandardCharsets;
 /**
  * The question Back asks in a network game ("Leave the game?", for the host "End the game for everyone?"). It is kept
  * apart from {@link GameActivity} (which needs the native engine) so the texts and the dialog can be tested on their own.
- * A local game does not use it: Back there still goes to the engine as Escape.
+ * A local game asks its own short question ({@link #showLocal}) before the engine is quit.
  */
 final class BackConfirm {
     private BackConfirm() { }
@@ -92,12 +92,28 @@ final class BackConfirm {
      * also "End the game for everyone". {@code onLeave} runs for Leave (and for Stop watching), {@code onEndAll} for the host's end.
      */
     static AlertDialog show(Activity a, int role, Runnable onLeave, Runnable onEndAll) {
+        if (role == LOCAL) return showLocal(a, onLeave);
         if (role != WATCH) return show(a, role == HOST, onLeave, onEndAll);
         AlertDialog d = Ui.dialog(a)
                 .setTitle(WATCH_TITLE)
                 .setMessage(WATCH_MESSAGE)
                 .setPositiveButton(WATCH_YES, (dlg, w) -> onLeave.run())
                 .setNegativeButton(WATCH_NO, null)
+                .create();
+        d.show();
+        return d;
+    }
+
+    /** The question for a local game: quit it (back to the setup screen) or keep playing. */
+    static final String LOCAL_TITLE = "Quit the game?", LOCAL_MESSAGE = "The game ends and you go back to the setup screen.",
+            LOCAL_YES = "Quit the game";
+
+    static AlertDialog showLocal(Activity a, Runnable onQuit) {
+        AlertDialog d = Ui.dialog(a)
+                .setTitle(LOCAL_TITLE)
+                .setMessage(LOCAL_MESSAGE)
+                .setPositiveButton(LOCAL_YES, (dlg, w) -> onQuit.run())
+                .setNegativeButton(no(), null)
                 .create();
         d.show();
         return d;

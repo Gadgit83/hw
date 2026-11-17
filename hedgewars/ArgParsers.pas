@@ -116,6 +116,10 @@ begin
     WriteLn(stdout, '  --screen-shape <tl,tr,bl,br,margin,ly0,ly1,ry0,ry1>: corner radii, extra edge margin and the vertical extent of the left and right cut-out, in pixels');
     WriteLn(stdout, '  --showfps: Show frames per second');
     WriteLn(stdout, '');
+    WriteLn(stdout, 'Computer players (both are off unless given):');
+    WriteLn(stdout, '  --quick-ai: computer turns start sooner: no artificial pause before the first move (the thinking time is unchanged)');
+    WriteLn(stdout, '  --smart-ai: computer players vary their weapons (less repeating the last shots), walk on when the best shot is weak, and walk towards an enemy when they stay put');
+    WriteLn(stdout, '');
     WriteLn(stdout, 'Miscellaneous:');
     WriteLn(stdout, '  --nick <name>: Set user nickname');
     WriteLn(stdout, '  --help: Show a list of command-line options and exit');
@@ -286,7 +290,7 @@ begin
 end;
 
 function parseParameter(cmd:string; arg:string; var paramIndex:LongInt): Boolean;
-const reallyAll: array[0..49] of shortstring = (
+const reallyAll: array[0..51] of shortstring = (
                 '--prefix', '--user-prefix', '--locale', '--fullscreen-width', '--fullscreen-height', '--width',
                 '--height', '--maximized', '--frame-interval', '--volume','--nomusic', '--nosound', '--nodampen',
                 '--fullscreen', '--showfps', '--altdmg', '--low-quality', '--raw-quality', '--stereo', '--nick',
@@ -294,7 +298,8 @@ const reallyAll: array[0..49] of shortstring = (
   {internal}    '--internal', '--port', '--recorder', '--landpreview',
   {misc}        '--stats-only', '--gci', '--help','--protocol', '--no-teamtag','--no-hogtag','--no-healthtag','--translucent-tags','--lua-test','--no-holiday-silliness','--chat-size', '--prefix64', '--user-prefix64',
   {android}     '--ui-scale', '--inset-left', '--inset-top', '--inset-right', '--inset-bottom', '--menu-scale',
-                '--effects-volume', '--music-volume', '--no-voices', '--screen-shape', '--turn-centre', '--turn-zoom');
+                '--effects-volume', '--music-volume', '--no-voices', '--screen-shape', '--turn-centre', '--turn-zoom',
+                '--quick-ai', '--smart-ai');
 var cmdIndex: byte;
 begin
     parseParameter:= false;
@@ -357,6 +362,8 @@ begin
         {--screen-shape}        47: setScreenShape      ( getstringParameter(arg, paramIndex, parseParameter) );
         {--turn-centre}         48: cTurnCentre        := true;
         {--turn-zoom}           49: cTurnZoom          := getLongIntParameter(arg, paramIndex, parseParameter);
+        {--quick-ai}            50: cQuickAI           := true;
+        {--smart-ai}            51: cSmartAI           := true;
     else
         begin
         //Assume the first "non parameter" is the demo file, anything else is invalid

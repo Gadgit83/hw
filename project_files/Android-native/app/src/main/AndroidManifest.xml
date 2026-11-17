@@ -36,9 +36,9 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:screenOrientation="sensorLandscape"
+            android:screenOrientation="user"
             android:windowSoftInputMode="adjustResize"
-            android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|smallestScreenSize">
+            android:configChanges="keyboardHidden">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -49,25 +49,25 @@
         <activity
             android:name=".OptionsActivity"
             android:exported="false"
-            android:screenOrientation="sensorLandscape"
+            android:screenOrientation="user"
             android:windowSoftInputMode="adjustResize"
-            android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|smallestScreenSize" />
+            android:configChanges="keyboardHidden" />
 
         <!-- One team in detail: colour, fort, grave, voice, hats and hedgehog names. -->
         <activity
             android:name=".TeamEditActivity"
             android:exported="false"
-            android:screenOrientation="sensorLandscape"
+            android:screenOrientation="user"
             android:windowSoftInputMode="adjustResize"
-            android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|smallestScreenSize" />
+            android:configChanges="keyboardHidden" />
 
         <!-- Network game: host or join, lobby, report of the last game. -->
         <activity
             android:name=".NetLobbyActivity"
             android:exported="false"
-            android:screenOrientation="sensorLandscape"
+            android:screenOrientation="user"
             android:windowSoftInputMode="adjustResize"
-            android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|smallestScreenSize" />
+            android:configChanges="keyboardHidden" />
 
         <!-- Keeps the relay alive while this phone hosts (main process). -->
         <service
@@ -94,6 +94,7 @@
             android:theme="@style/GameTheme"
             android:alwaysRetainTaskState="true"
             android:preferMinimalPostProcessing="true"
+            android:enableOnBackInvokedCallback="true"
             android:configChanges="layoutDirection|locale|orientation|uiMode|screenLayout|screenSize|smallestScreenSize|keyboard|keyboardHidden|navigation" />
 
         <!-- Hands the diagnostic report to mail and messaging apps. -->

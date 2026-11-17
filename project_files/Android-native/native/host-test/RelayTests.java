@@ -1,7 +1,9 @@
 import org.hedgewars.android.GameConfig;
 import org.hedgewars.android.GameData;
 import org.hedgewars.android.SetupModel;
+import org.hedgewars.android.net.Compat;
 import org.hedgewars.android.net.Frames;
+import org.hedgewars.android.net.HostAdvert;
 import org.hedgewars.android.net.Json;
 import org.hedgewars.android.net.NetTeams;
 import org.hedgewars.android.net.Relay;
@@ -2121,6 +2123,46 @@ public class RelayTests {
         return Boolean.TRUE.equals(j.get("pin"));
     }
 
+    /** One probe as a phone sends it (issue #15): the probe hello, then the relay's one line. */
+    static String probe(int port) throws Exception {
+        try (Socket s = new Socket("127.0.0.1", port)) {
+            s.setSoTimeout(2000);
+            s.getOutputStream().write(line(HostAdvert.PROBE_HELLO));
+            s.getOutputStream().flush();
+            return Frames.readLine(s.getInputStream(), HostAdvert.PROBE_MAX_LINE);
+        }
+    }
+
+    /** The subnet search's probe: answered at once with the host's record, never a player, never a password try, and hostile probes end alone. */
+    static void testProbe() throws Exception {
+        System.out.println("m7: a probe asks a host about itself: answered at once, never a player, never a password try");
+        Fix f = new Fix(20000, 1000);
+        P hp = new P();
+        join(f, hp, "PhoneA", true, team("Alpha", 0, 0));
+        waitFor(() -> hp.state != null, 3000);
+        f.relay.setPin("1234");
+        int answered = 0;
+        long worst = 0;
+        for (int i = 0; i < 12; i++) {       // more than the password lock allows wrong tries
+            long t0 = System.currentTimeMillis();
+            HostAdvert.Found h = HostAdvert.parseProbe(probe(f.port()), "127.0.0.1", f.port());
+            worst = Math.max(worst, System.currentTimeMillis() - t0);
+            if (h != null && h.pinRequired && h.lobbyProto == Relay.PROTO && Compat.VALUE.equals(h.compat)) answered++;
+        }
+        check(answered == 12, "12 probes of a host with a game password: each answered with its record (" + answered + ")");
+        check(worst < 1000, "each probe is answered at once (slowest " + worst + " ms)");
+        check(Json.list(f.relay.status(0), "players").size() == 1 && player(f.relay.status(0), "PhoneA") != null,
+                "the probes made no player: only the host is listed");
+        P pj = phoneJoin(f, "Pinned", "1234", false, false);
+        check(pj.state != null && pj.closed.isEmpty(), "after the probes, a phone with the right password joins (no probe was a wrong try)");
+        check(abuse(f.port(), cat(line(HostAdvert.PROBE_HELLO), line("[".repeat(60000))), 800), "a probe followed by a 60000 '[' line: connection closed");
+        check(abuse(f.port(), cat(line(HostAdvert.PROBE_HELLO), line("{\"t\":\"hello\",\"role\":\"lobby\"}")), 800), "a probe followed by another hello: connection closed");
+        sane(f, "after the probes");
+        check(player(f.relay.status(0), "Pinned") != null && hp.closed.isEmpty() && player(f.relay.status(0), "PhoneA") != null,
+                "  the host and the phone that joined are still listed");
+        f.stop();
+    }
+
     @SuppressWarnings("unchecked")
     static void testGamePassword() throws Exception {
         System.out.println("Game password: status flag, phones, TV viewers, lock");
@@ -2589,6 +2631,7 @@ public class RelayTests {
         testHidden();
         testReturnGrace();
         testWatchLate();
+        testProbe();
         System.out.println("\nrelay tests: " + checks + " checks, " + failures + " failed");
         System.out.println(failures == 0 ? "RESULT: PASS (the relay survived all malformed input)" : "RESULT: FAIL");
         System.exit(failures == 0 ? 0 : 1);

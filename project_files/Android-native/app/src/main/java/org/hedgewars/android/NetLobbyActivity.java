@@ -299,7 +299,7 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
     }
 
     private void choose() {
-        boolean wide = getResources().getConfiguration().screenWidthDp >= 700;
+        boolean wide = Ui.twoColumns(this, 700);
         if (pinMsg != null) content.addView(pinCard(), ui.margins(full(), 0, 6, 0, 0));
         rejoinCard();
         LinearLayout start = ui.card();
@@ -331,6 +331,7 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
         start.addView(ui.hint("Only this team joins the host's game. Choose one of your saved teams, or edit it. "
                 + "The host sets the other teams, the map and the rules."));
         start.addView(joinTeamRow());
+        start.addView(NetworkChoice.block(this, ui, this::changed), ui.margins(full(), 0, 6, 0, 0));
         start.addView(ui.heading("Host"));
         start.addView(ui.toggle("Game password", NetSession.pinSetting(this), on -> NetSession.setPinOn(this, on)));
         start.addView(ui.hint("On: each hosting session gets a random 4-digit password that players need to join or watch. "

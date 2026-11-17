@@ -37,6 +37,10 @@ procedure SetAmmo(var Hedgehog: THedgehog; ammo: TAmmoType; cnt: LongWord);
 function  HHHasAmmo(var Hedgehog: THedgehog; Ammo: TAmmoType): LongWord;
 procedure PackAmmo(Ammo: PHHAmmo; Slot: LongInt);
 procedure OnUsedAmmo(var Hedgehog: THedgehog);
+function AIRecentShots(Team: PTeam; a: TAmmoType): LongInt;
+procedure AINoteShot(Team: PTeam; a: TAmmoType);
+function AIStays(Hog: PHedgehog): LongInt;
+procedure AINoteTurnEnd(Hog: PHedgehog; x: LongInt);
 procedure ApplyAngleBounds(var Hedgehog: THedgehog; AmmoType: TAmmoType);
 procedure ApplyAmmoChanges(var Hedgehog: THedgehog);
 procedure SwitchNotHeldAmmo(var Hedgehog: THedgehog);
@@ -292,9 +296,106 @@ begin
 AmmoMenuInvalidated:= true;
 end;
 
+// --smart-ai: the last shots of each team, so the computer can avoid repeating a weapon. Only the AI reads it,
+// and only when the switch is on; it never changes the game.
+const cAIShotMemory = 3;
+      cAIMemTeams = 8;
+var aiMemTeam: array[0..cAIMemTeams - 1] of PTeam;
+    aiMemShots: array[0..cAIMemTeams - 1, 0..cAIShotMemory - 1] of TAmmoType;
+    aiMemCount: array[0..cAIMemTeams - 1] of LongInt;
+
+function AIRecentShots(Team: PTeam; a: TAmmoType): LongInt;
+var i, j: LongInt;
+begin
+AIRecentShots:= 0;
+if Team = nil then exit;
+for i:= 0 to cAIMemTeams - 1 do
+    if aiMemTeam[i] = Team then
+        begin
+        for j:= 0 to cAIShotMemory - 1 do
+            if (j < aiMemCount[i]) and (aiMemShots[i, j] = a) then
+                inc(AIRecentShots);
+        exit
+        end
+end;
+
+procedure AINoteShot(Team: PTeam; a: TAmmoType);
+var i, slot: LongInt;
+begin
+if Team = nil then exit;
+slot:= -1;
+for i:= 0 to cAIMemTeams - 1 do
+    if aiMemTeam[i] = Team then slot:= i;
+if slot < 0 then
+    for i:= 0 to cAIMemTeams - 1 do
+        if (slot < 0) and (aiMemTeam[i] = nil) then
+            begin
+            aiMemTeam[i]:= Team;
+            slot:= i
+            end;
+if slot < 0 then exit;
+aiMemShots[slot, aiMemCount[slot] mod cAIShotMemory]:= a;
+inc(aiMemCount[slot])
+end;
+
+// --smart-ai: where each hedgehog ended its last turns. A turn that ends where the last one ended counts as a stay.
+const cAIStayMem = 16;
+      cAIStayNoX = High(LongInt);
+var aiStayHH: array[0..cAIStayMem - 1] of PHedgehog;
+    aiStayX: array[0..cAIStayMem - 1] of LongInt;
+    aiStayTurns: array[0..cAIStayMem - 1] of LongInt;
+
+function AIStaySlot(Hog: PHedgehog; create: boolean): LongInt;
+var i: LongInt;
+begin
+AIStaySlot:= -1;
+for i:= 0 to cAIStayMem - 1 do
+    if aiStayHH[i] = Hog then
+        begin
+        AIStaySlot:= i;
+        exit
+        end;
+if not create then exit;
+for i:= 0 to cAIStayMem - 1 do
+    if aiStayHH[i] = nil then
+        begin
+        aiStayHH[i]:= Hog;
+        aiStayX[i]:= cAIStayNoX;
+        aiStayTurns[i]:= 0;
+        AIStaySlot:= i;
+        exit
+        end
+end;
+
+function AIStays(Hog: PHedgehog): LongInt;
+var s: LongInt;
+begin
+AIStays:= 0;
+s:= AIStaySlot(Hog, false);
+if s >= 0 then AIStays:= aiStayTurns[s]
+end;
+
+procedure AINoteTurnEnd(Hog: PHedgehog; x: LongInt);
+var s: LongInt;
+begin
+if Hog = nil then exit;
+s:= AIStaySlot(Hog, true);
+if s < 0 then exit;
+if (aiStayX[s] <> cAIStayNoX) and (abs(x - aiStayX[s]) <= 2) then
+    inc(aiStayTurns[s])
+else
+    aiStayTurns[s]:= 0;
+aiStayX[s]:= x
+end;
+
 procedure OnUsedAmmo(var Hedgehog: THedgehog);
 var CurWeapon: PAmmo;
 begin
+if cSmartAI then
+    begin
+    AINoteShot(Hedgehog.Team, Hedgehog.CurAmmoType);
+    if Hedgehog.Gear <> nil then AINoteTurnEnd(@Hedgehog, hwRound(Hedgehog.Gear^.X))
+    end;
 CurWeapon:= GetCurAmmoEntry(Hedgehog);
 with Hedgehog do
     begin

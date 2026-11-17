@@ -69,7 +69,15 @@ public class OptionsActivity extends SetupActivity {
             tab = i;
             show();
         });
-        topBar.addView(tabs.view, Ui.lp(ui.dp(440), ViewGroup.LayoutParams.WRAP_CONTENT));
+        // Held upright the tabs take a row of their own across the screen (three tabs do not fit beside Done and the title).
+        LinearLayout tabRow = null;
+        if (Ui.upright(this)) {
+            tabRow = ui.row();
+            tabRow.setPadding(ui.dp(Ui.GUTTER), ui.dp(2), ui.dp(Ui.GUTTER), 0);
+            tabRow.addView(tabs.view, ui.weight(1f));
+        } else {
+            topBar.addView(tabs.view, Ui.lp(ui.dp(440), ViewGroup.LayoutParams.WRAP_CONTENT));
+        }
         notice = ui.hint("Changes apply to the next game you start.");
         notice.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
         notice.setSingleLine(true);
@@ -78,6 +86,7 @@ public class OptionsActivity extends SetupActivity {
         if (getResources().getConfiguration().screenWidthDp < 800) notice.setVisibility(View.GONE);
         topBar.addView(notice, ui.margins(ui.weight(1f), 12, 0, 4, 0));
         root.addView(topBar);
+        if (tabRow != null) root.addView(tabRow);
 
         ScrollView scroll = new ScrollView(this);
         scroll.setClipToPadding(false);
@@ -92,7 +101,7 @@ public class OptionsActivity extends SetupActivity {
     }
 
     private boolean wide() {
-        return getResources().getConfiguration().screenWidthDp >= 760;
+        return Ui.twoColumns(this, 760);
     }
 
     private void show() {
@@ -228,6 +237,14 @@ public class OptionsActivity extends SetupActivity {
         left.addView(size);
         left.addView(edge, ui.margins(full(), 0, 8, 0, 0));
         left.addView(cam, ui.margins(full(), 0, 8, 0, 0));
+        LinearLayout computer = ui.card();
+        computer.addView(ui.heading("Computer turns"));
+        computer.addView(ui.choice("Computer players", Arrays.asList("Quick and smart (default)", "Classic"),
+                o.aiQuick ? 0 : 1, i -> o.aiQuick = i == 0));
+        computer.addView(ui.hint("Quick: a computer turn starts sooner, with no pause and a shorter think. "
+                + "Smart: less repeating of the same weapon, and more walking when its best shot is weak. "
+                + "Classic: the game's own timing and choices."));
+        left.addView(computer, ui.margins(full(), 0, 8, 0, 0));
         twoColumns(left, look);
     }
 

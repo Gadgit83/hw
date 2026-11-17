@@ -34,10 +34,19 @@ uses uConsts, SDLh, uAIMisc, uAIAmmoTests, uAIActions,
     uVariables, uCommands, uUtils, uDebug, uAILandMarks,
     uGearsUtils, uAI2;
 
+// --smart-ai (off unless the launcher passes it; see ArgParsers.pas). --quick-ai only drops the artificial pauses.
+const cSmartLowShot = 10 * 1024;   // smart: a best shot worth under 10 points of damage is weak
+      cSmartRepeatPenalty = 2048;  // smart: 2 points of damage off for each recent shot with the same weapon
+      cSmartApproachPx = 40;       // smart: a walk must end this many pixels nearer the nearest enemy to count as an approach
+      cSmartStayTurns = 2;         // smart: after this many turns in the same place, the hog walks towards an enemy first
+
 var BestActions: TActions;
     CanUseAmmo: array [TAmmoType] of boolean;
     StopThinking: boolean;
     StartTicks: Longword;
+    ApproachActions: TActions; // smart: the walk that got nearest an enemy so far (see Walk)
+    ApproachDist: LongInt;
+    ApproachFound: boolean;
     ThreadSem: PSDL_Sem;
 
 procedure FreeActionsList;
@@ -139,7 +148,7 @@ for i:= 0 to Pred(Targets.Count) do
         SDL_delay(0); // hint to let the context switch run
         repeat
         if (CanUseAmmo[a])
-            and ((not rareChecks) or ((AmmoTests[a].flags and amtest_Rare) = 0))
+            and ((not rareChecks) or ((AmmoTests[a].flags and amtest_Rare) = 0) or (cSmartAI and (BestActions.Score < cSmartLowShot)))
             and ((i = 0) or ((AmmoTests[a].flags and amtest_NoTarget) = 0))
             and ((l = 0) or ((AmmoTests[a].flags and amtest_NoLowGravity) = 0))
             then
@@ -147,6 +156,8 @@ for i:= 0 to Pred(Targets.Count) do
 {$HINTS OFF}
             Score:= AmmoTests[a].proc(Me, Targets.ar[i], BotLevel, ap, AmmoTests[a].flags);
 {$HINTS ON}
+            if cSmartAI and (Score > BadTurn) then
+                dec(Score, cSmartRepeatPenalty * AIRecentShots(Me^.Hedgehog^.Team, a));
             if (Score > BadTurn) and (Actions.Score + Score > BestActions.Score) then
                 if (BestActions.Score < 0) or (Actions.Score + Score > BestActions.Score + Byte(BotLevel - 1) * 2048) then
                     begin
@@ -306,10 +317,28 @@ aiGravity:= cGravity;
 aiGravityf:= cGravityf;
 end;
 
+// --smart-ai: Manhattan distance in pixels from Me to the nearest living hedgehog of another team
+function NearestEnemyDist(Me: PGear): LongInt;
+var Gear: PGear;
+    d: LongInt;
+begin
+NearestEnemyDist:= High(LongInt);
+Gear:= GearsList;
+while Gear <> nil do
+    begin
+    if (Gear^.Kind = gtHedgehog) and (Gear^.Hedgehog^.Team <> Me^.Hedgehog^.Team) and (Gear^.Health > Gear^.Damage) then
+        begin
+        d:= abs(hwRound(Gear^.X) - hwRound(Me^.X)) + abs(hwRound(Gear^.Y) - hwRound(Me^.Y));
+        if d < NearestEnemyDist then NearestEnemyDist:= d
+        end;
+    Gear:= Gear^.NextGear
+    end
+end;
+
 procedure Walk(Me: PGear; var Actions: TActions);
 const FallPixForBranching = cHHRadius;
 var
-    maxticks, oldticks, steps, tmp: Longword;
+    maxticks, oldticks, steps, tmp, walkTrialStep: Longword;
     BaseRate, BestRate, Rate, i: LongInt;
     GoInfo: TGoInfo;
     CanGo: boolean;
@@ -317,9 +346,13 @@ var
     BotLevel: Byte;
     a: TAmmoType;
     isAfterAttack: boolean;
+    dEnemy: LongInt;
 begin
 Actions.ticks:= 0;
 oldticks:= 0; // avoid compiler hint
+walkTrialStep:= 4;
+ApproachFound:= false;
+if cSmartAI then ApproachDist:= NearestEnemyDist(Me);
 Stack.Count:= 0;
 
 clearAllMarks;
@@ -454,6 +487,16 @@ if ((CurrentHedgehog^.MultiShootAttacks = 0) or ((Ammoz[Me^.Hedgehog^.CurAmmoTyp
 
              inc(steps);
              Actions.actions[Pred(Actions.Count)].Param:= hwRound(Me^.X);
+             if cSmartAI and (not isAfterAttack) then
+                 begin
+                 dEnemy:= NearestEnemyDist(Me);
+                 if (dEnemy < ApproachDist - cSmartApproachPx) and (RatePlace(Me) >= 0) then
+                     begin
+                     ApproachActions:= Actions;
+                     ApproachDist:= dEnemy;
+                     ApproachFound:= true
+                     end
+                 end;
              Rate:= RatePlace(Me);
              if Rate > BestRate then
                 begin
@@ -462,10 +505,10 @@ if ((CurrentHedgehog^.MultiShootAttacks = 0) or ((Ammoz[Me^.Hedgehog^.CurAmmoTyp
                 BestRate:= Rate;
                 isAfterAttack:= true // we have better place, go there and do not use ammo
                 end
-            else if Rate < BestRate then
+            else if (Rate < BestRate) and (not (cSmartAI and (BestActions.Score < cSmartLowShot))) then
                 break;
 
-            if (not isAfterAttack) and ((steps mod 4) = 0) then
+            if (not isAfterAttack) and ((steps mod walkTrialStep) = 0) then
                 begin
                 if (steps > 4) and checkMark(hwRound(Me^.X), hwRound(Me^.Y), markWalkedHere) then
                     break;
@@ -482,6 +525,15 @@ if ((CurrentHedgehog^.MultiShootAttacks = 0) or ((Ammoz[Me^.Hedgehog^.CurAmmoTyp
             exit
         end {while}
     end {if}
+
+// --smart-ai: no good attack from here, or this hog has stood still for cSmartStayTurns turns: walk to the place the
+// search reached nearest the enemy, when that is much nearer. The next think starts from there.
+if cSmartAI and ApproachFound and (not isAfterAttack) and (not StopThinking)
+    and ((BestActions.Score < cSmartLowShot) or (AIStays(Me^.Hedgehog) >= cSmartStayTurns)) then
+    begin
+    BestActions:= ApproachActions;
+    BestActions.isWalkingToABetterPlace:= true
+    end
 end;
 
 function Think(Me: PGear): LongInt; cdecl; export;
@@ -541,7 +593,7 @@ if ((Me^.State and gstAttacked) = 0) or isInMultiShoot or bonuses.activity or ((
             or (itHedgehog = currHedgehogIndex)
             or BestActions.isWalkingToABetterPlace;
 
-        if (StartTicks > GameTicks - 1500) and (not StopThinking) then
+        if (not cQuickAI) and (StartTicks > GameTicks - 1500) and (not StopThinking) then
             SDL_Delay(700);
 
         if (BestActions.Score < -1023) and (not BestActions.isWalkingToABetterPlace) then
@@ -597,6 +649,9 @@ else
         end
     end;
 
+// quick: no action found yet (for example something is still moving): look again in 100 ms, not every frame
+if cQuickAI and (BestActions.Count = 0) and (not StopThinking) then
+    SDL_Delay(100);
 Me^.State:= Me^.State and (not gstHHThinking);
 Think:= 0;
 SDL_SemPost(ThreadSem);

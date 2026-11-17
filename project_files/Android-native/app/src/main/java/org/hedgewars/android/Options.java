@@ -35,6 +35,7 @@ public final class Options {
     public boolean teamTags = true;
     public boolean hogTags = true;
     public boolean healthTags = true;
+    public boolean aiQuick = true;     // computer players: quick and smart (the default) or classic (no AI options)
 
     public Options copy() {
         return fromText(toText());
@@ -76,6 +77,10 @@ public final class Options {
         if (zoomTurn) {
             a.add("--turn-zoom");
             a.add(Integer.toString(Math.max(110, Math.min(200, zoomPct))));
+        }
+        if (aiQuick) {
+            a.add("--quick-ai");
+            a.add("--smart-ai");
         }
         if (showFps) a.add("--showfps");
         if (!teamTags) a.add("--no-teamtag");
@@ -119,6 +124,7 @@ public final class Options {
         p.setProperty("teamTags", teamTags ? "1" : "0");
         p.setProperty("hogTags", hogTags ? "1" : "0");
         p.setProperty("healthTags", healthTags ? "1" : "0");
+        p.setProperty("aiQuick", aiQuick ? "1" : "0");
         StringWriter w = new StringWriter();
         try {
             p.store(w, null);
@@ -156,6 +162,7 @@ public final class Options {
         o.teamTags = boolOf(p, "teamTags", o.teamTags);
         o.hogTags = boolOf(p, "hogTags", o.hogTags);
         o.healthTags = boolOf(p, "healthTags", o.healthTags);
+        o.aiQuick = boolOf(p, "aiQuick", o.aiQuick);
         return o;
     }
 }

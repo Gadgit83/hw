@@ -29,10 +29,12 @@ import java.util.Arrays;
 /**
  * Pictures of every screen (scripts/ui-screenshots.sh, or {@code ./gradlew -Pscreenshots testDebugUnitTest --tests
  * '*ScreenshotTest'}), drawn with Robolectric's native graphics mode (Skia) into PNG files. They are for looking at: the
- * test checks nothing about the layout and is skipped unless -Pscreenshots is given. Each screen is drawn for two devices:
- * "fp4", a Fairphone 4 held sideways (2340 x 1080 px at 409 dpi, camera cut-out of 90 px on the left) and "narrow",
- * a 2340 x 1080 px phone at 480 dpi (780 x 360 dp), whose screen is a third smaller in dp. Not drawn: the game itself (the
- * engine draws it with SDL); the Back question of the game is drawn from the same dialog code over a black screen.
+ * test checks nothing about the layout and is skipped unless -Pscreenshots is given. Each screen is drawn for four devices:
+ * "fp4", a Fairphone 4 held sideways (2340 x 1080 px at 409 dpi, camera cut-out of 90 px on the left), "narrow",
+ * a 2340 x 1080 px phone at 480 dpi (780 x 360 dp), whose screen is a third smaller in dp, and the same two held upright:
+ * "fp4-portrait" (422 x 915 dp, cut-out at the top) and "small-portrait" (360 x 740 dp, the narrowest phone that matters).
+ * Not drawn: the game itself (the engine draws it with SDL); the Back question of the game is drawn from the same dialog
+ * code over a black screen.
  */
 @RunWith(RobolectricTestRunner.class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -41,6 +43,8 @@ public class ScreenshotTest {
     private static final String[][] DEVICES = {
         { "fp4", "w915dp-h422dp-land-409dpi" },
         { "narrow", "w780dp-h360dp-land-xxhdpi" },
+        { "fp4-portrait", "w422dp-h915dp-port-409dpi" },
+        { "small-portrait", "w360dp-h740dp-port-xxhdpi" },
     };
     private static final String LOBBY = "{\"t\":\"state\",\"state\":\"setup\",\"host\":\"Pixel\",\"proto\":1,\"build\":\"0.3.0-mp2\",\"you\":2,"
             + "\"players\":[{\"id\":1,\"name\":\"Pixel\",\"host\":true,\"ready\":true,\"fg\":true,"
@@ -50,6 +54,7 @@ public class ScreenshotTest {
 
     private String device;
     private int w, h, cutout;
+    private boolean portrait;
 
     /** Only when asked for (-Pscreenshots): it draws pictures, it does not check anything. */
     @org.junit.Before
@@ -69,6 +74,7 @@ public class ScreenshotTest {
             w = dm.widthPixels;
             h = dm.heightPixels;
             cutout = Math.round(90 * dm.densityDpi / 409f);
+            portrait = h > w;
             TestSupport.resetStatics();
             c.getSharedPreferences(Store.PREFS_NAME, Context.MODE_PRIVATE).edit().clear().commit();
             TestSupport.installData(c);
@@ -90,7 +96,9 @@ public class ScreenshotTest {
     }
 
     private WindowInsets insets() {
-        return new WindowInsets.Builder().setInsets(WindowInsets.Type.displayCutout(), Insets.of(cutout, 0, 0, 0)).build();
+        // the camera cut-out is on the left edge when the phone is held sideways, on the top edge when it is held upright
+        Insets in = portrait ? Insets.of(0, cutout, 0, 0) : Insets.of(cutout, 0, 0, 0);
+        return new WindowInsets.Builder().setInsets(WindowInsets.Type.displayCutout(), in).build();
     }
 
     private Bitmap draw(Activity a) throws Exception {

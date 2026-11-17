@@ -21,6 +21,9 @@ final class TestSupport {
     /** Screen of a Fairphone 4 held sideways, in pixels (the qualifiers are w915dp-h422dp-land-409dpi). */
     static final int W = 2340, H = 1080;
     static final String QUALIFIERS = "w915dp-h422dp-land-409dpi";
+    /** The narrowest phone that matters held upright: 360 x 740 dp at xxhdpi, 1080 x 2220 px; the cut-out is at the top. */
+    static final String PORTRAIT_QUALIFIERS = "w360dp-h740dp-port-xxhdpi";
+    static final int PW = 1080, PH = 2220;
 
     private TestSupport() { }
 
@@ -104,12 +107,21 @@ final class TestSupport {
 
     /** Measure and lay out the window at full size with the camera cut-out on the left, as the system would. */
     static void layout(Activity a) {
+        layoutAt(a, W, H, Insets.of(90, 0, 0, 0));
+    }
+
+    /** The same for the phone held upright: the window is PW x PH and the cut-out is at the top edge. */
+    static void layoutUpright(Activity a) {
+        layoutAt(a, PW, PH, Insets.of(0, 90, 0, 0));
+    }
+
+    private static void layoutAt(Activity a, int w, int h, Insets cut) {
         View decor = a.getWindow().getDecorView();
         WindowInsets in = new WindowInsets.Builder()
-                .setInsets(WindowInsets.Type.displayCutout(), Insets.of(90, 0, 0, 0)).build();
-        measure(decor);
+                .setInsets(WindowInsets.Type.displayCutout(), cut).build();
+        measure(decor, w, h);
         decor.dispatchApplyWindowInsets(in);
-        measure(decor);
+        measure(decor, w, h);
     }
 
     /** The same with the soft keyboard open (400 px of it), as when a team name is being edited. */
@@ -119,9 +131,9 @@ final class TestSupport {
                 .setInsets(WindowInsets.Type.displayCutout(), Insets.of(90, 0, 0, 0))
                 .setInsets(WindowInsets.Type.ime(), Insets.of(0, 0, 0, 400))
                 .setVisible(WindowInsets.Type.ime(), true).build();
-        measure(decor);
+        measure(decor, W, H);
         decor.dispatchApplyWindowInsets(in);
-        measure(decor);
+        measure(decor, W, H);
     }
 
     /** The first view in the tree whose text or description is exactly this. */
@@ -147,10 +159,10 @@ final class TestSupport {
         return true;
     }
 
-    private static void measure(View decor) {
-        decor.measure(View.MeasureSpec.makeMeasureSpec(W, View.MeasureSpec.EXACTLY),
-                View.MeasureSpec.makeMeasureSpec(H, View.MeasureSpec.EXACTLY));
-        decor.layout(0, 0, W, H);
+    private static void measure(View decor, int w, int h) {
+        decor.measure(View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(h, View.MeasureSpec.EXACTLY));
+        decor.layout(0, 0, w, h);
     }
 
     /** All text on screen, to show that something was really built. */

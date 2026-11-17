@@ -50,7 +50,7 @@ public class MainActivity extends SetupActivity {
     private int tab = TAB_TEAMS;
     private boolean contentReady;
 
-    private LinearLayout root, topBar, bottomBar, holder, problemBox;
+    private LinearLayout root, topBar, tabRow, bottomBar, holder, problemBox;
     private ScrollView scroll;
     private Ui.Tabs tabs;
     private TextView status, summary, problemText, schemeInfo;
@@ -143,7 +143,15 @@ public class MainActivity extends SetupActivity {
             tab = i;
             showTab();
         });
-        topBar.addView(tabs.view, Ui.lp(ui.dp(270), ViewGroup.LayoutParams.WRAP_CONTENT));
+        // Held upright the tab strip gets a row of its own across the screen, so the title and Network fit beside it.
+        boolean stacked = Ui.upright(this);
+        if (stacked) {
+            tabRow = ui.row();
+            tabRow.setPadding(ui.dp(Ui.GUTTER), ui.dp(2), ui.dp(Ui.GUTTER), 0);
+            tabRow.addView(tabs.view, ui.weight(1f));
+        } else {
+            topBar.addView(tabs.view, Ui.lp(ui.dp(270), ViewGroup.LayoutParams.WRAP_CONTENT));
+        }
         LinearLayout optionsBox = new LinearLayout(this);
         optionsBox.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
         Button network = ui.button("Network", false, v -> {
@@ -157,6 +165,7 @@ public class MainActivity extends SetupActivity {
                 v -> startActivity(new Intent(this, OptionsActivity.class))), Ui.lp(ui.dp(Ui.TOUCH_DP), ui.dp(Ui.TOUCH_DP)));
         topBar.addView(optionsBox, ui.margins(Ui.lp(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT), 16, 0, 0, 0));
         root.addView(topBar);
+        if (stacked) root.addView(tabRow);
 
         problemBox = new LinearLayout(this);
         problemBox.setOrientation(LinearLayout.HORIZONTAL);
@@ -211,6 +220,7 @@ public class MainActivity extends SetupActivity {
         ui.trackInsets(root, (l, t, r, b, kb) -> {
             root.setPadding(l, t, r, b);
             topBar.setVisibility(kb ? View.GONE : View.VISIBLE);
+            if (tabRow != null) tabRow.setVisibility(kb ? View.GONE : View.VISIBLE);
             keyboardOpen = kb;
             showProblemBox();
             status.setVisibility(kb ? View.GONE : View.VISIBLE);   // keep the Start bar to one line
@@ -231,10 +241,6 @@ public class MainActivity extends SetupActivity {
             }
         });
         return root;
-    }
-
-    private int contentWidthDp() {
-        return getResources().getConfiguration().screenWidthDp;
     }
 
     /** Screen width minus the left and right padding actually applied to the list (insets and gutter). */
@@ -423,16 +429,25 @@ public class MainActivity extends SetupActivity {
             redraw();
         });
         dice.setContentDescription("Randomise teams");
-        head.addView(dice, Ui.lp(ViewGroup.LayoutParams.WRAP_CONTENT, ui.dp(Ui.TOUCH_DP)));
-        head.addView(add, ui.margins(Ui.lp(ViewGroup.LayoutParams.WRAP_CONTENT, ui.dp(Ui.TOUCH_DP)), 10, 0, 0, 0));
-        holder.addView(head);
+        if (Ui.upright(this)) {
+            // upright: the heading and count on one line, the two actions side by side on the next, so nothing is squeezed
+            holder.addView(head);
+            LinearLayout actions = ui.row();
+            actions.addView(dice, ui.weight(1f));
+            actions.addView(add, ui.margins(ui.weight(1f), 10, 0, 0, 0));
+            holder.addView(actions, ui.margins(Ui.lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT), 0, 6, 0, 0));
+        } else {
+            head.addView(dice, Ui.lp(ViewGroup.LayoutParams.WRAP_CONTENT, ui.dp(Ui.TOUCH_DP)));
+            head.addView(add, ui.margins(Ui.lp(ViewGroup.LayoutParams.WRAP_CONTENT, ui.dp(Ui.TOUCH_DP)), 10, 0, 0, 0));
+            holder.addView(head);
+        }
 
         // Three columns on a phone held sideways, so up to six teams are in view at once. The width is what
-        // is left after the insets and the list padding, not the whole screen.
+        // is left after the insets and the list padding, not the whole screen. Upright: one column.
         int w = usableWidthDp();
         int n = model.teams.size();
         // few teams fill the width; four make a square of two by two; five or more fill three columns
-        int cols = w >= 840 ? (n <= 2 ? 2 : n == 4 ? 2 : 3) : w >= 520 ? 2 : 1;
+        int cols = Ui.upright(this) ? 1 : w >= 840 ? (n <= 2 ? 2 : n == 4 ? 2 : 3) : w >= 520 ? 2 : 1;
         cols = Math.min(cols, Math.max(1, n));
         LinearLayout grid = null;
         for (int i = 0; i < model.teams.size(); i++) {
@@ -555,8 +570,8 @@ public class MainActivity extends SetupActivity {
 
     private void buildMap() {
         LinearLayout cols = new LinearLayout(this);
-        cols.setOrientation(contentWidthDp() >= 760 ? LinearLayout.HORIZONTAL : LinearLayout.VERTICAL);
-        boolean wide = contentWidthDp() >= 760;
+        boolean wide = Ui.twoColumns(this, 760);
+        cols.setOrientation(wide ? LinearLayout.HORIZONTAL : LinearLayout.VERTICAL);
 
         LinearLayout map = ui.card();
         map.addView(ui.heading("Map"));
@@ -675,7 +690,7 @@ public class MainActivity extends SetupActivity {
     // Rules tab -----------------------------------------------------------------------------------
 
     private void buildRules() {
-        boolean wide = contentWidthDp() >= 760;
+        boolean wide = Ui.twoColumns(this, 760);
         LinearLayout cols = new LinearLayout(this);
         cols.setOrientation(wide ? LinearLayout.HORIZONTAL : LinearLayout.VERTICAL);
         cols.setBaselineAligned(false);
@@ -687,11 +702,12 @@ public class MainActivity extends SetupActivity {
         styles.add("Normal");
         for (String s : data.styles()) styles.add(GameData.styleTitle(s));
         int styleIdx = model.style.isEmpty() ? 0 : data.styles().indexOf(model.style) + 1;
-        left.addView(ui.choice("Game style", styles, styleIdx, i -> {
+        left.addView(withInfo(ui.choice("Game style", styles, styleIdx, i -> {
             model.style = i == 0 ? "" : data.styles().get(i - 1);
             showTab();
-        }));
+        }), "Game style", "style"));
         if (!model.style.isEmpty()) {
+            left.addView(ui.hint(RuleHelp.style(model.style)));
             String[] cfg = data.styleCfg(model.style);
             String note = (cfg[0].equals("locked") ? "Uses its own rules" : cfg[0].equals("*") ? "Any rules" : "Rules: " + cfg[0])
                     + ", " + (cfg[1].equals("locked") ? "its own weapons." : cfg[1].equals("*") ? "any weapons." : "weapons: " + cfg[1] + ".");
@@ -708,13 +724,13 @@ public class MainActivity extends SetupActivity {
             showTab();
         });
         enableAll(schemeRow, !schemeLocked);
-        left.addView(schemeRow);
+        left.addView(withInfo(schemeRow, "Scheme", "scheme"));
         schemeInfo = ui.hint(schemeLocked ? "The game style sets the scheme." : (model.rulesEdited() ? "Changed from " + model.schemeName + " below." : "Built-in scheme."));
         left.addView(schemeInfo);
 
         Switch link = ui.toggle("Pick the weapons that share the scheme's name", model.linkWeapons, c -> model.linkWeapons = c);
         link.setEnabled(!schemeLocked && !weaponsLocked);
-        left.addView(link);
+        left.addView(withInfo(link, "Pick the weapons that share the scheme's name", "weapons.link"));
         List<String> sets = Rules.weaponSetNames();
         String shownSet = model.effectiveWeaponSet(data);
         LinearLayout weaponsRow = ui.choice("Weapon set", sets, Math.max(0, sets.indexOf(shownSet)), i -> {
@@ -722,7 +738,7 @@ public class MainActivity extends SetupActivity {
             showTab();
         });
         enableAll(weaponsRow, !weaponsLocked);
-        left.addView(weaponsRow);
+        left.addView(withInfo(weaponsRow, "Weapon set", "weapons.set"));
         if (weaponsLocked) left.addView(ui.hint("The game style sets the weapons."));
 
         // Right: the key numbers.
@@ -779,7 +795,7 @@ public class MainActivity extends SetupActivity {
                 updateSchemeInfo();
             });
             enableAll(edge, editable);
-            vals.addView(edge);
+            vals.addView(withInfo(edge, "World edge", "value." + Rules.V_WORLD_EDGE));
             while (vals.getChildCount() > 0) {
                 View c = vals.getChildAt(0);
                 vals.removeViewAt(0);
@@ -792,7 +808,7 @@ public class MainActivity extends SetupActivity {
                     updateSchemeInfo();
                 });
                 sw.setEnabled(editable);
-                rows.add(sw);
+                rows.add(withInfo(sw, Rules.FLAG_LABELS[k], "flag." + k));
             }
             LinearLayout first = ui.card(), second = wide ? ui.card() : first;
             first.addView(ui.heading("More rules"));
@@ -821,7 +837,7 @@ public class MainActivity extends SetupActivity {
                     updateSchemeInfo();
                 });
         enableAll(row, editable);
-        into.addView(row);
+        into.addView(withInfo(row, "Turn time", "value." + Rules.V_TURN_TIME));
     }
 
     private static String[] percentNames(int[] opts) {
@@ -849,7 +865,26 @@ public class MainActivity extends SetupActivity {
             updateSchemeInfo();
         });
         enableAll(row, editable);
-        into.addView(row);
+        into.addView(withInfo(row, label, "value." + entry));
+    }
+
+    /**
+     * A setting with an info button at its end, which shows the explanation from RuleHelp. A choice or stepper row
+     * (a horizontal row already) takes the button in place; a switch is put in a row of its own. The button is added
+     * after the row is greyed out, so it stays usable when the setting is locked.
+     */
+    private View withInfo(View setting, String title, String key) {
+        // A fixed 48 dp square: the button's own background would otherwise stretch it and squeeze the label out.
+        View info = ui.infoButton(title, RuleHelp.text(key));
+        int touch = ui.dp(Ui.TOUCH_DP);
+        if (setting instanceof LinearLayout) {
+            ((LinearLayout) setting).addView(info, Ui.lp(touch, touch));
+            return setting;
+        }
+        LinearLayout r = ui.row();
+        r.addView(setting, ui.weight(1f));
+        r.addView(info, Ui.lp(touch, touch));
+        return r;
     }
 
     private void updateSchemeInfo() {

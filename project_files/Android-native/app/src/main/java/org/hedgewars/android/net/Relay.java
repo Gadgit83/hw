@@ -52,6 +52,8 @@ import java.util.function.Supplier;
  *     game messages: whatever its engine link sends is ignored and logged (only {@code \0E}, {@code \0Q} and the finished message
  *     {@code q} about the spectator itself are read). It joins at the start, or at any time during a game: its engine link is answered
  *     with the whole log so far (its setup lines end with {@code e$spectate 1}, so the engine fast-forwards, as the TV's does), then the live stream.</li>
+ * <li>{@code {"t":"hello","role":"probe"}}: the subnet search of a phone that found no host by NSD (issue #15). The relay answers one line,
+ *     the host's record ({@link HostAdvert#probeReply}), and closes. Not a player, not a password try, not logged.</li>
  * </ul>
  * Threads: an accept thread; one reader thread per connection; one writer thread per recipient (bounded
  * queue, so a slow recipient never blocks anyone: see {@link Outbox}); a watchdog thread (lobby pings, link
@@ -822,12 +824,31 @@ public final class Relay {
             String role = Json.str(hello, "role", "");
             if ("lobby".equals(role)) lobbyConnection(s, in, hello);
             else if ("engine".equals(role)) engineConnection(s, in, hello);
+            else if (HostAdvert.PROBE_ROLE.equals(role)) probeConnection(s);
             else throw new IOException("unknown role " + role);
         } catch (Throwable e) {
             // Throwable, not Exception: a StackOverflowError or OutOfMemoryError caused by one phone's input must end
             // that connection only, never the process.
             log("connection from " + s.getRemoteSocketAddress() + " ended: " + e);
             try { s.close(); } catch (IOException ignored) { }
+        }
+    }
+
+    /**
+     * A probe of the subnet search (issue #15): answered with this host's record as one line, then closed. It is not a player, it is
+     * not counted against the password lock, and nothing else of the relay changes; a phone that sends anything after the hello is
+     * simply not read further.
+     */
+    private void probeConnection(Socket s) throws IOException {
+        String reply = HostAdvert.probeReply(HostAdvert.txt(cfg.build, cfg.compat, Compat.ENGINE_PROTOCOL, cfg.hostName, viewerPort(),
+                cfg.dataDigest, getPin() != null));
+        try {
+            s.getOutputStream().write((reply + "\n").getBytes(StandardCharsets.UTF_8));
+            s.getOutputStream().flush();
+        } catch (IOException ignored) {
+            // the probing phone went away first: nothing to answer
+        } finally {
+            s.close();
         }
     }
 

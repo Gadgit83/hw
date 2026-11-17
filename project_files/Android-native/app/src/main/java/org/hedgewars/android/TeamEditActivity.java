@@ -97,7 +97,7 @@ public class TeamEditActivity extends SetupActivity {
     }
 
     private boolean wide() {
-        return getResources().getConfiguration().screenWidthDp >= 700;
+        return Ui.twoColumns(this, 700);
     }
 
     private void fill() {
@@ -113,7 +113,18 @@ public class TeamEditActivity extends SetupActivity {
             team.name = s;
             title.setText("Team " + (index + 1) + ": " + s);
         }));
-        left.addView(name, Ui.lp(ViewGroup.LayoutParams.MATCH_PARENT, ui.dp(40)));
+        LinearLayout nameRow = ui.row();
+        nameRow.addView(name, Ui.lp(0, ui.dp(40), 1f));
+        // As on the network screen's player name: the dice picks another name, one no other team uses, and it is saved on leaving.
+        android.widget.Button dice = ui.button("🎲", false, v -> {
+            String n = SetupModel.otherTeamName(data, rnd, team, model.teams);
+            if (n == null) return;                   // no free name left: keep the one there is
+            team.name = n;
+            fill();
+        });
+        dice.setContentDescription("Pick another team name");
+        nameRow.addView(dice, ui.margins(Ui.lp(ui.dp(56), ViewGroup.LayoutParams.WRAP_CONTENT), 6, 0, 0, 0));
+        left.addView(nameRow);
 
         left.addView(ui.choice("Played by", MainActivity.shortLevelNames(), MainActivity.levelNames(), team.level, i -> {
             team.level = i;

@@ -260,7 +260,10 @@ with Actions.actions[Actions.Pos] do
                 ParseCommand('ljump', true);
 
             aia_Skip:
-                ParseCommand('skip', true);
+                begin
+                if cSmartAI then AINoteTurnEnd(Me^.Hedgehog, hwRound(Me^.X));
+                ParseCommand('skip', true)
+                end;
 
             aia_Put:
                 doPut(X, Y, true);

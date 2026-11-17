@@ -13,6 +13,7 @@ import java.util.Random;
  * Scenarios (default "two"):
  *   two              two human teams, four hedgehogs each, random map (the 0.1.x default)
  *   ai               two computer teams (level 5 and 3), nobody to press anything: the AI plays alone
+ *   ai4              the same with two computer teams at level 4 ("Computer, level 4" in the app)
  *   ai:WEAPONSET     the same, with that weapon set (e.g. ai:Crazy, where big explosions are likely)
  *   humanvsai        a human team and a level 5 computer team
  *   mixed8x8         eight teams of eight hedgehogs, humans and computers of every level
@@ -41,6 +42,10 @@ public class GenConfig {
             m = base(d, seed, 2, 4);
             m.teams.get(0).level = 5;
             m.teams.get(1).level = 3;
+        } else if (scenario.equals("ai4")) {
+            m = base(d, seed, 2, 4);
+            m.teams.get(0).level = 4;
+            m.teams.get(1).level = 4;
         } else if (scenario.startsWith("ai:")) {
             m = base(d, seed, 2, 4);
             m.teams.get(0).level = 5;

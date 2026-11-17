@@ -292,8 +292,8 @@ public class OptionsActivity extends SetupActivity {
         computer.addView(ui.heading("Computer turns"));
         computer.addView(ui.choice("Computer players", Arrays.asList("Quick and smart (default)", "Classic"),
                 o.aiQuick ? 0 : 1, i -> o.aiQuick = i == 0));
-        computer.addView(ui.hint("Quick: a computer turn starts sooner, with no pause and a shorter think. "
-                + "Smart: less repeating of the same weapon, and more walking when its best shot is weak. "
+        computer.addView(ui.hint("Quick: a computer turn starts sooner, with no added pause; the time it spends thinking is unchanged. "
+                + "Smart: less repeating of the same weapon, and more walking towards an enemy when its best shot is weak. "
                 + "Classic: the game's own timing and choices."));
         left.addView(computer, ui.margins(full(), 0, 8, 0, 0));
         left.addView(others, ui.margins(full(), 0, 8, 0, 0));

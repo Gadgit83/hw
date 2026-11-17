@@ -2242,7 +2242,7 @@ lastY:= AimPathY[0];
 for i:= 1 to n - 1 do
     if (abs(AimPathX[i] - lastX) + abs(AimPathY[i] - lastY)) >= 14 then
         begin
-        DrawCircleFilled(AimPathX[i] + WorldDx, AimPathY[i] + WorldDy, 2, $FF, $FF, $FF, $C0);
+        DrawCircleFilled(AimPathX[i] + WorldDx, AimPathY[i] + WorldDy, 3, $FF, $FF, $FF, $E0);
         lastX:= AimPathX[i];
         lastY:= AimPathY[i];
         end;

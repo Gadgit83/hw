@@ -16,6 +16,7 @@ import java.util.Random;
  *   ai4              the same with two computer teams at level 4 ("Computer, level 4" in the app)
  *   ai:WEAPONSET     the same, with that weapon set (e.g. ai:Crazy, where big explosions are likely)
  *   humanvsai        a human team and a level 5 computer team
+ *   humanvsai1       the same with one hedgehog a team, so the same hedgehog takes the next turn (weapon kept)
  *   mixed8x8         eight teams of eight hedgehogs, humans and computers of every level
  *   scheme:NAME      two teams, the built-in scheme NAME with its weapon set, e.g. scheme:Pro Mode
  *   map:KIND         generated | maze | perlin | forts | wfc | image:NAME
@@ -53,6 +54,9 @@ public class GenConfig {
             m.weaponSet = scenario.substring(3);
         } else if (scenario.equals("humanvsai")) {
             m = base(d, seed, 2, 4);
+            m.teams.get(1).level = 5;
+        } else if (scenario.equals("humanvsai1")) {
+            m = base(d, seed, 2, 1);
             m.teams.get(1).level = 5;
         } else if (scenario.equals("mixed8x8")) {
             m = base(d, seed, 8, 8);

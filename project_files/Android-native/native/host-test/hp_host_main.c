@@ -44,11 +44,12 @@ static void *restore_thread(void *arg)
  *   ctl:<letter>                                       (a control frame to the relay as the launcher would send it: ctl:P pause, ctl:R resume)
  *   relay:<text>                                       (one message straight onto the relay link, past the launcher's watcher filter: relay:Lx is a move)
  *   waitfile:<path>                                    (blocks the script until the file exists: the shell or the net-test harness decides when)
- *   key:esc  key:y                                     (a key press and release, as GameActivity sends for Back and the confirm in a network game)
+ *   key:esc  key:y  key:p                              (a key press and release, as GameActivity sends for Back and the confirm in a network game; p is pause)
  *   key:enter  text:<chars>                            (opens the chat, types into it)
  *   keydown:<name>  keyup:<name>                       (a held key, names left right up down space f1..f9: space holds Fire, releasing it fires, f2 selects slot 2)
  *   userquit                                           (what GameActivity does when the player confirms leaving: hp_ipc_user_quit)
  *   endall                                             (the host confirms "End the game for everyone": hp_ipc_end_for_everyone)
+ *   ecmd:<text>                                        (a console command to the engine over the local channel, e.g. ecmd:livevolume 128 100 50 0)
  *   log:<text>                                         (marks the engine log, for the shell driver) */
 static void push_key(SDL_Keycode sym, SDL_Scancode sc)
 {
@@ -140,10 +141,12 @@ static void *script_thread(void *arg)
         else if (!strncmp(act, "keyup:", 6)) push_key_edge(act + 6, 0);
         else if (!strcmp(act, "key:esc")) push_key(SDLK_ESCAPE, SDL_SCANCODE_ESCAPE);
         else if (!strcmp(act, "key:y")) push_key(SDLK_y, SDL_SCANCODE_Y);
+        else if (!strcmp(act, "key:p")) push_key(SDLK_p, SDL_SCANCODE_P);   /* the engine's pause key */
         else if (!strcmp(act, "key:enter")) push_key(SDLK_RETURN, SDL_SCANCODE_RETURN);
         else if (!strncmp(act, "text:", 5)) { SDL_Event e; memset(&e, 0, sizeof e); e.type = SDL_TEXTINPUT; e.text.windowID = 1; snprintf(e.text.text, sizeof e.text.text, "%s", act + 5); SDL_PushEvent(&e); }
         else if (!strcmp(act, "userquit")) fprintf(stderr, "[hosttest] user quit -> %d\n", hp_ipc_user_quit());
         else if (!strcmp(act, "endall")) fprintf(stderr, "[hosttest] end for everyone -> %d\n", hp_ipc_end_for_everyone());
+        else if (!strncmp(act, "ecmd:", 5)) fprintf(stderr, "[hosttest] engine command -> %d\n", hp_ipc_engine_command(act + 5));
         else if (!strcmp(act, "focuslost")) push_window(SDL_WINDOWEVENT_FOCUS_LOST);
         else if (!strcmp(act, "focusgained")) push_window(SDL_WINDOWEVENT_FOCUS_GAINED);
         else if (!strcmp(act, "minimized")) push_window(SDL_WINDOWEVENT_MINIMIZED);
@@ -151,6 +154,18 @@ static void *script_thread(void *arg)
         fprintf(stderr, "[hosttest] %ldms %s\n", at, act);
     }
     return NULL;
+}
+
+/* --pause-menu: the pause screen's buttons (the engine's 'k' message). The app opens the question or the options; the test logs it. */
+static void host_pause_menu(int action)
+{
+    fprintf(stderr, "[hosttest] pause menu: %s\n", action == 'q' ? "quit game" : action == 'o' ? "options" : "unknown");
+}
+
+/* --touch-layout: the engine's control places (IPC 'T', one per control) for the app's layout editor; the test logs them. */
+static void host_touch_layout(const char *entry, int len)
+{
+    fprintf(stderr, "[hosttest] touch layout %.*s\n", len, entry);
 }
 
 /* The engine calls this on a big explosion (uUtils.pas DeviceRumble); the app vibrates, the test logs it. */
@@ -174,6 +189,8 @@ int main(int argc, char **argv)
     }
     int p = hp_ipc_start(argv[3]);
     if (p < 0) return 2;
+    hp_ipc_set_pause_menu_handler(host_pause_menu);
+    hp_ipc_set_touch_layout_handler(host_touch_layout);
     snprintf(port, sizeof port, "%d", p);
     char *args[64] = {
         "--no-holiday-silliness", "--internal", "--port", port,

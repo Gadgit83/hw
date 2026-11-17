@@ -3,6 +3,7 @@ import org.hedgewars.android.GameData;
 import org.hedgewars.android.Options;
 import org.hedgewars.android.Rules;
 import org.hedgewars.android.SetupModel;
+import org.hedgewars.android.TouchLayout;
 
 import java.io.File;
 import java.util.Arrays;
@@ -175,6 +176,14 @@ public class ConfigCheck {
             List<String> ca = classic.toEngineArgs();
             check(!ca.contains("--quick-ai") && !ca.contains("--smart-ai"), "classic computer players pass no AI option");
             check(!Options.fromText(classic.toText()).aiQuick && Options.fromText(o.toText()).aiQuick == o.aiQuick, "computer players setting survives the options text");
+            check(args.contains("--jump-inset") && args.get(args.indexOf("--jump-inset") + 1).equals("100"), "jump inset is 100 by default");
+            check(args.contains("--hide-idle-controls"), "controls hidden on other turns by default");
+            check(args.contains("--two-jump-buttons"), "two jump buttons by default");
+            check(args.contains("--jump-forward-when-moving"), "jump while walking is the forward jump by default");
+            check(!args.contains("--swap-fire-jump"), "fire and jump are not swapped by default");
+            check(args.contains("--direct-ammo-menu"), "weapon drawer follows the finger by default");
+            check(args.contains("--refresh-weapon-ui"), "weapon controls refresh at the start of a turn by default");
+            check(args.contains("--pause-menu"), "the pause screen has Quit game and Options by default");
             o.mute = true;
             o.voices = false;
             o.quality = 0;
@@ -195,6 +204,31 @@ public class ConfigCheck {
             Set<String> argNames = engineArgNames(hw);
             for (String s : a3) if (s.startsWith("--")) check(argNames.contains(s), "engine knows option " + s);
             for (String s : a2) if (s.startsWith("--")) check(argNames.contains(s), "engine knows option " + s);
+
+            // the touch layout (issue #21): passed as --touch-layout, the engine has the option and the touchlayout command, and the
+            // editor's format round trips; entries that are not valid are dropped
+            check(!a3.contains("--touch-layout"), "no touch layout by default");
+            Options tl = new Options();
+            tl.touchLayout = "fire:0.800,0.620,1.600;aim:0.140,0.450,1.000";
+            List<String> at = Options.fromText(tl.toText()).toEngineArgs();
+            check(at.contains("--touch-layout") && at.get(at.indexOf("--touch-layout") + 1).equals(tl.touchLayout),
+                    "touch layout passed as --touch-layout");
+            check(argNames.contains("--touch-layout"), "engine knows --touch-layout");
+            check(engineCommands.contains("touchlayout"), "engine has the touchlayout command");
+            Map<String, double[]> places = TouchLayout.parse("fire:0.8,0.62,1.6;jump:1.5,0.2,1;bogus:0.1,0.1,1;left:0.1,0.1");
+            check(places.size() == 2 && places.containsKey("fire") && places.containsKey("jump"), "bad entries dropped " + places.keySet());
+            Map<String, double[]> clamped = TouchLayout.parse("fire:1.7,0.2,9");
+            check(clamped.get("fire")[0] == 1.0 && clamped.get("fire")[2] == TouchLayout.MAX_SCALE, "values clamped to the screen and the size limits");
+            String f = TouchLayout.format(places);
+            check(f.equals("fire:0.800,0.620,1.600;jump:1.000,0.200,1.000"), "layout format " + f);
+            check(TouchLayout.format(TouchLayout.parse(f)).equals(f), "layout round trip");
+            check(TouchLayout.sanitize("garbage").isEmpty() && TouchLayout.sanitize(f).equals(f), "sanitize");
+            check("highjump".equals(TouchLayout.reportName("highjump:0.5,0.5,1.0,0.1,0.2")), "report name");
+            TouchLayout.Place rp = TouchLayout.reportPlace("fire:0.920,0.850,1.000,0.120,0.210");
+            check(rp != null && rp.x == 0.92 && rp.h == 0.21, "report place");
+            check(TouchLayout.reportPlace("fire:0.920,0.850") == null && TouchLayout.reportName("nope:1,2,3") == null, "bad reports dropped");
+            Options bad = Options.fromText("touchLayout=garbage");
+            check(bad.touchLayout.isEmpty(), "a bad saved layout is the default");
         }
         checkContentPresent(d, dataDir);
         // stage-assets.sh writes the profile into Data/.profile; the test data offers exactly three themes.

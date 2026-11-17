@@ -48,6 +48,22 @@ void hp_ipc_set_error_handler(void (*handler)(const char *message))
     g_error_handler = handler;
 }
 
+/* --pause-menu: the engine's pause screen buttons ('k' messages, see below). Set by the app; NULL on the desktop. */
+static void (*g_pause_menu_handler)(int action);
+
+void hp_ipc_set_pause_menu_handler(void (*handler)(int action))
+{
+    g_pause_menu_handler = handler;
+}
+
+/* --touch-layout: the engine's places of the touch controls, one 'T' message per control (see hp.h). Set by the app; NULL on the desktop. */
+static void (*g_touch_layout_handler)(const char *entry, int len);
+
+void hp_ipc_set_touch_layout_handler(void (*handler)(const char *entry, int len))
+{
+    g_touch_layout_handler = handler;
+}
+
 static int read_full(int fd, void *buf, size_t n)
 {
     unsigned char *p = buf;
@@ -677,7 +693,7 @@ static void *server_thread(void *arg)
         if (read_full(fd, &len, 1)) break;
         if (len && read_full(fd, msg, len)) break;
         /* Network mode: tap every engine message (right after the read) into the queue for the relay link. */
-        if (g_net && len && msg[0] != 'C' && msg[0] != '?' && msg[0] != 'y') net_tap(msg, len);
+        if (g_net && len && msg[0] != 'C' && msg[0] != '?' && msg[0] != 'y' && msg[0] != 'k' && msg[0] != 'T') net_tap(msg, len);
         if (len && msg[0] == 'C') {
             /* The engine asks for the game configuration. */
             if (send_config(fd)) break;
@@ -707,6 +723,16 @@ static void *server_thread(void *arg)
             LOGE("engine error: %s", text);
             if (g_net) net_send_control('E', text);          /* before anything else: the process is about to end */
             if (g_error_handler) g_error_handler(text);
+        }
+        else if (len >= 2 && msg[0] == 'k') {
+            /* The pause screen's buttons (--pause-menu): 'q' is Quit game, 'o' is Options. Not a game message, so never tapped
+             * to the relay. The engine appends the game tick after the action; it is ignored here. */
+            if (g_pause_menu_handler) g_pause_menu_handler((int)msg[1]);
+        }
+        else if (len >= 4 && msg[0] == 'T') {
+            /* The engine's control places for the layout editor (--touch-layout). Not a game message, so never tapped to the relay.
+             * The message is 'T', the entry, then the two bytes of the game tick, which are left out. */
+            if (g_touch_layout_handler) g_touch_layout_handler((const char *)msg + 1, (int)len - 3);
         }
         else if (len >= 3) {
             unsigned char c = msg[0];
@@ -802,6 +828,25 @@ int hp_ipc_hidden(int hidden)
     pthread_mutex_unlock(&g_q_lock);
     diag("CONTROL %c (the app is %s)", kind, hidden ? "in the background" : "in front");
     return 0;
+}
+
+/* Sends one console command to the engine over the local channel (IPC 'e', as the pause and the quit do), e.g.
+ * "livevolume 128 100 50 0" from the options menu. Returns 0 when it was written, -1 when no engine is connected. */
+int hp_ipc_engine_command(const char *cmd)
+{
+    size_t n = strlen(cmd);
+    char buf[256];
+    unsigned char len;
+    int rc = -1;
+    if (n == 0 || n > 250) return -1;
+    buf[0] = 'e';
+    memcpy(buf + 1, cmd, n);
+    len = (unsigned char)(n + 1);
+    pthread_mutex_lock(&g_wr_lock);
+    if (g_engine_fd >= 0)
+        rc = (write_full(g_engine_fd, &len, 1) == 0 && write_full(g_engine_fd, buf, n + 1) == 0) ? 0 : -1;
+    pthread_mutex_unlock(&g_wr_lock);
+    return rc;
 }
 
 #ifdef HP_HOST_TEST

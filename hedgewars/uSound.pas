@@ -118,6 +118,10 @@ procedure SetVolume(vol: LongInt);
 procedure SetEffectsVolume(pct: LongInt);
 procedure SetMusicVolume(pct: LongInt);
 
+// Android options menu, during a game (the launcher's local IPC 'e' command livevolume): the master level (0 to MIX_MAX_VOLUME),
+// the effects and music percentages, and whether everything is muted. Does nothing when sound is off (--nosound).
+procedure SetLiveVolume(level, effectsPct, musicPct: LongInt; muted: boolean);
+
 // Switch the hedgehog voices (taunts, hurt and victory lines) off or on.
 procedure SetVoices(enabled: boolean);
 
@@ -920,6 +924,35 @@ begin
     if pct < 0 then pct:= 0;
     if pct > 100 then pct:= 100;
     cMusicPct:= pct;
+end;
+
+procedure SetLiveVolume(level, effectsPct, musicPct: LongInt; muted: boolean);
+begin
+    if not (isSoundEnabled or isMusicEnabled) then
+        exit;
+    if level < 0 then level:= 0;
+    if level > MIX_MAX_VOLUME then level:= MIX_MAX_VOLUME;
+    if effectsPct < 0 then effectsPct:= 0;
+    if effectsPct > 100 then effectsPct:= 100;
+    if musicPct < 0 then musicPct:= 0;
+    if musicPct > 100 then musicPct:= 100;
+    cEffectsPct:= effectsPct;
+    cMusicPct:= musicPct;
+    // what the mute key restores; the volume itself follows the options menu
+    previousVolume:= level;
+    if muted then
+        Volume:= 0
+    else
+        Volume:= level;
+    Mix_Volume(-1, Volume * cEffectsPct div 100);
+    if isMusicEnabled then
+        Mix_VolumeMusic(Volume * cMusicPct div 100);
+    if isMusicEnabled then
+        if Volume = 0 then
+            PauseMusic
+        else
+            ResumeMusic;
+    isAudioMuted:= (Volume = 0);
 end;
 
 procedure SetVoices(enabled: boolean);

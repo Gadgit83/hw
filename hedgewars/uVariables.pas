@@ -209,6 +209,16 @@ var
     cTurnZoom       : LongInt; // touch: zoom in to this percent of the default zoom when a turn starts, 0: off
     cQuickAI        : boolean; // --quick-ai: computer turns start sooner (no pause, shorter thinking, fewer walking trials)
     cSmartAI        : boolean; // --smart-ai: computer players vary their weapons and walk on when the best shot is weak
+    cJumpInset      : LongInt; // touch: move the jump button this percent of its own width further in from the right edge, 0: off
+    cTouchLayout    : shortstring; // touch: where each control is and how big, "name:x,y,s;..." (--touch-layout, the touchlayout command, see SetTouchLayout)
+    cHideIdleControls: boolean; // touch: hide the controls that do nothing when it is not this phone's turn (the weapon chest stays)
+    cDirectAmmoMenu : boolean; // touch: the weapon drawer follows the finger: the slot under it is highlighted, lifting on a weapon picks it (--direct-ammo-menu)
+    cRefreshWeaponUI: boolean; // touch: at the start of a turn (and when the hedgehog changes) show the aim buttons of its weapon and mark that weapon in the drawer (--refresh-weapon-ui)
+    cTwoJumpButtons : boolean; // touch: Jump is the long forward jump (ljump) and a second button, High jump (hjump), sits left of it (--two-jump-buttons)
+    cJumpForwardWhenMoving: boolean; // touch: with one jump button, Jump does the long forward jump while a left or right move is held (--jump-forward-when-moving)
+    cSwapFireJump   : boolean; // touch: the Fire and the Jump buttons swap places, mirrored (--swap-fire-jump)
+    cPauseMenu      : boolean; // touch: the pause screen shows two buttons under the Paused banner, Quit game and Options; they only send
+                               // IPC 'k' to the launcher, which asks the app (--pause-menu)
     cTurnCamPending : boolean; // a turn has started and the camera has not been moved for it yet
     cMenuTarget     : GLfloat; // wanted scale of the weapon menu (0: same as the HUD)
     cMenuScale      : GLfloat; // scale the weapon menu is drawn at right now
@@ -331,6 +341,8 @@ var
 
     arrowUp, arrowDown, arrowLeft, arrowRight : TOnScreenWidget;
     firebutton, jumpWidget, AMWidget          : TOnScreenWidget;
+    highJumpButton                            : TOnScreenWidget; // --two-jump-buttons: the high (vertical) jump, left of jumpWidget
+    pauseQuitWidget, pauseOptionsWidget       : TOnScreenWidget; // --pause-menu: the buttons under the Paused banner (Quit game, Options)
     pauseButton, utilityWidget                : TOnScreenWidget;
     utilityWidget2                            : TOnScreenWidget;
 {$ENDIF}
@@ -545,6 +557,8 @@ const
             Width: 128; Height: 128; imageWidth: 0; imageHeight: 0; saveSurf: false; critical: true; checkSum: false; priority: tpHigh; getDimensions: false; getImageDimensions: true), // sprSwitchButton
             (FileName: 'bouncebutton'; Path: ptButtons; AltPath: ptNone; Texture: nil; Surface: nil;
             Width: 128; Height: 128; imageWidth: 0; imageHeight: 0; saveSurf: false; critical: true; checkSum: false; priority: tpHigh; getDimensions: false; getImageDimensions: true), // sprBounceButton
+            (FileName: 'highjump'; Path: ptButtons; AltPath: ptNone; Texture: nil; Surface: nil;
+            Width: 128; Height: 128; imageWidth: 0; imageHeight: 0; saveSurf: false; critical: true; checkSum: false; priority: tpHigh; getDimensions: false; getImageDimensions: true), // sprHighJumpWidget
 {$ENDIF}
             (FileName:      'Flake'; Path:ptCurrTheme; AltPath: ptNone; Texture: nil; Surface: nil;
             Width:  64; Height: 64; imageWidth: 0; imageHeight: 0; saveSurf: false; critical: true; checkSum: false; priority: tpHighest; getDimensions: false; getImageDimensions: true),// sprFlake
@@ -2649,6 +2663,9 @@ var
     WindBarWidth: LongInt;
     bShowAmmoMenu: boolean;
     bSelected: boolean;
+    directAmmoId: Int64; // touch, --direct-ammo-menu: the finger that works the weapon drawer (-1: none)
+    directAmmoOn: boolean; // touch, --direct-ammo-menu: that finger is on the drawer now
+    directAmmoPoint: TPoint; // touch, --direct-ammo-menu: the finger in weapon drawer units (the slot under it is hit-tested)
     bShowFinger: boolean;
     bShowSwitcher: boolean;
     Frames: Longword;
@@ -2662,6 +2679,8 @@ var
 
     PauseTexture,
     HostPauseTexture,
+    PauseQuitTexture,
+    PauseOptionsTexture,
     AFKTexture,
     SyncTexture,
     ConfirmTexture: PTexture;
@@ -2727,12 +2746,39 @@ var trammo:  array[TAmmoStrId] of ansistring;   // name of the weapon
     trcmd:   array[TCmdHelpStrId] of ansistring; // chat command help
     cTestLua : Boolean;
 
+// Touch controls on another team's turn (see --hide-idle-controls): true when the playing controls must not be shown
+// or touched, because the game is paused or over, no team or hedgehog is playing, or the current one is not this phone's.
+function touchIdleTurn: boolean;
+// True when this touch widget is one of the playing controls hidden by touchIdleTurn (the weapon chest and the pause button stay).
+function isIdleHiddenControl(widget: POnScreenWidget): boolean;
+
 procedure preInitModule;
 procedure initModule;
 procedure freeModule;
 
 implementation
 uses uRust;
+
+function touchIdleTurn: boolean;
+begin
+touchIdleTurn:= false;
+if not cHideIdleControls then
+    exit;
+if isPaused or GameOver then
+    touchIdleTurn:= true
+else if (CurrentTeam = nil) or (CurrentHedgehog = nil) then
+    touchIdleTurn:= true
+else
+    touchIdleTurn:= CurrentTeam^.ExtDriven or (CurrentHedgehog^.BotLevel > 0);
+end;
+
+function isIdleHiddenControl(widget: POnScreenWidget): boolean;
+begin
+isIdleHiddenControl:= false;
+if (widget = @AMWidget) or (widget = @pauseButton) or (widget = @pauseQuitWidget) or (widget = @pauseOptionsWidget) then
+    exit;
+isIdleHiddenControl:= touchIdleTurn;
+end;
 
 procedure preInitModule;
 begin
@@ -2805,6 +2851,15 @@ begin
     cTurnZoom:= 0;
     cQuickAI:= false;
     cSmartAI:= false;
+    cJumpInset:= 0;
+    cTouchLayout:= '';
+    cHideIdleControls:= false;
+    cDirectAmmoMenu:= false;
+    cRefreshWeaponUI:= false;
+    cTwoJumpButtons:= false;
+    cJumpForwardWhenMoving:= false;
+    cSwapFireJump:= false;
+    cPauseMenu:= false;
     cTurnCamPending:= false;
     cCornerTL:= 0;
     cCornerTR:= 0;

@@ -430,6 +430,9 @@ for ii:= Low(TSprite) to High(TSprite) do
            and ((cCloudsNumber > 0) or (ii <> sprCloud))
            and ((vobCount > 0) or (ii <> sprFlake))
            and (savesurf or (not cOnlyStats)) // in stats-only only load those which are needed later
+{$IFDEF USE_TOUCH_INTERFACE}
+           and ((ii <> sprHighJumpWidget) or cTwoJumpButtons) // the high jump picture only with --two-jump-buttons
+{$ENDIF}
            and allOK
             then
             begin
@@ -549,6 +552,8 @@ if (not cOnlyStats) and allOK then
     PauseTexture:= RenderStringTex(trmsg[sidPaused], cCentralMessageColor, fntBig);
     HostPauseTexture:= RenderStringTex(ansistring('Paused by the host'), cCentralMessageColor, fntBig);
     AFKTexture:= RenderStringTex(trmsg[sidAFK], cCentralMessageColor, fntBig);
+    PauseQuitTexture:= RenderStringTex(ansistring('Quit game'), cCentralMessageColor, fntBig);
+    PauseOptionsTexture:= RenderStringTex(ansistring('Options'), cCentralMessageColor, fntBig);
     keyConfirm:= KeyBindToName('confirm');
     keyQuit:= KeyBindToName('quit');
     ConfirmTexture:= RenderStringTex(FormatA(trmsg[sidConfirm], ansistring(keyConfirm), ansistring(keyQuit)), cCentralMessageColor, fntBig);
@@ -611,6 +616,8 @@ FreeAndNilTexture(CrosshairTexture);
 FreeAndNilTexture(WeaponTooltipTex);
 FreeAndNilTexture(PauseTexture);
 FreeAndNilTexture(HostPauseTexture);
+FreeAndNilTexture(PauseQuitTexture);
+FreeAndNilTexture(PauseOptionsTexture);
 FreeAndNilTexture(AFKTexture);
 FreeAndNilTexture(SyncTexture);
 FreeAndNilTexture(ConfirmTexture);

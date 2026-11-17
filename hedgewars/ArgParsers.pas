@@ -113,6 +113,15 @@ begin
     WriteLn(stdout, '  --ui-scale [touch HUD scale in percent], --inset-left/top/right/bottom [safe area in pixels]');
     WriteLn(stdout, '  --turn-centre: Centre the camera on the active hedgehog when a turn starts (touch builds)');
     WriteLn(stdout, '  --turn-zoom [percent]: Zoom in to this percentage of the default zoom when a turn starts (touch builds, 110 to 200)');
+    WriteLn(stdout, '  --jump-inset [percent]: Move the jump button this percentage of its own width further in from the right edge (touch builds, 0 keeps the old place)');
+    WriteLn(stdout, '  --hide-idle-controls: Hide the playing controls (keep the weapon chest) when it is not this phone''s turn (touch builds)');
+    WriteLn(stdout, '  --direct-ammo-menu: The weapon drawer follows the finger: the slot under it is highlighted, lifting on a weapon picks it, nothing drifts (touch builds)');
+    WriteLn(stdout, '  --refresh-weapon-ui: At the start of a turn show the aim buttons of the weapon the hedgehog holds and mark it in the weapon drawer (touch builds)');
+    WriteLn(stdout, '  --two-jump-buttons: Jump is the long forward jump and a second button, High jump, sits left of it (pressed twice quickly: back flip) (touch builds)');
+    WriteLn(stdout, '  --jump-forward-when-moving: With one jump button, Jump does the long forward jump while a left or right move is held (touch builds)');
+    WriteLn(stdout, '  --swap-fire-jump: Swap the places of the Fire and the Jump buttons, mirrored (touch builds)');
+    WriteLn(stdout, '  --pause-menu: The pause screen shows Quit game and Options buttons; the app is asked what to do (touch builds)');
+    WriteLn(stdout, '  --touch-layout <spec>: Place and size the touch controls, "name:x,y,s;...": x,y is the centre as fractions of the screen (from left and top), s the size as a fraction of the default. Names: fire jump highjump left right aim weapons pause timer bounce (touch builds)');
     WriteLn(stdout, '  --screen-shape <tl,tr,bl,br,margin,ly0,ly1,ry0,ry1>: corner radii, extra edge margin and the vertical extent of the left and right cut-out, in pixels');
     WriteLn(stdout, '  --showfps: Show frames per second');
     WriteLn(stdout, '');
@@ -290,7 +299,7 @@ begin
 end;
 
 function parseParameter(cmd:string; arg:string; var paramIndex:LongInt): Boolean;
-const reallyAll: array[0..51] of shortstring = (
+const reallyAll: array[0..60] of shortstring = (
                 '--prefix', '--user-prefix', '--locale', '--fullscreen-width', '--fullscreen-height', '--width',
                 '--height', '--maximized', '--frame-interval', '--volume','--nomusic', '--nosound', '--nodampen',
                 '--fullscreen', '--showfps', '--altdmg', '--low-quality', '--raw-quality', '--stereo', '--nick',
@@ -299,7 +308,9 @@ const reallyAll: array[0..51] of shortstring = (
   {misc}        '--stats-only', '--gci', '--help','--protocol', '--no-teamtag','--no-hogtag','--no-healthtag','--translucent-tags','--lua-test','--no-holiday-silliness','--chat-size', '--prefix64', '--user-prefix64',
   {android}     '--ui-scale', '--inset-left', '--inset-top', '--inset-right', '--inset-bottom', '--menu-scale',
                 '--effects-volume', '--music-volume', '--no-voices', '--screen-shape', '--turn-centre', '--turn-zoom',
-                '--quick-ai', '--smart-ai');
+                '--quick-ai', '--smart-ai',
+                '--jump-inset', '--hide-idle-controls', '--direct-ammo-menu', '--refresh-weapon-ui',
+                '--two-jump-buttons', '--jump-forward-when-moving', '--swap-fire-jump', '--pause-menu', '--touch-layout');
 var cmdIndex: byte;
 begin
     parseParameter:= false;
@@ -364,6 +375,15 @@ begin
         {--turn-zoom}           49: cTurnZoom          := getLongIntParameter(arg, paramIndex, parseParameter);
         {--quick-ai}            50: cQuickAI           := true;
         {--smart-ai}            51: cSmartAI           := true;
+        {--jump-inset}          52: cJumpInset         := getLongIntParameter(arg, paramIndex, parseParameter);
+        {--hide-idle-controls}  53: cHideIdleControls  := true;
+        {--direct-ammo-menu}    54: cDirectAmmoMenu    := true;
+        {--refresh-weapon-ui}   55: cRefreshWeaponUI   := true;
+        {--two-jump-buttons}    56: cTwoJumpButtons    := true;
+        {--jump-forward-when-moving} 57: cJumpForwardWhenMoving := true;
+        {--swap-fire-jump}      58: cSwapFireJump      := true;
+        {--pause-menu}          59: cPauseMenu         := true;
+        {--touch-layout}        60: cTouchLayout       := getstringParameter(arg, paramIndex, parseParameter);
     else
         begin
         //Assume the first "non parameter" is the demo file, anything else is invalid

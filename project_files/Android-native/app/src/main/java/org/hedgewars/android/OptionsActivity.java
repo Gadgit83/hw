@@ -27,6 +27,16 @@ import java.util.List;
 /** Options: sound, display and controls, and the advanced and about pages. Changes apply to the next game. */
 public class OptionsActivity extends SetupActivity {
 
+    /** Intent extra: the tab to open first (0 Sound, 1 Display and controls, 2 Advanced). */
+    static final String EXTRA_TAB = "tab";
+    /**
+     * Intent extra: the options as the game holds them. The game process saves its own changes, which this process may not see
+     * yet in its preferences, so the game's copy is the one to start from.
+     */
+    static final String EXTRA_OPTIONS = "gameOptions";
+    /** Result extra: the options as they were saved, so a game that opened this screen gets the changes (see GameActivity). */
+    static final String RESULT_OPTIONS = "options";
+
     private Ui ui;
     private Options o;
     private int tab;
@@ -39,11 +49,25 @@ public class OptionsActivity extends SetupActivity {
         super.onCreate(b);
         ui = new Ui(this);
         Ui.edgeToEdge(this);
-        o = Store.loadOptions(this);
+        String fromGame = getIntent() == null ? null : getIntent().getStringExtra(EXTRA_OPTIONS);
+        o = fromGame != null ? Options.fromText(fromGame) : Store.loadOptions(this);
         tab = getSharedPreferences(Store.PREFS_NAME, MODE_PRIVATE).getInt("optionsTab", 0);
         if (tab < 0 || tab > 2) tab = 0;
+        int asked = getIntent() == null ? -1 : getIntent().getIntExtra(EXTRA_TAB, -1);
+        if (asked >= 0 && asked <= 2) tab = asked;
         setContentView(buildFrame());
         show();
+    }
+
+    /** The result must be set before the screen finishes (finish() sends it at once), so Done and Back both set it. */
+    private void reportOptions() {
+        setResult(RESULT_OK, new Intent().putExtra(RESULT_OPTIONS, o.toText()));
+    }
+
+    @Override
+    public void onBackPressed() {
+        reportOptions();
+        super.onBackPressed();
     }
 
     @Override
@@ -60,7 +84,10 @@ public class OptionsActivity extends SetupActivity {
 
         topBar = ui.row();
         topBar.setPadding(ui.dp(Ui.GUTTER), ui.dp(2), ui.dp(Ui.GUTTER), 0);
-        topBar.addView(ui.button("‹ Done", true, v -> finish()), Ui.lp(ViewGroup.LayoutParams.WRAP_CONTENT, ui.dp(Ui.TOUCH_DP)));
+        topBar.addView(ui.button("‹ Done", true, v -> {
+            reportOptions();
+            finish();
+        }), Ui.lp(ViewGroup.LayoutParams.WRAP_CONTENT, ui.dp(Ui.TOUCH_DP)));
         TextView title = ui.text("Options", 18, Color.WHITE);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         title.setSingleLine(true);
@@ -214,6 +241,30 @@ public class OptionsActivity extends SetupActivity {
         cam.addView(zoomSlider);
         cam.addView(ui.hint("Only at the start of a turn; pinching or dragging during the turn is left alone."));
 
+        LinearLayout others = ui.card();
+        others.addView(ui.heading("Other players' turns"));
+        others.addView(ui.toggle("Hide controls when it is not your turn", o.hideIdle, c -> o.hideIdle = c));
+        others.addView(ui.hint("On another player's turn the arrows, jump, fire and timer buttons are hidden, because they do nothing then. "
+                + "The weapon chest stays, so you can look at your weapons; choosing one only works on your own turn."));
+
+        LinearLayout buttons = ui.card();
+        buttons.addView(ui.heading("Jump and fire buttons"));
+        LinearLayout walk = new LinearLayout(this);   // declared first: the two-button switch below enables or disables it
+        walk.setOrientation(LinearLayout.VERTICAL);
+        buttons.addView(ui.toggle("Two jump buttons: Jump (forward) and High jump", o.twoJump, c -> {
+            o.twoJump = c;
+            enableAll(walk, !c);
+        }));
+        buttons.addView(ui.hint("The High jump button sits left of Jump. Press it twice quickly for a back flip."));
+        buttons.addView(ui.toggle("Swap Fire and Jump", o.swapFireJump, c -> o.swapFireJump = c));
+        buttons.addView(ui.hint("Puts Jump where Fire is, and Fire where Jump is, mirrored."));
+        walk.addView(ui.toggle("With one jump button: Jump while walking does the long forward jump", o.jumpWhileMoving,
+                c -> o.jumpWhileMoving = c));
+        walk.addView(ui.hint("Only with one jump button. While a left or right move is held, Jump jumps forward. "
+                + "Off, Jump is the high jump, as when standing still."));
+        enableAll(walk, !o.twoJump);
+        buttons.addView(walk);
+
         LinearLayout look = ui.card();
         look.addView(ui.heading("Effects and feedback"));
         List<String> q = Arrays.asList(
@@ -245,6 +296,8 @@ public class OptionsActivity extends SetupActivity {
                 + "Smart: less repeating of the same weapon, and more walking when its best shot is weak. "
                 + "Classic: the game's own timing and choices."));
         left.addView(computer, ui.margins(full(), 0, 8, 0, 0));
+        left.addView(others, ui.margins(full(), 0, 8, 0, 0));
+        left.addView(buttons, ui.margins(full(), 0, 8, 0, 0));
         twoColumns(left, look);
     }
 

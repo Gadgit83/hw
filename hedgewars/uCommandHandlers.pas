@@ -26,7 +26,7 @@ procedure initModule;
 procedure freeModule;
 
 implementation
-uses uCommands, uTypes, uVariables, uIO, uDebug, uConsts, uScript, uUtils, SDLh, uWorld, uRandom, uCaptions
+uses uCommands, uTypes, uVariables, uIO, uDebug, uConsts, uScript, uUtils, SDLh, uWorld, uRandom, uCaptions, uSound
     , uVisualGearsList, uGearsHedgehog, uChat, uRust
      {$IFDEF USE_VIDEO_RECORDING}, uVideoRec {$ENDIF};
 
@@ -693,6 +693,56 @@ s:= s; // avoid compiler hint
 cNetWatch:= true;
 end;
 
+// Android options menu (the launcher's local IPC 'e' command, never a network message): 'livevolume <level> <effects %> <music %> <muted 0|1>'
+// changes the sound of the game that is running. A malformed line is ignored.
+procedure chLiveVolume(var s: shortstring);
+var v: array[0..3] of LongInt;
+    i, p, code: LongInt;
+    rest, word: shortstring;
+begin
+rest:= s;
+for i:= 0 to 3 do
+    begin
+    p:= Pos(' ', rest);
+    if p = 0 then
+        begin
+        word:= rest;
+        rest:= ''
+        end
+    else
+        begin
+        word:= Copy(rest, 1, p - 1);
+        rest:= Copy(rest, p + 1, Length(rest) - p)
+        end;
+    // pas2c has no three-argument Val, so check the digits here (a leading minus is allowed)
+    if Length(word) = 0 then
+        exit;
+    for p:= 1 to Length(word) do
+        if not (((word[p] >= '0') and (word[p] <= '9')) or ((p = 1) and (word[p] = '-') and (Length(word) > 1))) then
+            exit;
+    v[i]:= StrToInt(word);
+    end;
+SetLiveVolume(v[0], v[1], v[2], v[3] <> 0);
+end;
+
+// --pause-menu: a press on the pause screen's buttons (touch): 'q' is Quit game, 'o' is Options. The launcher gets IPC 'k' and
+// passes it to the app, which shows the same question as Back (or the options). Only while the game is paused.
+procedure chPauseMenu(var s: shortstring);
+begin
+if cPauseMenu and isPaused and ((s = 'q') or (s = 'o')) then
+    SendIPC('k' + s);
+end;
+
+// The touchlayout command (the app's controls editor, launcher channel only, never chat): 'touchlayout <spec>' applies a layout at
+// once, 'touchlayout' alone puts the default back, and 'touchlayout ?' only reports the current places (IPC 'T', see ReportTouchLayout).
+procedure chTouchLayout(var s: shortstring);
+begin
+if s = '?' then
+    ReportTouchLayout
+else
+    SetTouchLayout(s);
+end;
+
 // Network games: the launcher pauses ('1') or resumes ('0') this engine when the relay says the host did. A real pause
 // (game time stops, the Paused banner shows), not the AFK toggle. Game time only moves by ticks, never by the wall
 // clock, so pausing at different moments on each phone cannot change what any phone computes.
@@ -1135,6 +1185,9 @@ begin
     RegisterVariable('netwatch', @chNetWatch     , true );
     RegisterVariable('netpause', @chNetPause     , true );
     RegisterVariable('netpausereq', @chNetPauseReq, true );
+    RegisterVariable('livevolume', @chLiveVolume, false);  // only the launcher's trusted channel (never chat)
+    RegisterVariable('pausemenu', @chPauseMenu, false);    // only the touch controls (trusted) and the launcher
+    RegisterVariable('touchlayout', @chTouchLayout, false); // only the launcher's trusted channel (never chat)
     RegisterVariable('+cur_u'  , @chCurU_p       , true );
     RegisterVariable('-cur_u'  , @chCurU_m       , true );
     RegisterVariable('+cur_d'  , @chCurD_p       , true );

@@ -7,5 +7,5 @@ T="$BUILD_DIR/config-test"
 JSRC="$HOST_DIR/app/src/main/java/org/hedgewars/android"
 rm -rf "$T"; mkdir -p "$T"
 javac -d "$T" "$JSRC/GameConfig.java" "$JSRC/GameData.java" "$JSRC/Rules.java" "$JSRC/SchemeData.java" \
-  "$JSRC/SetupModel.java" "$JSRC/Options.java" "$HOST_DIR/native/host-test/ConfigCheck.java"
+  "$JSRC/SetupModel.java" "$JSRC/Options.java" "$JSRC/TouchLayout.java" "$HOST_DIR/native/host-test/ConfigCheck.java"
 java -cp "$T" ConfigCheck "$BUILD_DIR/assets/Data" "$HW_ENGINE_DIR"

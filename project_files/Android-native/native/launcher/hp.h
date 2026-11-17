@@ -25,6 +25,14 @@ int hp_ipc_end_for_everyone(void);
 /* A network game: the app is in the background (hidden != 0, control frame H) or in front again (0, control frame V). */
 int hp_ipc_hidden(int hidden);
 
+/* The pause screen's buttons (--pause-menu): called from the server thread with 'q' (Quit game) or 'o' (Options). Optional. */
+void hp_ipc_set_pause_menu_handler(void (*handler)(int action));
+/* The controls editor (--touch-layout): called from the server thread for each control's place the engine reports (IPC 'T', e.g.
+ * "fire:0.920,0.850,1.000,0.120,0.210"). entry is not NUL-terminated; len is its length. Optional. */
+void hp_ipc_set_touch_layout_handler(void (*handler)(const char *entry, int len));
+/* Sends one console command to the engine, e.g. "livevolume 128 100 50 0". Returns 0 when it was written. */
+int hp_ipc_engine_command(const char *cmd);
+
 #ifdef HP_HOST_TEST
 /* Test hook for the host test: send one message to the engine, e.g. "Fteamname". Returns 0 when sent. */
 int hp_ipc_send(const char *payload);

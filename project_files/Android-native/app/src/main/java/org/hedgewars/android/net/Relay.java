@@ -2692,7 +2692,11 @@ public final class Relay {
             for (Player q : live) if (q.id != g.lastSender) { if (culprit == null) culprit = q; else return null; }
             return culprit;
         }
-        return players.get(g.lastSender);
+        Player last = players.get(g.lastSender);
+        // A phone that is still catching up after a rejoin is waiting for its own teams (they are sat out until its engine answers):
+        // the silence rule does not blame it. The wait is bounded by backWaitMs, then the relay stops asking as before.
+        if (last != null && last.catchUp) return null;
+        return last;
     }
 
     /**

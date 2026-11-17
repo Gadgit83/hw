@@ -58,6 +58,12 @@
 #   watchpause  two phones and a watching phone; the host pauses; the watcher cannot pause or resume, its engine follows the host
 #   malformed   no engines: hostile and malformed input to the relay (JSON bombs, huge lines, bad UTF-8, bad WebSocket
 #               frames, hostile team fields, silence-rule arming, host role, caps); the relay must stay up
+#   hostalone-ai<s>, hostalone-human<s>  the host plays alone (its human team and two computer teams, 2 hogs each, turn time 15 s) and
+#               leaves for good during a computer team's turn (ai) or its own human team's turn (human), comes back on its loopback seat
+#               after <s> seconds (3, 7 or 85). The game is held while it is away and must go on to a normal end, 0 desync.
+#               Add "slow" (hostalone-ai3slow, hostalone-human3slow): the rejoining engine loads for 20 s before it links to the relay
+#               and hands its replay late (HP_NET_RX_DELAY_MS, the first 450 messages), as a Moto G6 does. Before the fix this dropped
+#               the phone ("no messages for 20 s while it was the one expected to play") and its teams never came back.
 #   all         every scenario above in turn, with a summary at the end
 # Exit status: 0 only if the scenario passed. A positive scenario fails on any "Desync detected", "Unexpected protocol"
 # or engine queue error, a non-zero engine exit (except the victim's), differing per-turn checksums, differing relay and

@@ -180,6 +180,13 @@ public class NetHarness {
             hostModel.rules.value[Rules.V_DEATH_BOOM] = 300;
             hostModel.rules.value[Rules.V_AIM_HELPER] = 2;
         }
+        // hostalone-ai<s> / hostalone-human<s>: the host plays alone (its human team and two computer teams, 2 hogs each), turn time 15 s.
+        // It leaves for good during a computer team's turn (ai) or during its own human team's turn (human), and comes back on its own
+        // loopback seat after <s> seconds (3, 7 or 85). The game is held while it is away and must go on to a normal end.
+        final boolean soloHost = scenario.startsWith("hostalone");
+        final boolean soloAi = scenario.startsWith("hostalone-ai");
+        final long soloAwayMs = soloHost ? Long.parseLong(scenario.replaceAll("\\D", "")) * 1000 : 0;
+        if (soloHost) hostModel.rules.value[Rules.V_TURN_TIME] = 15;
         boolean watchScen = scenario.startsWith("watch");
         if (scenario.equals("viewer3") || scenario.equals("viewerflap") || (watchScen && !scenario.equals("watchpause"))) {
             // a short game that still reaches a normal game over: little health, short turns
@@ -192,13 +199,13 @@ public class NetHarness {
         aTeams.add(team(d, rnd, "Alpha Bot", 1, 5, aTeams));
         bTeams.add(team(d, rnd, "Bravo One", 0, 0, bTeams));        // same colour as Alpha One on purpose
         bTeams.add(team(d, rnd, "Bravo Bot", 2, 3, bTeams));
-        if (scenario.equals("solo") || scenario.startsWith("viewer1") || scenario.equals("viewer3") || scenario.equals("viewerflap") || (watchScen && !scenario.equals("watchpause"))) { aTeams.add(team(d, rnd, "Alpha Three", 3, 4, aTeams)); bTeams.clear(); }
+        if (scenario.equals("solo") || soloHost || scenario.startsWith("viewer1") || scenario.equals("viewer3") || scenario.equals("viewerflap") || (watchScen && !scenario.equals("watchpause"))) { aTeams.add(team(d, rnd, "Alpha Three", 3, 4, aTeams)); bTeams.clear(); }
         java.util.Set<String> known = new java.util.HashSet<>(java.util.Arrays.asList("basic", "basic3", "dropout", "dropout3", "stall",
                 "slowstart", "solo", "viewer1", "viewer2", "viewer3", "viewerflap", "hostquit", "joinerquit", "hostquitchat", "joinerquitchat", "negcontrol", "injecte",
                 "rejoin", "rejoinlate", "hostleave", "hostend", "lonerejoin", "lonerejoinb", "lonerejoinc",
                 "hostpause", "hostpausequit", "joinerpause", "pausecap", "watch1", "watchlate", "watchflap", "watchsend", "watchpause", "hidden", "settings"));
         expectSettings = scenario.equals("settings");
-        if (!known.contains(scenario)) {
+        if (!known.contains(scenario) && !scenario.matches("hostalone-(ai|human)\\d+(slow)?")) {
             System.out.println("[harness] unknown scenario '" + scenario + "'; known: " + new java.util.TreeSet<>(known));
             System.exit(2);
         }
@@ -307,7 +314,9 @@ public class NetHarness {
         final String loneQ1 = "0:waitfile:" + root.resolve("lone1.now") + ";0:userquit", loneQ2 = "0:waitfile:" + root.resolve("lone2.now") + ";0:userquit";
         // The host's engine is paused first (it sends nothing, so it cannot hand B its teams while B replays), then it leaves once B has its start.
         final String loneCQuitA = "0:waitfile:" + root.resolve("lone0.now") + ";0:ipc:enetpause 1;0:waitfile:" + root.resolve("lone2.now") + ";800:userquit";
-        Phone pa = new Phone("Phone A", root.resolve("phoneA"), true, aTeams, hosttest, data, loneC ? loneCQuitA : lone ? (loneHostBack ? loneQ2 : loneQ1)
+        // hostalone: the host leaves for good (Back > Leave the game) when the harness flags it, and its engine plays no input before that
+        final String soloQuit = "0:waitfile:" + root.resolve("lone1.now") + ";0:userquit";
+        Phone pa = new Phone("Phone A", root.resolve("phoneA"), true, aTeams, hosttest, data, loneC ? loneCQuitA : soloHost ? soloQuit : lone ? (loneHostBack ? loneQ2 : loneQ1)
                 : (hostLeave || scenario.equals("hostend")) ? quitScript : hostScript);
         Phone pb = new Phone("Phone B", root.resolve("phoneB"), false, bTeams, hosttest, data, loneC ? loneQ1 : lone ? (loneHostBack ? loneQ1 : loneQ2)
                 : scenario.startsWith("joinerquit") ? quitScript : joinerScript);
@@ -403,7 +412,7 @@ public class NetHarness {
         int turnsAtQuit = -1;
         final boolean closeProbeScen = scenario.equals("hostleave") || scenario.equals("hostend");
         while (System.currentTimeMillis() - t0 < timeout * 1000) {
-            if ((lone && back != null ? back : pa).gotSummary.await(1, TimeUnit.SECONDS)) break;
+            if (((lone || soloHost) && back != null ? back : pa).gotSummary.await(1, TimeUnit.SECONDS)) break;
             if (closeProbeScen && probe == null && relay.viewerPort() > 0 && relay.turns() >= 1) {
                 probe = CloseProbe.start(relay.viewerPort());
                 System.out.println("[harness] === a WebSocket probe (a TV) connects after " + relay.turns() + " turn checksums; it must see the right close code at the end ===");
@@ -501,6 +510,37 @@ public class NetHarness {
                             + turnsAtReturn + " turn checksums so far ===");
                 }
             }
+            if (soloHost) {
+                // The leave is timed by the turn order: the clans take turns round the table, the human team (the first one added) has
+                // every third turn (turn n, counted by the turn checksums so far, is the human team's when n % 3 == 0). The leave waits for
+                // the phase asked for, so the host's engine is quit in the middle of that team's turn.
+                long nowMs = System.currentTimeMillis();
+                boolean humanNext = relay.turns() % 3 == 0;
+                if (loneStage == 0 && relay.turns() >= killAfterTurns && humanNext == !soloAi) {
+                    flag(root, "lone1.now");
+                    loneStage = 1;
+                    turnsAtLone1 = relay.turns();
+                    loneSince = nowMs;
+                    System.out.println("[harness] === " + scenario + ": the host leaves for good (Back > Leave the game) during "
+                            + (soloAi ? "a computer team's" : "its own human team's") + " turn, after " + turnsAtLone1 + " turn checksums ===");
+                } else if (loneStage == 1 && nowMs - loneSince >= soloAwayMs) {
+                    turnsAtReturn = relay.turns();
+                    back = new Phone("Phone A2", root.resolve("phoneA2"), true, aTeams, hosttest, data, hostScript);
+                    back.client = new RelayClient("127.0.0.1", relay.port(), "Phone A", "harness", true, aTeams, back)
+                            .hostSecret(cfg.hostSecret).identity(org.hedgewars.android.net.Compat.VALUE, digest).rejoin(pa.rejoinToken);
+                    // hostalone-...slow: the returning engine replays the game slowly (the launcher hands it each message late, HP_NET_RX_DELAY_MS)
+                    // ...and its engine loads for NET_START_DELAY_MS (default 20 s) before it links to the relay, as a Moto G6 does (25 s to load a game).
+                    if (scenario.endsWith("slow")) {
+                        back.extraEnv.put("HP_NET_RX_DELAY_MS", System.getenv().getOrDefault("NET_RX_DELAY_MS", "60"));
+                        back.extraEnv.put("HP_NET_RX_DELAY_N", System.getenv().getOrDefault("NET_RX_DELAY_N", "450"));
+                        back.extraEnv.put("HP_NET_START_DELAY_MS", System.getenv().getOrDefault("NET_START_DELAY_MS", "20000"));
+                    }
+                    back.client.connect();
+                    loneStage = 3;
+                    System.out.println("[harness] === " + scenario + ": the host comes back alone on its loopback seat " + (nowMs - loneSince) / 1000
+                            + " s after it left, " + turnsAtReturn + " turn checksums so far, during " + (relay.turns() % 3 == 0 ? "a human" : "a computer") + " team's turn ===");
+                }
+            }
             if (wantViewer && relay.viewerPort() > 0) {
                 int n = runs.size();
                 if (cur == null) {
@@ -580,7 +620,7 @@ public class NetHarness {
                 else victim.proc.destroyForcibly();
             }
         }
-        boolean over = (lone && back != null ? back : pa).gotSummary.getCount() == 0;
+        boolean over = ((lone || soloHost) && back != null ? back : pa).gotSummary.getCount() == 0;
         List<Phone> everyone = new ArrayList<>(java.util.Arrays.asList(players));
         everyone.addAll(watchers);
         if (pb2 != null && pb2.proc != null) everyone.add(pb2);
@@ -688,10 +728,10 @@ public class NetHarness {
         byte[] vb = relay.viewerBacklog();
         System.out.println("viewer backlog framing available after the game: " + (vb == null ? "no (game cleared)" : vb.length + " bytes"));
 
-        if (lone) {
+        if (lone || soloHost) {
             // The game must be held while every phone is away, and the phone that comes back must get its teams back and play on to a normal end.
             List<String> lf = new ArrayList<>();
-            String seat = loneHostBack ? "Phone A" : "Phone B";
+            String seat = loneHostBack || soloHost ? "Phone A" : "Phone B";
             boolean held = false, rejoinedEv = false, askedEv = false, teamsBackEv = false, gaveUpEv = false;
             for (String e : gs.events) {
                 if (e.startsWith("every player is away")) held = true;
@@ -736,7 +776,7 @@ public class NetHarness {
                 if (ex == null || ex != 0) lf.add(p.name + ": engine exit code " + ex + " (expected 0)");
                 // The seat that came back has its stream totals reset at the rejoin (the relay counts what the new engine got), so the
                 // first engine of that seat is not compared; the coming-back engine is, and it must equal the relay's count.
-                if (back != null && p == (loneHostBack ? pa : pb)) continue;
+                if (back != null && p == (loneHostBack || soloHost ? pa : pb)) continue;
                 if (!Boolean.TRUE.equals(streamOk.get(p.name))) lf.add(p.name + ": the relay's stream and the launcher's received stream differ");
             }
             System.out.println("\nlone check: " + seat + " back alone: held " + held + ", rejoined " + rejoinedEv + ", teams asked " + askedEv + ", teams back " + teamsBackEv

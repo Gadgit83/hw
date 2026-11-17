@@ -472,6 +472,18 @@ static void *down_thread(void *arg)
             if (++g_rx_dropped <= 10) diag("RX DROPPED a relay message of type 0x%02x ('%c', %u bytes): not on the whitelist", msg[0], msg[0] >= 32 && msg[0] < 127 ? msg[0] : '?', (unsigned)len);
             continue;
         }
+        /* Test hook (HP_NET_RX_DELAY_MS, set only by the host tests): hand each game message to the engine this late, to imitate a
+           phone whose engine is slow to replay the game it rejoins (the relay's silence rule must not blame it meanwhile). */
+        {
+            /* Only the first HP_NET_RX_DELAY_N messages (the replay of the game so far) are slowed; the rest of the game runs at speed. */
+            static int rx_delay_ms = -1, rx_delay_n = 0, rx_seen = 0;
+            if (rx_delay_ms < 0) {
+                const char *d = getenv("HP_NET_RX_DELAY_MS"), *n = getenv("HP_NET_RX_DELAY_N");
+                rx_delay_ms = d ? atoi(d) : 0;
+                rx_delay_n = n ? atoi(n) : 1000000;
+            }
+            if (rx_delay_ms > 0 && rx_seen < rx_delay_n) { rx_seen++; usleep((useconds_t)rx_delay_ms * 1000u); }
+        }
         unsigned char frame[257];
         frame[0] = len;
         memcpy(frame + 1, msg, len);
@@ -708,6 +720,12 @@ static void *server_thread(void *arg)
             if (g_net && g_net_pending) {
                 /* The setup has been delivered: now join the game through the relay. */
                 g_net_pending = 0;
+                /* Test hook (HP_NET_START_DELAY_MS, set only by the host tests): the engine takes this long to load the game before it
+                   links to the relay, as a slow phone does (the relay sees the seat away until then). */
+                {
+                    const char *sd = getenv("HP_NET_START_DELAY_MS");
+                    if (sd && atoi(sd) > 0) usleep((useconds_t)atoi(sd) * 1000u);
+                }
                 if (net_connect()) {
                     if (g_error_handler) g_error_handler("Could not connect the game to the host (see the log).");
                     break;

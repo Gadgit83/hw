@@ -812,7 +812,8 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
         }
         String phase = st == null ? "connecting..." : Json.str(st, "state", "");
         boolean playing = "playing".equals(phase) || NetSession.inGame;
-        card.addView(ui.hint("State: " + (playing ? "game running" : "lobby (setting up)")));
+        // Until the relay has said what the game is doing this is "connecting...", never a lobby (a rejoin starts with no state at all).
+        card.addView(ui.hint("State: " + (st == null ? "connecting..." : playing ? "game running" : "lobby (setting up)")));
         // A watcher whose game is over (it asked to watch after the game ended, or it was ended while it watched) is told so, and why.
         if (NetSession.watching && !playing && !NetSession.lastEndReason.isEmpty()) {
             card.addView(ui.heading("The game ended"));
@@ -867,16 +868,15 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
                 RelayClient c = NetSession.client;
                 if (c != null) c.rejoinNow();
             }), ui.margins(full(), 6, 0, 0, 4));
-        } else if (!NetSession.watching && !host && (iGaveUp || NetSession.offersWatch(NetSession.notice))) {
-            // Whatever offers watching comes with this button, while a game runs or after it ended (the notice stays on the screen):
-            // the given-up notice, a refused rejoin. It joins as a watcher; the relay sends the running game or the last summary.
-            if (iGaveUp && NetSession.notice.isEmpty()) card.addView(coloured(Relay.GAVE_UP_TEXT, Ui.ACCENT));
-            card.addView(ui.button("Watch the game", true, v -> {
-                final String h = NetSession.lastHostName;
-                final int pt = NetSession.lastPort;
-                leaveOrStop();
-                if (!h.isEmpty()) connectTo(h, pt, true);
-            }), ui.margins(full(), 6, 0, 0, 4));
+        }
+        // Whatever offers watching comes with this button: a game running that this phone is not playing in (away, gave up, or a
+        // joiner who arrived late), and the lines that offer it after the game ended (the notice stays on the screen). It joins as a
+        // watcher; the relay sends the running game or the last summary. A hosting phone watches over its own loopback relay, so
+        // its hosting goes on.
+        boolean playingHere = playing && NetSession.inGame && !iAmAway && !iGaveUp;
+        if (NetSession.offerWatch(NetSession.watching, playingHere, playing, iGaveUp, NetSession.notice)) {
+            if (iGaveUp && NetSession.notice.isEmpty()) card.addView(coloured(host ? Relay.GAVE_UP_HOST_TEXT : Relay.GAVE_UP_TEXT, Ui.ACCENT));
+            card.addView(ui.button("Watch the game", true, v -> watchTheGame()), ui.margins(full(), 6, 0, 0, 4));
         }
         if (host) {
             boolean can = st != null && Json.bool(st, "canStart", false) && !playing;
@@ -895,7 +895,8 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
                 }
             });
             start.setEnabled(can);
-            buttons.addView(start, ui.weight(1f));
+            // No Start while the game runs or before the relay has said what the game is: the lobby would be a stale guess.
+            if (!playing && st != null) buttons.addView(start, ui.weight(1f));
         } else if (NetSession.watching) {
             // A watching phone has no teams to ready. Between games it simply waits for the host's Start; if a game runs and this phone
             // is not in it (it stopped watching, or joined while the host's game was starting), it can watch the running game.
@@ -1103,6 +1104,38 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
                 NetSession.ping();
             }
         }, "join").start();
+    }
+
+    /** "Watch the game": a joiner leaves its seat and joins as a watcher; a hosting phone watches its own game over loopback (not stopped). */
+    private void watchTheGame() {
+        final String h = NetSession.lastHostName;
+        final int pt = NetSession.lastPort;
+        if (NetSession.hosting) {
+            watchOwnGame(pt);
+            return;
+        }
+        leaveOrStop();
+        if (!h.isEmpty()) connectTo(h, pt, true);
+    }
+
+    private void watchOwnGame(final int port) {
+        if (connecting) return;
+        final String nick = name.isEmpty() ? PlayerNames.current(this) : name;
+        connecting = true;
+        problem = "";
+        new Thread(() -> {
+            try {
+                NetSession.watchOwnHostedGame(getApplicationContext(), nick, port);
+            } catch (NetSession.Cancelled e) {
+                // given up on purpose: nothing to report
+            } catch (Exception e) {
+                problem = "Could not watch: " + e.getMessage();
+            } finally {
+                connecting = false;
+                changed();
+                NetSession.ping();
+            }
+        }, "watch-own").start();
     }
 
     private void leaveOrStop() {

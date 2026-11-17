@@ -989,7 +989,13 @@ begin
                 AddChatString(#8 + Format('* '+shortstring(trmsg[sidTeamBack]), TeamName));
                 // A phone that came back alone answers for its own team: all its teams are driven from outside, so none of them is
                 // in play to answer (issue 22). Only that phone, and only when the relay says it is alone (LoneBack).
-                if (not CurrentTeam^.ExtDriven) or (LoneBack and (Owner = UserNick)) then SendIPC(_S'g' + s);
+                if (not CurrentTeam^.ExtDriven) or (LoneBack and (Owner = UserNick)) then
+                    begin
+                    SendIPC(_S'g' + s);
+                    // A lone phone's engine drives every team from outside, so the game loop never flushes its send buffer: the answer
+                    // would wait there for good and the relay would never get the team back. It goes out now (LoneBack only).
+                    if LoneBack then FlushMessages(cNetFlushMs)
+                    end;
                 hasGone:= false;
 
                 RecountTeamHealth(TeamsArray[t]);

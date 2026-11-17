@@ -41,7 +41,7 @@ public final class Rules {
         "Death explosion size (%)", "Terrain destruction (%)", "Aim helper",
     };
 
-    /** Allowed range of each number (entries 26 to 45), as in the Qt scheme editor. The last two are not in the Qt scheme. */
+    /** Allowed range of each number (entries 26 to 46), as in the Qt scheme editor. The last three are not in the Qt scheme. */
     public static final int[][] VALUE_RANGE = {
         { 10, 300 }, { 1, 9999 }, { 1, 1000 }, { 0, 51 }, { 0, 9 }, { -1, 5 }, { 0, 200 }, { 0, 100 },
         { 0, 200 }, { 0, 200 }, { 0, 200 }, { 0, 100 }, { 0, 1000 }, { 0, 100 }, { 0, 1000 }, { 25, 999 },

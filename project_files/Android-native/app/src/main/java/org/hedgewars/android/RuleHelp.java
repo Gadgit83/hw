@@ -49,6 +49,10 @@ final class RuleHelp {
         put("value.42", "The time a hedgehog has to get away after attacking, in percent of the normal time.");
         put("value.43", "What happens at the left and right edges of the map: None (a wall), Wrap (the map joins up), "
                 + "Bounce (edges reflect) or Sea (edges meet the sea).");
+        put("value.44", "How big the blast is when a hedgehog dies, in percent of the normal size. 100% is the classic game.");
+        put("value.45", "How much land an explosion removes, in percent of the normal amount. Damage to hedgehogs is unchanged.");
+        put("value.46", "Shows the path of the shot while you aim: Off, Short (the first 40% of the path) or Full. "
+                + "It applies to everyone in a network game.");
 
         // More rules: the switches (Rules.FLAG_LABELS, entries 1 to 25).
         put("flag.1", "The hedgehog that acts at the start of each turn is chosen by the player, not taken in order.");

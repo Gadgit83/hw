@@ -202,6 +202,58 @@ public class LaunchSmokeTest {
         }
     }
 
+    /**
+     * Every setting row on the Rules tab, the hidden "More rules" section included, has an info button: a row with a stepper
+     * or a choice button but no "About ..." button fails, so a new setting cannot ship without its explanation on screen.
+     */
+    @Test
+    public void rules_everyRowHasInfoButton() throws Exception {
+        TestSupport.installData(app());
+        prefsInt("tab", 2);
+        ActivityController<MainActivity> ctl = Robolectric.buildActivity(MainActivity.class).create().start().postCreate(null).resume().visible();
+        MainActivity a = ctl.get();
+        a.onWindowFocusChanged(true);
+        TestSupport.layout(a);
+        TestSupport.settle(1500);
+        TestSupport.layout(a);
+        View decor = a.getWindow().getDecorView();
+        java.util.List<String> missing = new java.util.ArrayList<>();
+        int[] rows = { 0 };
+        checkSettingRows(decor, missing, rows);
+        android.widget.Button more = (android.widget.Button) TestSupport.find(decor, "More rules");
+        assertNotNull("the Rules tab has a More rules button", more);
+        more.performClick();
+        TestSupport.settle(300);
+        TestSupport.layout(a);
+        checkSettingRows(a.getWindow().getDecorView(), missing, rows);
+        assertTrue("the setting rows were checked (" + rows[0] + ")", rows[0] >= 20);
+        assertTrue("settings without an info button: " + missing, missing.isEmpty());
+        ctl.pause().stop().destroy();
+    }
+
+    private static void checkSettingRows(View v, java.util.List<String> missing, int[] rows) {
+        if (!(v instanceof android.view.ViewGroup)) return;
+        android.view.ViewGroup g = (android.view.ViewGroup) v;
+        boolean info = false, control = false;
+        String label = "";
+        for (int i = 0; i < g.getChildCount(); i++) {
+            View c = g.getChildAt(i);
+            if (c instanceof Ui.Glyph && String.valueOf(c.getContentDescription()).startsWith("About ")) info = true;
+            if (c instanceof android.widget.Button) {
+                String t = String.valueOf(((android.widget.Button) c).getText());
+                if (t.equals("+") || t.endsWith("\u25be")) control = true;
+            }
+            if (label.isEmpty() && c instanceof android.widget.TextView && !(c instanceof android.widget.Button)) {
+                label = String.valueOf(((android.widget.TextView) c).getText());
+            }
+        }
+        if (control) {
+            rows[0]++;
+            if (!info) missing.add(label.isEmpty() ? "(unnamed row)" : label);
+        }
+        for (int i = 0; i < g.getChildCount(); i++) checkSettingRows(g.getChildAt(i), missing, rows);
+    }
+
     // Held upright (the menus follow the rotation; the game stays sideways) ------------------------
 
     /** Every tab of the Setup screen opens upright on a 360 dp wide phone, with the header, tabs, Start and Options on screen. */
@@ -673,6 +725,57 @@ public class LaunchSmokeTest {
         local.finish();
         assertNull("a local game finishes as before", org.robolectric.Shadows.shadowOf(local).getNextStartedActivity());
         System.out.println("SDK " + android.os.Build.VERSION.SDK_INT + ": network game returns to the lobby ok");
+    }
+
+    /**
+     * The in-game Options dialog on a small landscape phone (the Moto G6: 640 x 360 dp): the Mute switch keeps its full height,
+     * and the Controls layout button lies inside the dialog's scroll view, reachable by scrolling to the bottom.
+     */
+    @Test
+    public void gameOptions_smallLandscape_controlsLayoutReachable() throws Exception {
+        RuntimeEnvironment.setQualifiers("w640dp-h360dp-land-xxhdpi");
+        try {
+            GameActivity g = gameActivity();
+            g.pauseMenuAction(GameActivity.PAUSE_OPTIONS);
+            TestSupport.settle(300);
+            android.app.AlertDialog d = org.robolectric.shadows.ShadowAlertDialog.getLatestAlertDialog();
+            assertTrue("the Options dialog is up", d != null && d.isShowing());
+            View decor = d.getWindow().getDecorView();
+            android.util.DisplayMetrics dm = g.getResources().getDisplayMetrics();
+            int w = dm.widthPixels, h = dm.heightPixels;
+            decor.measure(View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(h, View.MeasureSpec.EXACTLY));
+            decor.layout(0, 0, w, h);
+            TestSupport.settle(100);
+            android.widget.Switch mute = (android.widget.Switch) TestSupport.find(decor, "Mute all sound and music");
+            assertNotNull("the Mute switch is in the dialog", mute);
+            assertTrue("the Mute switch keeps its height (" + mute.getHeight() + " px)", mute.getHeight() >= 40 * dm.density);
+            android.widget.Button controls = (android.widget.Button) TestSupport.find(decor, "Controls layout");
+            assertNotNull("the Controls layout button is in the dialog", controls);
+            // the scroll view that holds the rows: the nearest one above the Controls layout button
+            android.widget.ScrollView sv = null;
+            for (View p = (View) controls.getParent(); p != null && sv == null; p = p.getParent() instanceof View ? (View) p.getParent() : null) {
+                if (p instanceof android.widget.ScrollView) sv = (android.widget.ScrollView) p;
+            }
+            assertNotNull("the Options rows are in a scroll view", sv);
+            int top = offsetIn(controls, sv);
+            sv.scrollTo(0, Math.max(0, top + controls.getHeight() - sv.getHeight()));
+            int visibleTop = top - sv.getScrollY();
+            assertTrue("the Controls layout button is in the visible part after scrolling: y " + visibleTop + " of " + sv.getHeight(),
+                    visibleTop >= 0 && visibleTop + controls.getHeight() <= sv.getHeight());
+            d.dismiss();
+        } finally {
+            RuntimeEnvironment.setQualifiers(TestSupport.QUALIFIERS);
+        }
+    }
+
+    /** The top edge of a view inside an ancestor, in the ancestor's coordinates. */
+    private static int offsetIn(View v, View ancestor) {
+        int y = 0;
+        while (v != ancestor) {
+            y += v.getTop();
+            v = (View) v.getParent();
+        }
+        return y;
     }
 
     /** Writes the role of this phone's network game the way the Network screen does (net.cfg); "player" is a joined phone. */

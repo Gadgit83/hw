@@ -5,6 +5,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.view.KeyEvent;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.view.ViewGroup;
 
 import org.libsdl.app.SDLActivity;
@@ -191,9 +192,13 @@ public class GameActivity extends SDLActivity {
             if (optionsDialog != null) optionsDialog.dismiss();
             openControlsLayout();
         }), ui.margins(Ui.lp(ViewGroup.LayoutParams.WRAP_CONTENT, ui.dp(Ui.TOUCH_DP)), 0, 8, 0, 0));
+        // A scroll view, so a short landscape screen (the Moto G6) shows every row: the dialog would otherwise squeeze the rows
+        // (the Mute switch shrank to "OFF") and cut off the Controls layout button and the hint.
+        ScrollView scroll = new ScrollView(this);
+        scroll.addView(body);
         optionsDialog = Ui.dialog(this)
                 .setTitle("Options")
-                .setView(body)
+                .setView(scroll)
                 .setPositiveButton("Done", null)
                 .setOnDismissListener(d -> Store.saveOptions(this, options))
                 .create();

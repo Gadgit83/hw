@@ -181,6 +181,14 @@ public class ControlsLayoutView extends FrameLayout {
         return new RectF(cx - hw, cy - hh, cx + hw, cy + hh);
     }
 
+    /** The outline of a control on the screen (for the tests), or null when the editor does not have that control. */
+    RectF outlineOf(String name) {
+        for (Ctl c : controls) {
+            if (c.name.equals(name)) return rect(c);
+        }
+        return null;
+    }
+
     private boolean onHandle(Ctl c, float x, float y) {
         RectF r = rect(c);
         float reach = 26 * density;

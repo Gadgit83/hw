@@ -4,21 +4,45 @@ All notable changes to the native Android app (`project_files/Android-native`), 
 
 Only some builds were put on a phone, so a version below is a build that was made, not necessarily one that was released. Releases are tags on `android-master` with the APK attached; there is none yet.
 
-## Unreleased: finding hosts when NSD misses them (issue #15)
+## 0.3.0-tv17 (121): issues 2 to 26
 
-### Fixed
-
-- Find games: a phone whose NSD search finds no host after 3 s (a VPN on the default network, or multicast filtered) also probes its Wi-Fi (or Ethernet) subnet for hosts on the phone port, bound to the Wi-Fi network. Hosts found both ways are listed once. The search log says when the probe starts, each host it finds, and when it ends.
-
-## Unreleased: quicker and smarter computer players
+`HP_PROFILE=test`, versionName `0.3.0-tv17-test`. Each change is listed under the issue it answers. Engine changes are commits on `android-master` of https://github.com/Gadgit83/hw.
 
 ### Added
 
-- Options, Display and controls: **Computer players**, Quick and smart (the default) or Classic. Quick and smart pass `--quick-ai --smart-ai` to the engine.
-  - `--quick-ai`: no 700 ms pause before a computer turn's first move, a think of at most 3 s (9 s before), and fewer weapon tests while walking, with a walk budget of 6 s.
-  - `--smart-ai`: a computer team is less likely to repeat one of its last shots, and when its best shot is weak (under 10 points of damage) it tests the rare weapons too and keeps walking past the bonus crates.
-  - Without the options the engine plays as it did before.
-- Host test scenario `ai4`: two computer teams at level 4.
+- #2 Team dice: a team of each side is picked by dice in every game, and the Back question is asked in every game (#19).
+- #3 Death explosion size and #6 terrain destruction: Rules tab settings (`e$deathboompct`, `e$landboompct`, percent, 100 is unchanged). Default games send neither line.
+- #4 Swap Fire and Jump, #5 forward jump, #10 two jump buttons: touch options. With one jump button, Jump does the long forward jump while a left or right move is held (`--jump-forward-when-moving`). A second High jump button (`--two-jump-buttons`) and the swap (`--swap-fire-jump`) are options. Defaults are as before, except that the jump inset and the forward jump are on (see #24).
+- #7 Weapon refresh: at the start of a turn the aim buttons show the weapon of that hedgehog and mark it in the drawer (`--refresh-weapon-ui`, always on).
+- #8 Rule help: every setting on the Rules tab explains what it does.
+- #9 Pause menu: the touch pause screen has Quit game and Options (`--pause-menu`). Options can be changed during a game.
+- #11 and #12 Computer players: Options, Computer players, Quick and smart (the default) or Classic. Quick and smart pass `--quick-ai --smart-ai`:
+  - quick: no artificial pause before a computer turn's first move (the thinking time is unchanged);
+  - smart: computer players vary their weapons, walk on when the best shot is weak, and walk towards an enemy when they stay put.
+- #13 Aim helper: an opt-in preview of the flight of a ballistic shot (`e$aimhelper`: 0 off, 1 short, 2 full; display only).
+- #14 and #15 Network: joins and hosting use the Wi-Fi network with a VPN on, and Options has a Network to use choice. Find games also scans the Wi-Fi subnet (see below).
+- #16 Teams: a joiner plays with one team, and the host can remove a joiner.
+- #21 Prefilled join address: the Join by address field starts with the phone's own Wi-Fi prefix, or the last address used.
+- #22 Lone rejoin and Watch the game: a lone player can rejoin a running game, and the Network screen has a Watch the game button (`loneback` engine command).
+- #23 Join to watch: a phone can join a running or ended game as a watcher.
+- #26 Controls layout editor: from the pause Options, drag and resize the controls, then Save or Cancel. The layout goes to the engine (`--touch-layout`, `touchlayout`).
+- #20 Portrait: the menus work held upright as well as sideways.
+- #19 Back: the Back question is asked in every game, for the phone's role.
+- Host test scenarios: `settings` (the game settings of this build on the wire), `lonerejoin`, `lonerejoinb`, `lonerejoinc`, `hidden`, `watch*`, and the `ai` and `ai4` scenarios.
+
+### Changed
+
+- #24 Jump inset and hiding idle controls: the jump button sits a percent of its own width further in from the right edge (`--jump-inset`), and the controls that do nothing are hidden when it is not this phone's turn (`--hide-idle-controls`). Both are on by default.
+- #25 Weapon drawer follows the finger: the slot under the finger is highlighted, and lifting on a weapon picks it (`--direct-ammo-menu`, always on).
+- #17 Hidden app: a phone that goes to the background is not dropped; it has a return grace when it comes back, and it keeps its silence window while it is hidden (`H` and `V` control frames to the relay). A hidden game plays on after a pause.
+- #18 Leave to the lobby: leaving a network game returns to the Network lobby, which shows the game still running.
+- Menus work held upright as well as sideways (#20).
+- Quick and smart no longer shortens the thinking time of a computer turn (README, #12).
+
+### Fixed
+
+- #15 Find games: a phone whose NSD search finds no host after 3 s (a VPN on the default network, or multicast filtered) also probes its Wi-Fi (or Ethernet) subnet for hosts on the phone port, bound to the Wi-Fi network. Hosts found both ways are listed once. The search log says when the probe starts, each host it finds, and when it ends.
+- #22 A phone still getting its teams back is told it is alone, not left out.
 
 ## 0.3.0-tv16 (120): 32-bit ARM phones; chat line fix (test build)
 

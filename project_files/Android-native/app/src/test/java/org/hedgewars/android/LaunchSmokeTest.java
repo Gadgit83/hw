@@ -852,6 +852,88 @@ public class LaunchSmokeTest {
         System.out.println("SDK " + android.os.Build.VERSION.SDK_INT + ": NetLobbyActivity chooser ok");
     }
 
+    /** A game running on the host: the phone of this test ("Fairphone", id 2) is away, or joins the game (not in it), or plays in it. */
+    private static String runningState(boolean youAway, boolean hostHere) {
+        return "{\"t\":\"state\",\"state\":\"playing\",\"host\":\"Pixel\",\"proto\":1,\"build\":\"0.3.0-mp2\",\"you\":2,"
+                + "\"players\":[{\"id\":1,\"name\":\"Pixel\",\"host\":true,\"ready\":true,\"fg\":true,\"away\":" + (hostHere ? "false" : "true")
+                + ",\"awayLeftMs\":90000,\"teams\":[{\"name\":\"Red Team\",\"color\":0,\"level\":0}]},"
+                + "{\"id\":2,\"name\":\"Fairphone\",\"host\":false,\"ready\":true,\"fg\":true,\"away\":" + (youAway ? "true" : "false")
+                + ",\"awayLeftMs\":60000,\"teams\":[{\"name\":\"Blue Team\",\"color\":1,\"level\":0}]}],"
+                + "\"canStart\":false,\"game\":1,\"watching\":0}";
+    }
+
+    /** The Watch the game button (issue 22, device): offered for a joiner that is away, gave up, or arrived late, and for the host when its seat is out. */
+    @Test
+    public void netLobbyActivity_watchButtonVisibility() throws Exception {
+        TestSupport.installData(app());
+        // away: the Rejoin button and the Watch button are both there
+        netState(runningState(true, true), false);
+        NetSession.inGame = false;
+        String away = launch(NetLobbyActivity.class, null, 600);
+        assertTrue("away: Rejoin and Watch both offered: " + away, away.contains("Rejoin the game") && away.contains("Watch the game"));
+        TestSupport.resetStatics();
+        // a joiner who arrived late (the game runs, this phone is not in it)
+        netState(runningState(false, true), false);
+        NetSession.inGame = false;
+        String late = launch(NetLobbyActivity.class, null, 600);
+        assertTrue("late joiner: Watch offered: " + late, late.contains("Watch the game") && late.contains("State: game running"));
+        TestSupport.resetStatics();
+        // playing in it: no Watch button
+        netState(runningState(false, true), false);
+        NetSession.inGame = true;
+        String playing = launch(NetLobbyActivity.class, null, 600);
+        assertFalse("playing in the game: no Watch: " + playing, playing.contains("Watch the game"));
+        TestSupport.resetStatics();
+        // the host, its own seat out of the game: Watch offered (it watches over its loopback relay)
+        netState(runningState(false, false), true);
+        NetSession.inGame = false;
+        NetSession.gaveUp = true;
+        String host = launch(NetLobbyActivity.class, null, 600);
+        assertTrue("host out of the game: Watch offered: " + host, host.contains("Watch the game"));
+        TestSupport.resetStatics();
+        // a watching phone never offers it again
+        netState(runningState(true, true), false);
+        NetSession.watching = true;
+        NetSession.inGame = true;      // a watcher in the running game: "Watching", not a second Watch button
+        String w = launch(NetLobbyActivity.class, null, 600);
+        assertFalse("already watching: no second Watch button: " + w, w.contains("Watch the game"));
+        TestSupport.resetStatics();
+        System.out.println("SDK " + android.os.Build.VERSION.SDK_INT + ": NetLobbyActivity watch button visibility ok");
+    }
+
+    /** The lobby before the relay has said what the game is (a rejoin starts with no state): no "lobby (setting up)", no Start game. */
+    @Test
+    public void netLobbyActivity_hostWithoutStateShowsNoStaleLobby() throws Exception {
+        TestSupport.installData(app());
+        netState(LOBBY, true);
+        java.lang.reflect.Field f = NetSession.class.getDeclaredField("state");
+        f.setAccessible(true);
+        f.set(null, null);
+        String text = launch(NetLobbyActivity.class, null, 600);
+        assertTrue("connecting, not a lobby: " + text, text.contains("State: connecting..."));
+        assertFalse("no stale lobby label: " + text, text.contains("lobby (setting up)"));
+        assertFalse("no Start game while the state is unknown: " + text, text.contains("Start game"));
+        TestSupport.resetStatics();
+        // a game running on this host: no Start game either
+        netState(runningState(false, true).replace("\"you\":2", "\"you\":1"), true);
+        NetSession.inGame = true;
+        String running = launch(NetLobbyActivity.class, null, 600);
+        assertFalse("a running game has no Start game: " + running, running.contains("Start game"));
+        TestSupport.resetStatics();
+        System.out.println("SDK " + android.os.Build.VERSION.SDK_INT + ": NetLobbyActivity no stale lobby ok");
+    }
+
+    /** The offer rule as a truth table (NetSession.offerWatch). */
+    @Test
+    public void netSession_offerWatchRule() {
+        assertFalse(NetSession.offerWatch(true, false, true, true, ""));                 // already watching
+        assertTrue(NetSession.offerWatch(false, false, true, false, ""));                // away or late: game runs, not in it
+        assertFalse(NetSession.offerWatch(false, true, true, false, ""));                // playing in it
+        assertTrue(NetSession.offerWatch(false, true, true, true, ""));                  // gave up
+        assertFalse(NetSession.offerWatch(false, false, false, false, ""));              // no game, nothing offered
+        assertTrue(NetSession.offerWatch(false, false, false, false, "The game ended. You can watch."));   // a line that offers it
+    }
+
     // Phase 5: finding hosts ----------------------------------------------------------------------------------
 
     private static org.hedgewars.android.net.HostAdvert.Found advert(String service, String host, int port, String compat, String version, String data) {

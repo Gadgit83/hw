@@ -389,6 +389,27 @@ final class NetSession {
     }
 
     /**
+     * Whether the lobby offers "Watch the game": not while this phone is already watching, and whenever a game is running on the host and
+     * this phone is not playing in it (away, gave up, or a joiner who arrived late), or a line on the screen offers watching.
+     */
+    static boolean offerWatch(boolean watching, boolean playingHere, boolean gameRunning, boolean gaveUp, String notice) {
+        if (watching) return false;
+        return (gameRunning && !playingHere) || gaveUp || offersWatch(notice);
+    }
+
+    /**
+     * A hosting phone whose own seat is out of the game watches it over its loopback relay (the relay admits a watcher whose hello is not
+     * flagged as host). The hosting goes on: HostService and its relay are not stopped, and the phone still hosts afterwards.
+     */
+    static void watchOwnHostedGame(Context c, String nick, int port) throws IOException {
+        String pin = hostPin == null ? "" : hostPin;
+        connect(c, "127.0.0.1", port, nick, false, true, pin);
+        synchronized (NetSession.class) {
+            if (client != null) hosting = true;
+        }
+    }
+
+    /**
      * The teams this phone sends in its hello. The host sends every team of its setup (its own and the computer teams). A joining
      * phone sends only its own team ("Your team" on the Network screen). A watcher, or a phone coming back to its seat (the relay
      * keeps its teams), sends none.

@@ -222,6 +222,13 @@ public class ConfigCheck {
             String f = TouchLayout.format(places);
             check(f.equals("fire:0.800,0.620,1.600;jump:1.000,0.200,1.000"), "layout format " + f);
             check(TouchLayout.format(TouchLayout.parse(f)).equals(f), "layout round trip");
+            // the touchlayout command is an IPC 'e' message, at most 254 bytes (hp_ipc_engine_command): a full layout with all ten
+            // controls moved, each number five characters, is 240 characters and 252 with the command name
+            Map<String, double[]> every = new HashMap<>();
+            for (String name : TouchLayout.NAMES) every.put(name, new double[] { 1.0, 1.0, TouchLayout.MAX_SCALE });
+            String full = TouchLayout.format(every);
+            check(full.length() == 240 && ("touchlayout " + full).length() == 252, "full layout length " + full.length());
+            check(("touchlayout " + full).length() <= 254, "full touchlayout command fits the IPC limit");
             check(TouchLayout.sanitize("garbage").isEmpty() && TouchLayout.sanitize(f).equals(f), "sanitize");
             check("highjump".equals(TouchLayout.reportName("highjump:0.5,0.5,1.0,0.1,0.2")), "report name");
             TouchLayout.Place rp = TouchLayout.reportPlace("fire:0.920,0.850,1.000,0.120,0.210");

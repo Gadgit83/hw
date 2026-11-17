@@ -838,7 +838,9 @@ int hp_ipc_engine_command(const char *cmd)
     char buf[256];
     unsigned char len;
     int rc = -1;
-    if (n == 0 || n > 250) return -1;
+    /* The length byte holds n + 1 and is an unsigned char, so n is at most 254 (buf holds 'e' and n bytes: 255 at most).
+     * A full touchlayout spec is 240 characters, 252 with the command name. */
+    if (n == 0 || n > 254) return -1;
     buf[0] = 'e';
     memcpy(buf + 1, cmd, n);
     len = (unsigned char)(n + 1);

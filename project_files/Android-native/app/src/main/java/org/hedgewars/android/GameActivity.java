@@ -251,10 +251,14 @@ public class GameActivity extends SDLActivity {
         layoutEditor = null;
     }
 
-    /** Sends a layout to the engine (the touchlayout command); "" is the default layout. Nothing happens when no game runs. */
+    /**
+     * Sends a layout to the engine (the touchlayout command); "" is the default layout. Nothing happens when no game runs:
+     * the launcher then returns -1 (no engine connected), which is normal and not logged.
+     */
     private void sendTouchLayout(String spec) {
         try {
-            nativeTouchLayout(spec);
+            int rc = nativeTouchLayout(spec);
+            if (rc != 0 && rc != -1) android.util.Log.w(Diag.TAG, "touch layout not sent to the engine, result " + rc);
         } catch (Throwable e) {
             android.util.Log.w(Diag.TAG, "nativeTouchLayout failed: " + e);
         }

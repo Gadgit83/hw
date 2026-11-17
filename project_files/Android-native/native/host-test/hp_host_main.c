@@ -49,7 +49,8 @@ static void *restore_thread(void *arg)
  *   keydown:<name>  keyup:<name>                       (a held key, names left right up down space f1..f9: space holds Fire, releasing it fires, f2 selects slot 2)
  *   userquit                                           (what GameActivity does when the player confirms leaving: hp_ipc_user_quit)
  *   endall                                             (the host confirms "End the game for everyone": hp_ipc_end_for_everyone)
- *   ecmd:<text>                                        (a console command to the engine over the local channel, e.g. ecmd:livevolume 128 100 50 0)
+ *   ecmd:<text>                                        (a console command to the engine over the local channel, e.g. ecmd:livevolume 128 100 50 0;
+ *                                                      in the text '|' stands for a semicolon, e.g. ecmd:touchlayout fire:0.5,0.5,1.0|jump:...)
  *   log:<text>                                         (marks the engine log, for the shell driver) */
 static void push_key(SDL_Keycode sym, SDL_Scancode sc)
 {
@@ -146,7 +147,13 @@ static void *script_thread(void *arg)
         else if (!strncmp(act, "text:", 5)) { SDL_Event e; memset(&e, 0, sizeof e); e.type = SDL_TEXTINPUT; e.text.windowID = 1; snprintf(e.text.text, sizeof e.text.text, "%s", act + 5); SDL_PushEvent(&e); }
         else if (!strcmp(act, "userquit")) fprintf(stderr, "[hosttest] user quit -> %d\n", hp_ipc_user_quit());
         else if (!strcmp(act, "endall")) fprintf(stderr, "[hosttest] end for everyone -> %d\n", hp_ipc_end_for_everyone());
-        else if (!strncmp(act, "ecmd:", 5)) fprintf(stderr, "[hosttest] engine command -> %d\n", hp_ipc_engine_command(act + 5));
+        else if (!strncmp(act, "ecmd:", 5)) {
+            /* '|' stands for ';' here, as a layout spec has ';' between its controls and the script is split on ';' */
+            char cmd[256];
+            snprintf(cmd, sizeof cmd, "%s", act + 5);
+            for (char *c = cmd; *c; c++) if (*c == '|') *c = ';';
+            fprintf(stderr, "[hosttest] engine command -> %d\n", hp_ipc_engine_command(cmd));
+        }
         else if (!strcmp(act, "focuslost")) push_window(SDL_WINDOWEVENT_FOCUS_LOST);
         else if (!strcmp(act, "focusgained")) push_window(SDL_WINDOWEVENT_FOCUS_GAINED);
         else if (!strcmp(act, "minimized")) push_window(SDL_WINDOWEVENT_MINIMIZED);

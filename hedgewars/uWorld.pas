@@ -1092,9 +1092,12 @@ end;
 {$ENDIF}
 
 // Reports where every control is now (IPC 'T', one message per control), so the layout editor shows the real places.
+// The frames are in UI units (see UISwapIn), so the report swaps the UI size in as well: the fractions of the screen must
+// be taken over the same size the frames were laid out in, or they are squeezed towards the middle when cUIScale is not 1.
 procedure ReportTouchLayout;
 begin
 {$IFDEF USE_TOUCH_INTERFACE}
+UISwapIn;
 reportTouchControl('fire', @firebutton);
 reportTouchControl('jump', @jumpWidget);
 reportTouchControl('highjump', @highJumpButton);
@@ -1105,6 +1108,7 @@ reportTouchControl('weapons', @AMWidget);
 reportTouchControl('pause', @pauseButton);
 reportTouchControl('timer', @utilityWidget);
 reportTouchControl('bounce', @utilityWidget2);
+UISwapOut;
 {$ENDIF}
 end;
 

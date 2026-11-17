@@ -128,6 +128,7 @@ begin
     WriteLn(stdout, 'Computer players (both are off unless given):');
     WriteLn(stdout, '  --quick-ai: computer turns start sooner: no artificial pause before the first move (the thinking time is unchanged)');
     WriteLn(stdout, '  --smart-ai: computer players vary their weapons (less repeating the last shots), walk on when the best shot is weak, and walk towards an enemy when they stay put');
+    WriteLn(stdout, '  --ai-log: log one line per computer attack naming the team, the hedgehog and the weapon (also logged with --smart-ai or --quick-ai)');
     WriteLn(stdout, '');
     WriteLn(stdout, 'Miscellaneous:');
     WriteLn(stdout, '  --nick <name>: Set user nickname');
@@ -299,7 +300,7 @@ begin
 end;
 
 function parseParameter(cmd:string; arg:string; var paramIndex:LongInt): Boolean;
-const reallyAll: array[0..60] of shortstring = (
+const reallyAll: array[0..61] of shortstring = (
                 '--prefix', '--user-prefix', '--locale', '--fullscreen-width', '--fullscreen-height', '--width',
                 '--height', '--maximized', '--frame-interval', '--volume','--nomusic', '--nosound', '--nodampen',
                 '--fullscreen', '--showfps', '--altdmg', '--low-quality', '--raw-quality', '--stereo', '--nick',
@@ -310,7 +311,7 @@ const reallyAll: array[0..60] of shortstring = (
                 '--effects-volume', '--music-volume', '--no-voices', '--screen-shape', '--turn-centre', '--turn-zoom',
                 '--quick-ai', '--smart-ai',
                 '--jump-inset', '--hide-idle-controls', '--direct-ammo-menu', '--refresh-weapon-ui',
-                '--two-jump-buttons', '--jump-forward-when-moving', '--swap-fire-jump', '--pause-menu', '--touch-layout');
+                '--two-jump-buttons', '--jump-forward-when-moving', '--swap-fire-jump', '--pause-menu', '--touch-layout', '--ai-log');
 var cmdIndex: byte;
 begin
     parseParameter:= false;
@@ -384,6 +385,7 @@ begin
         {--swap-fire-jump}      58: cSwapFireJump      := true;
         {--pause-menu}          59: cPauseMenu         := true;
         {--touch-layout}        60: cTouchLayout       := getstringParameter(arg, paramIndex, parseParameter);
+        {--ai-log}              61: cAILog             := true;
     else
         begin
         //Assume the first "non parameter" is the demo file, anything else is invalid

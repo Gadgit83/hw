@@ -209,6 +209,7 @@ var
     cTurnZoom       : LongInt; // touch: zoom in to this percent of the default zoom when a turn starts, 0: off
     cQuickAI        : boolean; // --quick-ai: computer turns start sooner (the 700 ms pause before a turn is skipped; a 100 ms poll when no action is found yet)
     cSmartAI        : boolean; // --smart-ai: computer players vary their weapons and walk on when the best shot is weak
+    cAILog          : boolean; // --ai-log: one log line per computer attack (team, hedgehog, weapon); --smart-ai and --quick-ai log too
     cJumpInset      : LongInt; // touch: move the jump button this percent of its own width further in from the right edge, 0: off
     cTouchLayout    : shortstring; // touch: where each control is and how big, "name:x,y,s;..." (--touch-layout, the touchlayout command, see SetTouchLayout)
     cHideIdleControls: boolean; // touch: hide the controls that do nothing when it is not this phone's turn (the weapon chest stays)
@@ -2853,6 +2854,7 @@ begin
     cTurnZoom:= 0;
     cQuickAI:= false;
     cSmartAI:= false;
+    cAILog:= false;
     cJumpInset:= 0;
     cTouchLayout:= '';
     cHideIdleControls:= false;

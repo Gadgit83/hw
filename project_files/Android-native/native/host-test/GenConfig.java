@@ -84,6 +84,7 @@ public class GenConfig {
             m = base(d, seed, 2, 4);
         }
         if (System.getenv("HP_TEST_SEED") != null) m.seed = System.getenv("HP_TEST_SEED");
+        if (System.getenv("HP_TEST_AIMHELPER") != null) m.rules.value[Rules.V_AIM_HELPER] = Integer.parseInt(System.getenv("HP_TEST_AIMHELPER"));
         List<String> lines = GameConfig.build(m, d, new Random(seed));
         // HP_TEST_SETUP: extra setup lines, separated by ';', e.g. "e$landboompct 200;e$deathboompct 300". Put before the teams.
         if (System.getenv("HP_TEST_SETUP") != null) {

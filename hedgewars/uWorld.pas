@@ -20,7 +20,7 @@
 
 unit uWorld;
 interface
-uses SDLh, uGears, uConsts, uFloat, uRandom, uTypes, uRenderUtils;
+uses SDLh, uGears, uConsts, uFloat, uRandom, uTypes, uRenderUtils, GLunit;
 
 procedure initModule;
 procedure freeModule;
@@ -361,12 +361,35 @@ if c > depth then
 HInset:= SafeInset(depth + cEdgeMargin);
 end;
 
+// --touch-layout sets a control's layoutScale only when the layout names it (placeTouchControl), so every control's
+// scale is cleared before a placement: a control that the new layout does not name is drawn at the default size again
+// (0 is the default size, see uRender).
+procedure ResetLayoutScales;
+begin
+{$IFDEF USE_TOUCH_INTERFACE}
+arrowUp.layoutScale:= 0;
+arrowDown.layoutScale:= 0;
+arrowLeft.layoutScale:= 0;
+arrowRight.layoutScale:= 0;
+firebutton.layoutScale:= 0;
+jumpWidget.layoutScale:= 0;
+highJumpButton.layoutScale:= 0;
+AMWidget.layoutScale:= 0;
+pauseQuitWidget.layoutScale:= 0;
+pauseOptionsWidget.layoutScale:= 0;
+pauseButton.layoutScale:= 0;
+utilityWidget.layoutScale:= 0;
+utilityWidget2.layoutScale:= 0;
+{$ENDIF}
+end;
+
 // The android-master placement. Used when no screen shape and no inset is given (every value is 0), so builds
 // without --screen-shape (upstream) keep the layout they always had.
 procedure InitTouchLegacy;
 var sl, st, sr, sb: LongInt;
 begin
 {$IFDEF USE_TOUCH_INTERFACE}
+ResetLayoutScales;
 sl:= SafeInset(cSafeInsetL);
 st:= SafeInset(cSafeInsetT);
 sr:= SafeInset(cSafeInsetR);
@@ -551,6 +574,7 @@ procedure InitTouchPlaced;
 var vt, vb, pad: LongInt;
 begin
 {$IFDEF USE_TOUCH_INTERFACE}
+ResetLayoutScales;
 // Every control sits just clear of its own corner: vt and vb are the room kept at the top and bottom edge and
 // HInset adds what the cut-out and the rounding of that corner need at the side (see HInset).
 vt:= VInset(true);

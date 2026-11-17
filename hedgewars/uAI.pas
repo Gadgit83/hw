@@ -524,7 +524,7 @@ if ((CurrentHedgehog^.MultiShootAttacks = 0) or ((Ammoz[Me^.Hedgehog^.CurAmmoTyp
         if BestRate > BaseRate then
             exit
         end {while}
-    end {if}
+    end {if};
 
 // --smart-ai: no good attack from here, or this hog has stood still for cSmartStayTurns turns: walk to the place the
 // search reached nearest the enemy, when that is much nearer. The next think starts from there.

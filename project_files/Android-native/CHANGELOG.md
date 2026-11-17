@@ -6,11 +6,11 @@ Only some builds were put on a phone, so a version below is a build that was mad
 
 ## 0.3.0-tv17 (121): issues 2 to 26
 
-`HP_PROFILE=test`, versionName `0.3.0-tv17-test`. Each change is listed under the issue it answers. Engine changes are commits on `android-master` of https://github.com/Gadgit83/hw.
+`HP_PROFILE=test`, versionName `0.3.0-tv17-test`. Each change is listed under the issue it answers. Engine changes are commits on the `tv17` branch of https://github.com/Gadgit83/hw, each opt-in, so the original engine behaves as before.
 
 ### Added
 
-- #2 Team dice: a team of each side is picked by dice in every game, and the Back question is asked in every game (#19).
+- #2 Team name dice: in the team editor a 🎲 button beside the team name picks another name from the Randomise team list, never the current name and never one another team uses. Nothing else about the team changes.
 - #3 Death explosion size and #6 terrain destruction: Rules tab settings (`e$deathboompct`, `e$landboompct`, percent, 100 is unchanged). Default games send neither line.
 - #4 Swap Fire and Jump, #5 forward jump, #10 two jump buttons: touch options. With one jump button, Jump does the long forward jump while a left or right move is held (`--jump-forward-when-moving`). A second High jump button (`--two-jump-buttons`) and the swap (`--swap-fire-jump`) are options. Defaults are as before, except that the jump inset and the forward jump are on (see #24).
 - #7 Weapon refresh: at the start of a turn the aim buttons show the weapon of that hedgehog and mark it in the drawer (`--refresh-weapon-ui`, always on).
@@ -43,6 +43,10 @@ Only some builds were put on a phone, so a version below is a build that was mad
 
 - #15 Find games: a phone whose NSD search finds no host after 3 s (a VPN on the default network, or multicast filtered) also probes its Wi-Fi (or Ethernet) subnet for hosts on the phone port, bound to the Wi-Fi network. Hosts found both ways are listed once. The search log says when the probe starts, each host it finds, and when it ends.
 - #22 A phone still getting its teams back is told it is alone, not left out.
+- #26 Controls layout editor: Save and Cancel now reach a running game with both jump buttons on. A full layout command is 252 bytes and the launcher refused anything over 250 (the limit is now 254, the most the length byte allows). A control left out of a new layout no longer keeps the size of the old one.
+- #8 The three new rules (death explosion size, terrain destruction, aim helper) have their explanations.
+- Engine, review fixes: the desktop (non-touch) engine compiles again; `livevolume` ignores a number longer than nine digits; `deathboompct` and `landboompct` are clamped to 0 to 1000 (the default 100 is unchanged).
+- Tests: `layout-test.sh` (a full ten-control layout reaches a running game) and `touchlayout-test.sh` (a control's size returns to normal after the default layout).
 
 ## 0.3.0-tv16 (120): 32-bit ARM phones; chat line fix (test build)
 

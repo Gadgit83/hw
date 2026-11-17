@@ -557,8 +557,8 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
         });
     }
 
-    /** Two search rounds (NsdFinder), each a few seconds more than its own time, so the backstop never cuts the second one short. */
-    private static final long BACKSTOP_MS = 2 * NsdFinder.SEARCH_MS + 5000;
+    /** The search ends at NsdFinder.SEARCH_MS (restart included); this backstop is a few seconds later, as it was before. */
+    static final long BACKSTOP_MS = NsdFinder.SEARCH_MS + 3000;
     private final android.os.Handler searchHandler = new android.os.Handler(android.os.Looper.getMainLooper());
     /** Ends a search that the finder did not end itself (its own timeout is 20 s), so the screen never says "Searching" for ever. */
     private final Runnable searchBackstop = () -> {

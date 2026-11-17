@@ -21,12 +21,17 @@ import java.util.Map;
  * Discovery of {@code _hedgeparty._tcp} hosts with NsdManager (docs/tv-viewer-plan.md section 5.1). Resolving is serialised and
  * retried by {@link ResolveQueue}, because resolveService is unreliable (a second resolve at once fails with
  * FAILURE_ALREADY_ACTIVE, a resolve may fail once and work later, a callback may never come). The search stops by itself after
- * {@link #SEARCH_MS} so it does not run for ever; the screen offers "Search again". Only IPv4 addresses are used. When NSD has found no
+ * {@link #SEARCH_MS} (20 s in all) so it does not run for ever; the screen offers "Search again". Only IPv4 addresses are used. When NSD has found no
  * host after {@link #FALLBACK_MS}, the phone's Wi-Fi subnet is probed as well ({@link SubnetFinder}, issue #15); its hosts are merged in.
+ * When nothing has been found after {@link #RESTART_MS}, NSD is started again once inside the same {@link #SEARCH_MS} (issue #15);
+ * the search time does not grow.
  * NSD cannot run on the build machine: only the parsing and the queue are unit-tested; this class is for the device test.
  */
 final class NsdFinder implements HostDiscovery {
+    /** The whole search, restart included. */
     static final long SEARCH_MS = 20000;
+    /** The one restart of NSD, when nothing was found by then (well inside {@link #SEARCH_MS}). */
+    static final long RESTART_MS = 9000;
     private final Context app;
     private final Handler main = new Handler(Looper.getMainLooper());
     private NsdManager nsd;
@@ -45,25 +50,15 @@ final class NsdFinder implements HostDiscovery {
     private WifiManager.MulticastLock multicast;
     /** This phone's own addresses: an advert from one of them is this phone's own, stale after it stopped hosting. */
     private volatile java.util.Set<String> own = java.util.Collections.emptySet();
-    /**
-     * Issue #15: a first search that finds nothing in its time gets one more round by itself (the first one can miss hosts when NSD
-     * and the multicast lock are still starting, or the first subnet probe ran on a network that refused it). Guarded by this.
-     */
-    private boolean secondRoundLeft;
+    /** True until the one restart has been used (or not needed). Guarded by this. */
+    private boolean restartLeft;
+
     private final Runnable timeout = () -> {
         if (!running) return;
+        stop();
         Listener l = listener;
         int shown;
-        synchronized (this) {
-            shown = visible();
-            if (shown == 0 && secondRoundLeft && l != null) {
-                secondRoundLeft = false;
-                Log.i(Diag.TAG, "nsd: no host in the first round, a second round");
-                begin(l, "Searching for hosts on this Wi-Fi again...");
-                return;
-            }
-        }
-        stop();
+        synchronized (this) { shown = visible(); }
         Log.i(Diag.TAG, "nsd: search time is up, " + shown + " host(s) listed");
         if (l != null) l.status(shown == 0 ? "No host found on this Wi-Fi." : "Search finished.", true);
     };
@@ -75,6 +70,21 @@ final class NsdFinder implements HostDiscovery {
         }
         Log.i(Diag.TAG, "nsd: no host found after " + (FALLBACK_MS / 1000) + " s, probing the Wi-Fi subnet as well");
         startSubnet();
+    };
+
+    /**
+     * The restart (issue #15): if nothing has been found after {@link #RESTART_MS}, NSD discovery is stopped and started again. The
+     * subnet probe and the {@link #SEARCH_MS} timeout are not touched, so the search still ends at {@link #SEARCH_MS}.
+     */
+    private final Runnable restart = () -> {
+        Listener l = listener;
+        synchronized (this) {
+            if (!running || l == null || !restartLeft || visible() > 0) return;
+            restartLeft = false;
+            Log.i(Diag.TAG, "nsd: no host after " + (RESTART_MS / 1000) + " s, starting the search again");
+            stopNsd();
+            startNsd(l, "Searching for hosts on this Wi-Fi again...");
+        }
     };
 
     NsdFinder(Context c) {
@@ -99,17 +109,12 @@ final class NsdFinder implements HostDiscovery {
 
     @Override
     public synchronized void start(Listener l) {
-        secondRoundLeft = true;
-        begin(l, "Searching for hosts on this Wi-Fi...");
-    }
-
-    /** Starts one round of the search (the first, or the second when the first found nothing). Lock held. */
-    private void begin(Listener l, String text) {
         stop();
         listener = l;
         found.clear();
         seen.clear();
         probed.clear();
+        restartLeft = true;
         try {
             nsd = (NsdManager) app.getSystemService(Context.NSD_SERVICE);
         } catch (RuntimeException e) {
@@ -120,6 +125,23 @@ final class NsdFinder implements HostDiscovery {
             l.status("This phone cannot search for hosts (no NSD service).", true);
             return;
         }
+        Thread ownT = new Thread(() -> {
+            own = new java.util.HashSet<>(NetSession.localAddresses());     // lists interfaces: not on the UI thread
+            synchronized (NsdFinder.this) { if (running) publish(); }
+        }, "nsd-own-addresses");
+        ownT.setDaemon(true);
+        ownT.start();
+        if (!startNsd(l, "Searching for hosts on this Wi-Fi...")) return;
+        main.postDelayed(timeout, SEARCH_MS);
+        main.postDelayed(restart, RESTART_MS);
+        main.postDelayed(fallback, FALLBACK_MS);
+    }
+
+    /**
+     * Starts NSD discovery (one round: the first search, or the restart). Lock held. False if the search could not start; the
+     * listener has then been told.
+     */
+    private boolean startNsd(final Listener l, String text) {
         takeMulticastLock();
         queue = new ResolveQueue(this::resolveOne, new ResolveQueue.Sink() {
             @Override public void resolved(String key, Object result) {
@@ -181,12 +203,6 @@ final class NsdFinder implements HostDiscovery {
             }
         };
         running = true;
-        Thread ownT = new Thread(() -> {
-            own = new java.util.HashSet<>(NetSession.localAddresses());     // lists interfaces: not on the UI thread
-            synchronized (NsdFinder.this) { if (running) publish(); }
-        }, "nsd-own-addresses");
-        ownT.setDaemon(true);
-        ownT.start();
         try {
             nsd.discoverServices(HostAdvert.SERVICE_TYPE_BARE, NsdManager.PROTOCOL_DNS_SD, discovery);
         } catch (RuntimeException e) {
@@ -194,12 +210,11 @@ final class NsdFinder implements HostDiscovery {
             running = false;
             releaseMulticastLock();
             l.status("The search could not start (" + e.getMessage() + "). Type the host's address instead.", true);
-            return;
+            return false;
         }
         Log.i(Diag.TAG, "nsd: searching for " + HostAdvert.SERVICE_TYPE_BARE + " for " + (SEARCH_MS / 1000) + " s");
         l.status(text, false);
-        main.postDelayed(timeout, SEARCH_MS);
-        main.postDelayed(fallback, FALLBACK_MS);
+        return true;
     }
 
     /**
@@ -274,14 +289,9 @@ final class NsdFinder implements HostDiscovery {
         }
     }
 
-    @Override
-    public synchronized void stop() {
-        running = false;
+    /** Stops the NSD discovery and its queue (not the subnet probe, not the timers). Lock held. */
+    private void stopNsd() {
         releaseMulticastLock();
-        main.removeCallbacks(timeout);
-        main.removeCallbacks(fallback);
-        if (subnet != null) subnet.stop();
-        subnet = null;
         if (queue != null) queue.stop();
         queue = null;
         NsdManager m = nsd;
@@ -290,5 +300,16 @@ final class NsdFinder implements HostDiscovery {
         if (m != null && d != null) {
             try { m.stopServiceDiscovery(d); } catch (RuntimeException ignored) { }
         }
+    }
+
+    @Override
+    public synchronized void stop() {
+        running = false;
+        main.removeCallbacks(timeout);
+        main.removeCallbacks(fallback);
+        main.removeCallbacks(restart);
+        if (subnet != null) subnet.stop();
+        subnet = null;
+        stopNsd();
     }
 }

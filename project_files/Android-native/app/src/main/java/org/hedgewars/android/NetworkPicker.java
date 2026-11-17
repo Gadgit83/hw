@@ -103,20 +103,6 @@ final class NetworkPicker {
         }
     }
 
-    /**
-     * Reads a route's destination. Its own class, so that the IpPrefix type is only loaded on Android 13 and up ({@link #vpnRoutes}
-     * checks the version first).
-     */
-    private static final class RouteDestinations {
-        private RouteDestinations() { }
-
-        static Route of(RouteInfo r) {
-            android.net.IpPrefix p = r.getDestination();
-            if (p == null || !(p.getAddress() instanceof Inet4Address)) return null;
-            return new Route(p.getAddress().getHostAddress(), p.getPrefixLength());
-        }
-    }
-
     /** Makes the socket for one network. {@link #openSocket} calls it; the socket factory passes the real binding. */
     interface Binder<T> {
         Socket bind(T network) throws java.io.IOException;
@@ -292,10 +278,11 @@ final class NetworkPicker {
                 if (caps == null || !caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) continue;
                 LinkProperties lp = cm.getLinkProperties(n);
                 if (lp == null) continue;
-                if (Build.VERSION.SDK_INT < 33) continue;     // the destinations are read from Android 13 on; before, the join binds and falls back
                 for (RouteInfo r : lp.getRoutes()) {
-                    Route rt = RouteDestinations.of(r);
-                    if (rt != null) out.add(rt);
+                    // RouteInfo.getDestination() and IpPrefix exist from API 21; routesTo compares the masked IPv4 bytes itself.
+                    android.net.IpPrefix p = r.getDestination();
+                    if (p == null || !(p.getAddress() instanceof Inet4Address)) continue;
+                    out.add(new Route(p.getAddress().getHostAddress(), p.getPrefixLength()));
                 }
             }
         } catch (RuntimeException ignored) {
@@ -331,24 +318,29 @@ final class NetworkPicker {
             boolean eth = caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET);
             if (!wifi && !eth) continue;
             LinkProperties lp = cm.getLinkProperties(n);
-            out.add(new Lan<>(n, lp != null ? lp.getInterfaceName() : null, wifi, eth, isConnected(cm, n),
+            out.add(new Lan<>(n, lp != null ? lp.getInterfaceName() : null, wifi, eth, isConnected(cm, n, caps),
                     caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED), hasIpv4(lp), n.equals(active)));
         }
         return out;
     }
 
     /**
-     * False for a network the system reports as not connected (CONNECTING, DISCONNECTED, SUSPENDED). The state is read where the
-     * system gives it (API 29 and up); on older systems, and where it is not known, the network counts as connected.
+     * True only for a network the system reports as CONNECTED (not CONNECTING, DISCONNECTED or suspended) and, on API 28 and up,
+     * not suspended by the capabilities. A network whose state is not known is not usable: a stale network after a roam (issue #2,
+     * Android 9 included) must be rejected. {@code ConnectivityManager.getNetworkInfo(Network)} exists from API 21, so no version check.
      */
     @SuppressWarnings("deprecation")
-    private static boolean isConnected(ConnectivityManager cm, Network n) {
+    static boolean isConnected(ConnectivityManager cm, Network n, NetworkCapabilities caps) {
         try {
             android.net.NetworkInfo ni = cm.getNetworkInfo(n);
-            return ni == null || ni.getState() == android.net.NetworkInfo.State.CONNECTED;
-        } catch (RuntimeException | LinkageError e) {
-            return true;
+            if (ni == null || ni.getState() != android.net.NetworkInfo.State.CONNECTED) return false;
+        } catch (RuntimeException e) {
+            return false;
         }
+        if (Build.VERSION.SDK_INT >= 28 && caps != null) {
+            return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_SUSPENDED);
+        }
+        return true;
     }
 
     private static boolean hasIpv4(LinkProperties lp) {
@@ -367,7 +359,7 @@ final class NetworkPicker {
         try {
             for (Network n : cm.getAllNetworks()) {
                 LinkProperties lp = cm.getLinkProperties(n);
-                if (lp != null && iface.equals(lp.getInterfaceName()) && isConnected(cm, n)) return n;
+                if (lp != null && iface.equals(lp.getInterfaceName()) && isConnected(cm, n, cm.getNetworkCapabilities(n))) return n;
             }
         } catch (RuntimeException ignored) {
         }

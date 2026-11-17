@@ -2,9 +2,12 @@ package org.hedgewars.android;
 
 import android.content.Context;
 import android.net.ConnectivityManager;
+import android.os.Build;
+import android.net.LinkAddress;
 import android.net.LinkProperties;
 import android.net.Network;
 import android.net.NetworkCapabilities;
+import android.net.RouteInfo;
 
 import java.net.Inet4Address;
 import java.net.InetAddress;
@@ -25,10 +28,13 @@ import javax.net.SocketFactory;
  * ("Network to use") can pin one interface instead. The rules, in order:
  * <ul>
  *   <li>a loopback target (this phone's own host) uses the default network, as before;</li>
- *   <li>an explicit choice of an interface uses that interface's network, if it is still there;</li>
- *   <li>Automatic: a target on a VPN's subnet (or a Tailscale address, 100.64.0.0/10, while a VPN is on) uses the default network;
- *       any other target uses the Wi-Fi or Ethernet network, if there is one;</li>
- *   <li>no suitable network: the default network.</li>
+ *   <li>an explicit choice of an interface uses that interface's network, if it is still connected;</li>
+ *   <li>Automatic: a target on a VPN's subnet (or a Tailscale address, 100.64.0.0/10, while a VPN is on), or on a subnet a VPN's
+ *       routes carry, uses the default network; any other target uses the Wi-Fi or Ethernet network, if there is one;</li>
+ *   <li>the Wi-Fi or Ethernet network is the active network when that is one of them, else a connected one (never a network still
+ *       CONNECTING after a roam, see {@link #chooseLan});</li>
+ *   <li>a socket that cannot be bound to a network (EPERM with a non-bypassable VPN, or any other refusal) is opened on the default
+ *       network instead, logged once ({@link #openSocket}); no join or probe fails for that reason alone.</li>
  * </ul>
  * Only the choice, the interface list and the route are here; the relay client takes the socket factory from
  * {@link #socketFactory}. Not verified on a device with a VPN (none here): the test steps in docs/multiphone-test.md say what to look for.
@@ -63,6 +69,43 @@ final class NetworkPicker {
 
         /** "Wi-Fi 192.168.1.62", for the button. */
         String shortLabel() { return kind + " " + address; }
+    }
+
+    /** One network of this phone as the choice sees it. The Android objects are read into this, so the choice is tested on the JVM. */
+    static final class Lan<T> {
+        final T network;
+        final String iface;
+        final boolean wifi, ethernet, connected, validated, ipv4, active;
+
+        Lan(T network, String iface, boolean wifi, boolean ethernet, boolean connected, boolean validated, boolean ipv4, boolean active) {
+            this.network = network;
+            this.iface = iface;
+            this.wifi = wifi;
+            this.ethernet = ethernet;
+            this.connected = connected;
+            this.validated = validated;
+            this.ipv4 = ipv4;
+            this.active = active;
+        }
+
+        /** A Wi-Fi or Ethernet network that is connected and has an IPv4 address. */
+        boolean usable() { return (wifi || ethernet) && connected && ipv4; }
+    }
+
+    /** One IPv4 route of a VPN: the destination and its prefix length. */
+    static final class Route {
+        final String dest;
+        final int prefix;
+
+        Route(String dest, int prefix) {
+            this.dest = dest;
+            this.prefix = prefix;
+        }
+    }
+
+    /** Makes the socket for one network. {@link #openSocket} calls it; the socket factory passes the real binding. */
+    interface Binder<T> {
+        Socket bind(T network) throws java.io.IOException;
     }
 
     /** Test hook: the interfaces this phone has, instead of the real ones (null: the real ones). */
@@ -192,39 +235,141 @@ final class NetworkPicker {
         }
     }
 
-    /** The Wi-Fi network (or, failing that, Ethernet) of this phone, or null. Not for the UI thread. */
-    static Network lanNetwork(Context c) {
+    /**
+     * The network to use from a choice of networks (issues #2 and #15): the active network when it is a usable Wi-Fi or Ethernet one;
+     * else the usable one on {@code preferIface} (if any), then the validated ones, then Wi-Fi before Ethernet, the first in the list
+     * last. A network that is not connected (a stale Wi-Fi network still CONNECTING after a roam) is never chosen. Null if none is usable.
+     */
+    static <T> T chooseLan(List<Lan<T>> nets, String preferIface) {
+        for (Lan<T> l : nets) if (l.active && l.usable()) return l.network;
+        Lan<T> best = null;
+        int bestRank = Integer.MAX_VALUE;
+        for (Lan<T> l : nets) {
+            if (!l.usable()) continue;
+            int r = (preferIface != null && preferIface.equals(l.iface) ? 0 : 4) + (l.validated ? 0 : 2) + (l.wifi ? 0 : 1);
+            if (r < bestRank) {
+                best = l;
+                bestRank = r;
+            }
+        }
+        return best == null ? null : best.network;
+    }
+
+    /**
+     * True if one of the VPN routes carries {@code host}. Routes shorter than a /8 do not count: the default route and a split default
+     * (0.0.0.0/1 with 128.0.0.0/1) send everything, the LAN too, but a join on those routes binds to the Wi-Fi first and falls back to
+     * the default network if that is refused ({@link #openSocket}), so they need no special case.
+     */
+    static boolean routesTo(String host, List<Route> routes) {
+        for (Route r : routes) {
+            if (r.prefix >= 8 && sameSubnet(host, r.dest, r.prefix)) return true;
+        }
+        return false;
+    }
+
+    /** The IPv4 routes of the VPN networks, read from their LinkProperties. Not for the UI thread. */
+    static List<Route> vpnRoutes(Context c) {
+        List<Route> out = new ArrayList<>();
+        ConnectivityManager cm = connectivity(c);
+        if (cm == null) return out;
+        try {
+            for (Network n : cm.getAllNetworks()) {
+                NetworkCapabilities caps = cm.getNetworkCapabilities(n);
+                if (caps == null || !caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) continue;
+                LinkProperties lp = cm.getLinkProperties(n);
+                if (lp == null) continue;
+                for (RouteInfo r : lp.getRoutes()) {
+                    // RouteInfo.getDestination() and IpPrefix exist from API 21; routesTo compares the masked IPv4 bytes itself.
+                    android.net.IpPrefix p = r.getDestination();
+                    if (p == null || !(p.getAddress() instanceof Inet4Address)) continue;
+                    out.add(new Route(p.getAddress().getHostAddress(), p.getPrefixLength()));
+                }
+            }
+        } catch (RuntimeException ignored) {
+        }
+        return out;
+    }
+
+    /** The Wi-Fi or Ethernet network to use (see {@link #chooseLan}), or null. Not for the UI thread. */
+    static Network lanNetwork(Context c) { return lanNetwork(c, null); }
+
+    /** As {@link #lanNetwork(Context)}, preferring the network of interface {@code preferIface}. */
+    static Network lanNetwork(Context c, String preferIface) {
         ConnectivityManager cm = connectivity(c);
         if (cm == null) return null;
         try {
-            Network wifi = null, eth = null;
-            for (Network n : cm.getAllNetworks()) {
-                NetworkCapabilities caps = cm.getNetworkCapabilities(n);
-                if (caps == null || caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) continue;
-                if (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) && wifi == null) wifi = n;
-                else if (caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) && eth == null) eth = n;
-            }
-            return wifi != null ? wifi : eth;
+            return chooseLan(lanCandidates(cm), preferIface);
         } catch (RuntimeException e) {
             return null;
         }
     }
 
-    /** The network of the named interface, or null if it is not up. */
+    private static List<Lan<Network>> lanCandidates(ConnectivityManager cm) {
+        List<Lan<Network>> out = new ArrayList<>();
+        Network active = null;
+        try {
+            active = cm.getActiveNetwork();
+        } catch (RuntimeException ignored) {
+        }
+        for (Network n : cm.getAllNetworks()) {
+            NetworkCapabilities caps = cm.getNetworkCapabilities(n);
+            if (caps == null || caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) continue;
+            boolean wifi = caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI);
+            boolean eth = caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET);
+            if (!wifi && !eth) continue;
+            LinkProperties lp = cm.getLinkProperties(n);
+            out.add(new Lan<>(n, lp != null ? lp.getInterfaceName() : null, wifi, eth, isConnected(cm, n, caps),
+                    caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED), hasIpv4(lp), n.equals(active)));
+        }
+        return out;
+    }
+
+    /**
+     * True only for a network the system reports as CONNECTED (not CONNECTING, DISCONNECTED or suspended) and, on API 28 and up,
+     * not suspended by the capabilities. A network whose state is not known is not usable: a stale network after a roam (issue #2,
+     * Android 9 included) must be rejected. {@code ConnectivityManager.getNetworkInfo(Network)} exists from API 21, so no version check.
+     */
+    @SuppressWarnings("deprecation")
+    static boolean isConnected(ConnectivityManager cm, Network n, NetworkCapabilities caps) {
+        try {
+            android.net.NetworkInfo ni = cm.getNetworkInfo(n);
+            if (ni == null || ni.getState() != android.net.NetworkInfo.State.CONNECTED) return false;
+        } catch (RuntimeException e) {
+            return false;
+        }
+        if (Build.VERSION.SDK_INT >= 28 && caps != null) {
+            return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_SUSPENDED);
+        }
+        return true;
+    }
+
+    private static boolean hasIpv4(LinkProperties lp) {
+        if (lp == null) return false;
+        for (LinkAddress a : lp.getLinkAddresses()) {
+            InetAddress addr = a.getAddress();
+            if (addr instanceof Inet4Address && !addr.isLinkLocalAddress()) return true;
+        }
+        return false;
+    }
+
+    /** The network of the named interface that is connected, or null if it is not up. */
     static Network networkNamed(Context c, String iface) {
         ConnectivityManager cm = connectivity(c);
         if (cm == null || iface == null || iface.isEmpty()) return null;
         try {
             for (Network n : cm.getAllNetworks()) {
                 LinkProperties lp = cm.getLinkProperties(n);
-                if (lp != null && iface.equals(lp.getInterfaceName())) return n;
+                if (lp != null && iface.equals(lp.getInterfaceName()) && isConnected(cm, n, cm.getNetworkCapabilities(n))) return n;
             }
         } catch (RuntimeException ignored) {
         }
         return null;
     }
 
-    /** The network a join to {@code host} uses (see the class comment), or null for the default network. */
+    /**
+     * The network a join to {@code host} uses (see the class comment), or null for the default network. An explicit choice of an
+     * interface is used whenever that interface is connected; Automatic is {@link #autoNetwork}.
+     */
     static Network networkFor(Context c, String host) {
         if (host == null || host.isEmpty() || host.startsWith("127.") || host.equals("localhost") || host.equals("::1")) return null;
         String choice = saved(c);
@@ -232,9 +377,18 @@ final class NetworkPicker {
             Network n = networkNamed(c, choice);
             if (n != null) return n;              // the chosen interface is gone: Automatic below
         }
+        return autoNetwork(c, host, null);
+    }
+
+    /**
+     * Automatic: the default network (null) when a VPN carries {@code host}, on its subnet or on one of its routes; else the Wi-Fi
+     * or Ethernet network ({@code preferIface} first). Used by the joins and by the subnet search.
+     */
+    static Network autoNetwork(Context c, String host, String preferIface) {
         List<Iface> ifaces = list();
         if (onVpnRoute(host, ifaces, vpnActive(c, ifaces))) return null;
-        return lanNetwork(c);
+        if (routesTo(host, vpnRoutes(c))) return null;
+        return lanNetwork(c, preferIface);
     }
 
     /** True if {@code host} is reached through a VPN: on a VPN interface's subnet, or a Tailscale address while a VPN is on. */
@@ -271,6 +425,32 @@ final class NetworkPicker {
 
     // Sockets ----------------------------------------------------------------------------------
 
+    private static final java.util.Set<String> noted = Collections.synchronizedSet(new java.util.HashSet<>());
+
+    /** Logs {@code msg} once for the process (a probe of 253 addresses must not write 253 lines). Logging is skipped off the device. */
+    static void noteOnce(String msg) {
+        if (!noted.add(msg)) return;
+        try {
+            android.util.Log.w(Diag.TAG, msg);
+        } catch (RuntimeException | LinkageError ignored) {
+        }
+    }
+
+    /**
+     * An unconnected socket on {@code network}, made by {@code bind}. A null network is the default network. If the binding is refused
+     * (EPERM when a non-bypassable VPN is on, or any other IOException or SecurityException), the socket is made on the default
+     * network instead, so the join or probe still goes out (a VPN that routes the LAN carries it); the refusal is logged once.
+     */
+    static <T> Socket openSocket(T network, Binder<T> bind) throws java.io.IOException {
+        if (network == null) return new Socket();
+        try {
+            return bind.bind(network);
+        } catch (java.io.IOException | SecurityException e) {
+            noteOnce("network: the chosen network refused the socket (" + e.getMessage() + "), using the default network");
+            return new Socket();
+        }
+    }
+
     /**
      * The factory a join uses: each socket is opened on the network {@link #networkFor} picks at that moment (so a retry follows
      * a network that came back). With no such network the plain default socket is made, as before.
@@ -283,8 +463,8 @@ final class NetworkPicker {
                     android.util.Log.i(Diag.TAG, "join " + host + ": default network");
                     return new Socket();
                 }
-                android.util.Log.i(Diag.TAG, "join " + host + ": on the network " + n);
-                return n.getSocketFactory().createSocket();
+                android.util.Log.i(Diag.TAG, "join " + host + ": on the chosen network");
+                return openSocket(n, x -> x.getSocketFactory().createSocket());
             }
 
             @Override public Socket createSocket(String h, int port) throws java.io.IOException {

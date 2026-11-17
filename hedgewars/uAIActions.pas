@@ -67,9 +67,10 @@ type TAction = record
 
 procedure AddAction(var Actions: TActions; Action: Longword; Param: LongInt; TimeDelta: Longword; X, Y: LongInt);
 procedure ProcessAction(var Actions: TActions; Me: PGear);
+procedure AILogAttack(Me: PGear);
 
 implementation
-uses uAIMisc, uAI, uAmmos, uVariables, uCommands, uConsts, uUtils, uIO{$IFDEF TRACEAIACTIONS}, uConsole{$ENDIF};
+uses uAIMisc, uAI, uAmmos, uVariables, uCommands, uConsts, uUtils, uIO, uConsole;
 
 var PrevX: LongInt = 0;
     timedelta: Longword = 0;
@@ -118,6 +119,25 @@ else
     end
 end;
 {$ENDIF}
+
+// --ai-log (also with --smart-ai or --quick-ai): one line each time a computer hedgehog really fires (the attack
+// command is sent), naming the team, the hedgehog and the weapon in hand. Logging only: it never changes the game.
+procedure AILogAttack(Me: PGear);
+var cur: TAmmoType;
+    team: shortstring;
+    line: ansistring;
+    msg: shortstring;
+begin
+if not (cAILog or cSmartAI or cQuickAI) then exit;
+if (Me = nil) or (Me^.Hedgehog = nil) then exit;
+cur:= Me^.Hedgehog^.CurAmmoType;
+if Me^.Hedgehog^.Team <> nil then team:= Me^.Hedgehog^.Team^.TeamName else team:= 'no team';
+line:= ansistring('AI attack: team ' + team + ', hedgehog ' + Me^.Hedgehog^.Name + ', weapon ');
+line:= line + trammo[Ammoz[cur].NameId];
+line:= line + ansistring(' (' + IntToStr(Ord(cur)) + ')');
+msg:= line;
+WriteLnToConsole(msg);
+end;
 
 procedure AddAction(var Actions: TActions; Action: Longword; Param: LongInt; TimeDelta: Longword; X, Y: LongInt);
 var t: Longword;
@@ -278,6 +298,7 @@ with Actions.actions[Actions.Pos] do
         else
             begin
             s:= ActionIdToStr[Action];
+            if (Action = aia_attack) and (Param = aim_push) then AILogAttack(Me);
             if (Param and ai_specmask) <> 0 then
                 case Param of
                 aim_push:

@@ -551,6 +551,11 @@ public final class Ui {
         return r;
     }
 
+    /**
+     * A stepper button. A tap steps once when the finger lifts; holding still for a moment starts the repeat. Nothing
+     * happens on touch-down, and a finger that moves past the touch slop cancels the step, so a swipe that starts on the
+     * button scrolls the page (the enclosing scroll view takes the gesture) and leaves the value alone.
+     */
     private Button repeatButton(String s, Runnable action) {
         Button b = button(s, false, null);
         b.setTextSize(18);
@@ -561,7 +566,11 @@ public final class Ui {
         b.setPadding(0, 0, 0, 0); // an inset background brings its own padding
         final Runnable[] loop = new Runnable[1];
         final int[] count = { 0 };
+        final boolean[] repeating = { false }, moved = { false };
+        final float[] down = { 0, 0 };
+        final int slop = android.view.ViewConfiguration.get(ctx).getScaledTouchSlop();
         loop[0] = () -> {
+            repeating[0] = true;
             action.run();
             count[0]++;
             handler.postDelayed(loop[0], count[0] > 12 ? 40 : 110);
@@ -571,11 +580,25 @@ public final class Ui {
                 case MotionEvent.ACTION_DOWN:
                     if (!v.isEnabled()) return false;
                     v.setPressed(true);
-                    action.run();
+                    down[0] = e.getX();
+                    down[1] = e.getY();
+                    moved[0] = false;
+                    repeating[0] = false;
                     count[0] = 0;
                     handler.postDelayed(loop[0], 420);
                     return true;
+                case MotionEvent.ACTION_MOVE:
+                    if (!moved[0] && (Math.abs(e.getX() - down[0]) > slop || Math.abs(e.getY() - down[1]) > slop)) {
+                        moved[0] = true;
+                        v.setPressed(false);
+                        handler.removeCallbacks(loop[0]);
+                    }
+                    return true;
                 case MotionEvent.ACTION_UP:
+                    v.setPressed(false);
+                    handler.removeCallbacks(loop[0]);
+                    if (v.isEnabled() && !moved[0] && !repeating[0]) action.run();
+                    return true;
                 case MotionEvent.ACTION_CANCEL:
                     v.setPressed(false);
                     handler.removeCallbacks(loop[0]);

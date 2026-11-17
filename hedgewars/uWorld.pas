@@ -2152,7 +2152,7 @@ function AimHelperRun: boolean;
 var HHG: PGear;
     at: TAmmoType;
     xx, yy, vx, vy, x0, y0, density, elast, fric: hwFloat;
-    radius, maxSteps, fuse, shotPower: LongInt;
+    radius, maxSteps, fuse: LongInt;
     kind: TGearType;
     shellLike, power: boolean;
 begin
@@ -2181,13 +2181,13 @@ case at of
 else
     exit
 end;
-// a charged shot: while Fire is held the preview follows the power so far (it is the shot fired now); before the
-// charge starts, and at the very first frame of it, the preview shows the full charge, the longest shot it can make
-if power and ((HHG^.State and gstAttacking) <> 0) and (HHG^.Power > 0) then
-    shotPower:= HHG^.Power
-else
-    shotPower:= cMaxPower;
-if (not power) and ((HHG^.State and gstMoving) <> 0) then
+if power then
+    begin
+    // a charged shot: the preview runs while Fire is held, once the power is above zero
+    if ((HHG^.State and gstAttacking) = 0) or (HHG^.Power <= 0) then
+        exit;
+    end
+else if (HHG^.State and gstMoving) <> 0 then
     // the mortar fires at once at full power, so its preview shows while the hedgehog is still
     exit;
 
@@ -2198,8 +2198,8 @@ if ((HHG^.State and gstHHHJump) <> 0) and (CurrentHedgehog^.Effects[heArtillery]
     xx:= -xx;
 if power then
     begin
-    vx:= xx * shotPower / cPowerDivisor;
-    vy:= yy * shotPower / cPowerDivisor
+    vx:= xx * HHG^.Power / cPowerDivisor;
+    vy:= yy * HHG^.Power / cPowerDivisor
     end
 else
     begin

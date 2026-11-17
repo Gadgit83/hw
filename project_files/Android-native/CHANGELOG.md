@@ -4,6 +4,30 @@ All notable changes to the native Android app (`project_files/Android-native`), 
 
 Only some builds were put on a phone, so a version below is a build that was made, not necessarily one that was released. Releases are tags on `android-master` with the APK attached; there is none yet.
 
+## 0.3.0-tv18 (122): fixes from the tv17 device check
+
+`HP_PROFILE=test`, versionName `0.3.0-tv18-test`. Each change answers a finding of RESULT 25 on issue #1. Engine changes are commits on the `tv18` branch of https://github.com/Gadgit83/hw, each opt-in, so the original engine behaves as before. Compat is unchanged (`hwnet-60-sim3`).
+
+### Fixed
+
+- #26 Controls layout editor: the controls were drawn bunched in the middle of the screen, and Save moved Pause and the weapon chest. The engine measured each control's place against the screen size instead of the UI size it is laid out in, so at the phone's UI scale every place was pulled towards the centre. The editor now opens with every outline on its control. New `layout-scale-test.sh` and `ControlsLayoutViewTest`.
+- #13 Aim helper: it shows only while Fire is held, at the current power, with wind and gravity, and grows with the charge (the owner's specification). The dots are a little larger (radius 3).
+- #14 and #15 Network:
+  - A join no longer picks a Wi-Fi network that is still connecting (the Fairphone 3's stale network 106).
+  - A VPN that routes the home network sends the join over the default route instead of binding to the Wi-Fi (the Fairphone 4 with Tailscale).
+  - When binding to a network is refused, the socket falls back to the default route instead of failing.
+  - The host search does the same, restarts once at 9 s if nothing was found, and still ends after 20 s.
+  - Join shows "Connecting to ..." at once.
+- #22 Lone-host rejoin: a phone replaying the game after a rejoin (over 20 s on the Moto G6) was dropped by the 20 s silence rule, so its teams never came back. A phone that is still catching up is no longer blamed for the silence. The engine also sends the team-back answer at once (opt-in, with `loneback`). New host scenarios `hostalone-(ai|human)N[slow]`.
+- #22 Watch the game: the button now shows for a phone that is away, that gave up or whose game ended, and for the host, who watches over its own relay. The lobby no longer flashes a stale "lobby (setting up)" during a rejoin.
+- #8 The three settings added in tv17 have their (i) button like the others; a smoke test checks every row.
+- Rules: a scroll that starts on a + or - button no longer changes the value; a tap steps once and a hold repeats.
+- In-game Options scrolls, so on a small landscape screen (Moto G6) the Mute switch, the Controls layout button and the help text are all reachable.
+
+### Added
+
+- #11 and #12: `--ai-log` (also on with Quick and smart) writes `AI attack: team ..., hedgehog ..., weapon ...` for each computer attack to the engine log (`adb logcat -s HW_Engine`). Further tuning of the computer players is paused at the owner's request.
+
 ## 0.3.0-tv17 (121): issues 2 to 26
 
 `HP_PROFILE=test`, versionName `0.3.0-tv17-test`. Each change is listed under the issue it answers. Engine changes are commits on the `tv17` branch of https://github.com/Gadgit83/hw, each opt-in, so the original engine behaves as before.

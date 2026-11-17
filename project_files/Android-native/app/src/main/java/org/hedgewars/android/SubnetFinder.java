@@ -83,9 +83,9 @@ final class SubnetFinder {
             return;
         }
         List<String> targets = SubnetScan.addresses(lan.address, lan.prefix);
-        Network picked = NetworkPicker.networkNamed(app, lan.name);
-        if (picked == null) picked = NetworkPicker.lanNetwork(app);
-        final Network net = picked;
+        // The same Automatic choice as a join: the connected Wi-Fi network (never a stale one), or the default network when a VPN
+        // carries this subnet. A network that refuses the socket is replaced by the default one in each probe (NetworkPicker.openSocket).
+        final Network net = NetworkPicker.autoNetwork(app, lan.address, lan.name);
         Log.i(Diag.TAG, "subnet: scan started, " + targets.size() + " address(es) on " + lan.kind + " " + lan.address + "/" + lan.prefix
                 + ", port " + Relay.PHONE_PORT + ", " + (net != null ? "on the Wi-Fi network" : "on the default network"));
         ExecutorService ex = Executors.newFixedThreadPool(AT_ONCE, r -> {
@@ -122,7 +122,7 @@ final class SubnetFinder {
         Socket s = null;
         HostAdvert.Found h = null;
         try {
-            s = net != null ? net.getSocketFactory().createSocket() : new Socket();
+            s = NetworkPicker.openSocket(net, n -> n.getSocketFactory().createSocket());
             if (!track(s)) return;
             s.connect(new InetSocketAddress(address, Relay.PHONE_PORT), CONNECT_MS);
             s.setSoTimeout(READ_MS);

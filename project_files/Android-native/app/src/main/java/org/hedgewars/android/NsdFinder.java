@@ -45,12 +45,25 @@ final class NsdFinder implements HostDiscovery {
     private WifiManager.MulticastLock multicast;
     /** This phone's own addresses: an advert from one of them is this phone's own, stale after it stopped hosting. */
     private volatile java.util.Set<String> own = java.util.Collections.emptySet();
+    /**
+     * Issue #15: a first search that finds nothing in its time gets one more round by itself (the first one can miss hosts when NSD
+     * and the multicast lock are still starting, or the first subnet probe ran on a network that refused it). Guarded by this.
+     */
+    private boolean secondRoundLeft;
     private final Runnable timeout = () -> {
         if (!running) return;
-        stop();
         Listener l = listener;
         int shown;
-        synchronized (this) { shown = visible(); }
+        synchronized (this) {
+            shown = visible();
+            if (shown == 0 && secondRoundLeft && l != null) {
+                secondRoundLeft = false;
+                Log.i(Diag.TAG, "nsd: no host in the first round, a second round");
+                begin(l, "Searching for hosts on this Wi-Fi again...");
+                return;
+            }
+        }
+        stop();
         Log.i(Diag.TAG, "nsd: search time is up, " + shown + " host(s) listed");
         if (l != null) l.status(shown == 0 ? "No host found on this Wi-Fi." : "Search finished.", true);
     };
@@ -86,6 +99,12 @@ final class NsdFinder implements HostDiscovery {
 
     @Override
     public synchronized void start(Listener l) {
+        secondRoundLeft = true;
+        begin(l, "Searching for hosts on this Wi-Fi...");
+    }
+
+    /** Starts one round of the search (the first, or the second when the first found nothing). Lock held. */
+    private void begin(Listener l, String text) {
         stop();
         listener = l;
         found.clear();
@@ -178,7 +197,7 @@ final class NsdFinder implements HostDiscovery {
             return;
         }
         Log.i(Diag.TAG, "nsd: searching for " + HostAdvert.SERVICE_TYPE_BARE + " for " + (SEARCH_MS / 1000) + " s");
-        l.status("Searching for hosts on this Wi-Fi...", false);
+        l.status(text, false);
         main.postDelayed(timeout, SEARCH_MS);
         main.postDelayed(fallback, FALLBACK_MS);
     }

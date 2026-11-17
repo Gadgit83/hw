@@ -51,6 +51,8 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
     static final String DEFAULT_PREFIX = "192.168.1.";
     /** A host or join connect is running. Shared by every Network screen, so a reopened screen cannot start a second one. */
     private static volatile boolean connecting;
+    /** The address a join is connecting to ("host:port"), shown at once while it runs; empty for a host's own connect. */
+    private static volatile String joinTarget = "";
     private String problem = "";
     private boolean destroyed;
     // Finding hosts (docs/tv-viewer-plan.md section 5.1)
@@ -277,6 +279,7 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
         if (NetSession.joined || NetSession.hosting) pinMsg = null;
         if (!problem.isEmpty()) content.addView(coloured(problem, Ui.DANGER));
         if (connecting && !NetSession.connectProgress.isEmpty()) content.addView(ui.hint(NetSession.connectProgress));
+        else if (connecting && !joinTarget.isEmpty()) content.addView(ui.hint("Connecting to " + joinTarget + "..."));
         String closed = NetSession.closedReason;
         if (!closed.isEmpty() && !NetSession.joined && pinMsg == null) content.addView(coloured(closed, Ui.DANGER));
         if (!NetSession.inGame) {
@@ -554,7 +557,8 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
         });
     }
 
-    private static final long BACKSTOP_MS = 23000;
+    /** Two search rounds (NsdFinder), each a few seconds more than its own time, so the backstop never cuts the second one short. */
+    private static final long BACKSTOP_MS = 2 * NsdFinder.SEARCH_MS + 5000;
     private final android.os.Handler searchHandler = new android.os.Handler(android.os.Looper.getMainLooper());
     /** Ends a search that the finder did not end itself (its own timeout is 20 s), so the screen never says "Searching" for ever. */
     private final Runnable searchBackstop = () -> {
@@ -1079,7 +1083,9 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
         final String nick = name.isEmpty() ? PlayerNames.current(this) : name;
         connecting = true;
         problem = "";
+        joinTarget = host + ":" + port;          // "Connecting to ..." is drawn at once, below
         stopSearch();
+        render();
         final int seq = ++joinSeq;
         new Thread(() -> {
             try {
@@ -1089,7 +1095,10 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
             } catch (Exception e) {
                 if (seq == joinSeq) problem = "Could not reach " + host + ":" + port + " (" + e.getMessage() + "). Same Wi-Fi? Is the host hosting?";
             } finally {
-                if (seq == joinSeq) connecting = false;
+                if (seq == joinSeq) {
+                    connecting = false;
+                    joinTarget = "";
+                }
                 changed();
                 NetSession.ping();
             }

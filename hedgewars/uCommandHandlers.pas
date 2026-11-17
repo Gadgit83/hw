@@ -697,7 +697,7 @@ end;
 // changes the sound of the game that is running. A malformed line is ignored.
 procedure chLiveVolume(var s: shortstring);
 var v: array[0..3] of LongInt;
-    i, p, code: LongInt;
+    i, p, code, digits: LongInt;
     rest, word: shortstring;
 begin
 rest:= s;
@@ -716,6 +716,12 @@ for i:= 0 to 3 do
         end;
     // pas2c has no three-argument Val, so check the digits here (a leading minus is allowed)
     if Length(word) = 0 then
+        exit;
+    // more than nine digits would overflow StrToInt (a leading minus does not count)
+    digits:= Length(word);
+    if word[1] = '-' then
+        digits:= digits - 1;
+    if digits > 9 then
         exit;
     for p:= 1 to Length(word) do
         if not (((word[p] >= '0') and (word[p] <= '9')) or ((p = 1) and (word[p] = '-') and (Length(word) > 1))) then
@@ -932,12 +938,20 @@ end;
 
 procedure chDeathBoomPercent(var s: shortstring);
 begin
-cDeathBoomPercent:= StrToInt(s)
+cDeathBoomPercent:= StrToInt(s);
+if cDeathBoomPercent < 0 then
+    cDeathBoomPercent:= 0
+else if cDeathBoomPercent > 1000 then
+    cDeathBoomPercent:= 1000
 end;
 
 procedure chLandBoomPercent(var s: shortstring);
 begin
-cLandBoomPercent:= StrToInt(s)
+cLandBoomPercent:= StrToInt(s);
+if cLandBoomPercent < 0 then
+    cLandBoomPercent:= 0
+else if cLandBoomPercent > 1000 then
+    cLandBoomPercent:= 1000
 end;
 
 procedure chAimHelper(var s: shortstring);

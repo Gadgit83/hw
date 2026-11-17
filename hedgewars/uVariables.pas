@@ -207,7 +207,7 @@ var
     cCutLY0, cCutLY1, cCutRY0, cCutRY1: LongInt; // vertical extent (pixels from the top) of the cut-out at the left and right edge, 0,0: the whole height
     cTurnCentre     : boolean; // touch: centre the camera on the active hedgehog when a turn starts
     cTurnZoom       : LongInt; // touch: zoom in to this percent of the default zoom when a turn starts, 0: off
-    cQuickAI        : boolean; // --quick-ai: computer turns start sooner (no pause, shorter thinking, fewer walking trials)
+    cQuickAI        : boolean; // --quick-ai: computer turns start sooner (the 700 ms pause before a turn is skipped; a 100 ms poll when no action is found yet)
     cSmartAI        : boolean; // --smart-ai: computer players vary their weapons and walk on when the best shot is weak
     cJumpInset      : LongInt; // touch: move the jump button this percent of its own width further in from the right edge, 0: off
     cTouchLayout    : shortstring; // touch: where each control is and how big, "name:x,y,s;..." (--touch-layout, the touchlayout command, see SetTouchLayout)
@@ -2775,9 +2775,11 @@ end;
 function isIdleHiddenControl(widget: POnScreenWidget): boolean;
 begin
 isIdleHiddenControl:= false;
+{$IFDEF USE_TOUCH_INTERFACE}
 if (widget = @AMWidget) or (widget = @pauseButton) or (widget = @pauseQuitWidget) or (widget = @pauseOptionsWidget) then
     exit;
 isIdleHiddenControl:= touchIdleTurn;
+{$ENDIF}
 end;
 
 procedure preInitModule;

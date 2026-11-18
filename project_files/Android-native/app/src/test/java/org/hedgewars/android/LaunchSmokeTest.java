@@ -776,6 +776,34 @@ public class LaunchSmokeTest {
         }
     }
 
+    /**
+     * Android 9 (API 28, the Moto G6 and the FP3): the Mute switch in the in-game Options has a track and a thumb, and a normal size.
+     * It was drawn as a bare "OFF"/"ON" label on those phones, because the game's own theme was used for it (issue #2 of the tv19 list).
+     */
+    @Test
+    @Config(sdk = 28, qualifiers = "w640dp-h360dp-land-xxhdpi")
+    public void gameOptions_api28_muteSwitchIsDrawn() throws Exception {
+        GameActivity g = gameActivity();
+        g.pauseMenuAction(GameActivity.PAUSE_OPTIONS);
+        TestSupport.settle(300);
+        android.app.AlertDialog d = org.robolectric.shadows.ShadowAlertDialog.getLatestAlertDialog();
+        assertTrue("the Options dialog is up", d != null && d.isShowing());
+        View decor = d.getWindow().getDecorView();
+        android.util.DisplayMetrics dm = g.getResources().getDisplayMetrics();
+        int w = dm.widthPixels, h = dm.heightPixels;
+        decor.measure(View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(h, View.MeasureSpec.EXACTLY));
+        decor.layout(0, 0, w, h);
+        TestSupport.settle(100);
+        android.widget.Switch mute = (android.widget.Switch) TestSupport.find(decor, "Mute all sound and music");
+        assertNotNull("the Mute switch is in the dialog", mute);
+        assertTrue("the Mute switch has a height of a touch target (" + mute.getHeight() + " px)", mute.getHeight() >= 40 * dm.density);
+        assertTrue("the Mute switch has a sensible width (" + mute.getWidth() + " px)", mute.getWidth() >= 120 * dm.density && mute.getWidth() <= w);
+        assertNotNull("the Mute switch has a track", mute.getTrackDrawable());
+        assertNotNull("the Mute switch has a thumb", mute.getThumbDrawable());
+        d.dismiss();
+        System.out.println("SDK " + android.os.Build.VERSION.SDK_INT + ": Mute switch " + mute.getWidth() + " x " + mute.getHeight() + " px, drawn");
+    }
+
     /** The top edge of a view inside an ancestor, in the ancestor's coordinates. */
     private static int offsetIn(View v, View ancestor) {
         int y = 0;

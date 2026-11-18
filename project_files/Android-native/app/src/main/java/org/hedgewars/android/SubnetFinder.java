@@ -87,7 +87,8 @@ final class SubnetFinder {
         // carries this subnet. A network that refuses the socket is replaced by the default one in each probe (NetworkPicker.openSocket).
         final Network net = NetworkPicker.autoNetwork(app, lan.address, lan.name);
         Log.i(Diag.TAG, "subnet: scan started, " + targets.size() + " address(es) on " + lan.kind + " " + lan.address + "/" + lan.prefix
-                + ", port " + Relay.PHONE_PORT + ", " + (net != null ? "on the Wi-Fi network" : "on the default network"));
+                + ", port " + Relay.PHONE_PORT + ", " + (net != null ? "bound to " + NetworkPicker.describe(app, net)
+                : "on the default route (" + NetworkPicker.defaultRouteWhy(app, lan.address) + ")"));
         ExecutorService ex = Executors.newFixedThreadPool(AT_ONCE, r -> {
             Thread th = new Thread(r, "subnet-probe");
             th.setDaemon(true);

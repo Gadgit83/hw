@@ -385,10 +385,36 @@ final class NetworkPicker {
      * or Ethernet network ({@code preferIface} first). Used by the joins and by the subnet search.
      */
     static Network autoNetwork(Context c, String host, String preferIface) {
-        List<Iface> ifaces = list();
-        if (onVpnRoute(host, ifaces, vpnActive(c, ifaces))) return null;
-        if (routesTo(host, vpnRoutes(c))) return null;
+        if (vpnCovers(c, host)) return null;
         return lanNetwork(c, preferIface);
+    }
+
+    /** True if a VPN carries {@code host}: on its interface's subnet, a Tailscale address, or on one of its routes. Not for the UI thread. */
+    static boolean vpnCovers(Context c, String host) {
+        List<Iface> ifaces = list();
+        return onVpnRoute(host, ifaces, vpnActive(c, ifaces)) || routesTo(host, vpnRoutes(c));
+    }
+
+    /**
+     * The network as the search and join log name it: "network 108 (wlan0)". The id is the one in the Network's own text, which the
+     * system writes as {@code Network[108]}; the interface comes from its LinkProperties.
+     */
+    static String describe(Context c, Network n) {
+        String id = String.valueOf(n).replaceAll("\\D", "");
+        String iface = "?";
+        try {
+            ConnectivityManager cm = connectivity(c);
+            LinkProperties lp = cm == null ? null : cm.getLinkProperties(n);
+            if (lp != null && lp.getInterfaceName() != null) iface = lp.getInterfaceName();
+        } catch (RuntimeException ignored) {
+        }
+        return "network " + (id.isEmpty() ? String.valueOf(n) : id) + " (" + iface + ")";
+    }
+
+    /** Why a join to {@code host} uses the default route, for the log: this phone, a VPN that covers the LAN, or no Wi-Fi or Ethernet. */
+    static String defaultRouteWhy(Context c, String host) {
+        if (host == null || host.isEmpty() || host.startsWith("127.") || host.equals("localhost") || host.equals("::1")) return "this phone";
+        return vpnCovers(c, host) ? "VPN covers the LAN" : "no Wi-Fi or Ethernet network";
     }
 
     /** True if {@code host} is reached through a VPN: on a VPN interface's subnet, or a Tailscale address while a VPN is on. */
@@ -460,10 +486,10 @@ final class NetworkPicker {
             @Override public Socket createSocket() throws java.io.IOException {
                 Network n = networkFor(c, host);
                 if (n == null) {
-                    android.util.Log.i(Diag.TAG, "join " + host + ": default network");
+                    android.util.Log.i(Diag.TAG, "join " + host + ": default route (" + defaultRouteWhy(c, host) + ")");
                     return new Socket();
                 }
-                android.util.Log.i(Diag.TAG, "join " + host + ": on the chosen network");
+                android.util.Log.i(Diag.TAG, "join " + host + ": bound to " + describe(c, n));
                 return openSocket(n, x -> x.getSocketFactory().createSocket());
             }
 

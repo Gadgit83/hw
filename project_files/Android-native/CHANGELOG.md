@@ -4,6 +4,37 @@ All notable changes to the native Android app (`project_files/Android-native`), 
 
 Only some builds were put on a phone, so a version below is a build that was made, not necessarily one that was released. Releases are tags on `android-master` with the APK attached; there is none yet.
 
+## 0.3.0-tv19 (123): fixes from the tv18 device check
+
+`HP_PROFILE=test`, versionName `0.3.0-tv19-test`. Each change answers a finding of RESULT 26 on issue #1. Engine changes are commits on the `tv19` branch of https://github.com/Gadgit83/hw, each opt-in. Compat is unchanged (`hwnet-60-sim3`).
+
+### Changed
+
+- #22 Watch the game (owner decision): a player who is away and can still rejoin, the host included, is offered Rejoin, not Watch. Watch is offered only to a phone with no teams in the running game, because its window has run out or it arrived late. Watching your own held game could not work: the watcher ended the game after about 26 s, and the host lost its teams. The host still watches over its own relay without closing its seat. New scenario `hostwatch`.
+- #4 Swap Fire and Jump (owner decision): greyed out, with a note, while a custom controls layout is saved.
+
+### Fixed
+
+- #26 The saved controls layout was lost after Quit and a new game in the same session. The game and the menus run in separate processes, and the menus wrote their stale copy of the settings back. Settings now live in their own file, read fresh and written atomically, so in-game changes such as the volume survive as well.
+- #26 After Reset to default, the aim Up arrow was missing: both arrows sat at their hidden place. A shown arrow now goes back to its shown place after a layout change.
+- The rejoin countdown ticks down.
+- A game the host ended is no longer reported as "Engine error".
+- A host that has left is greyed out in the Join list until a search finds it again.
+- The in-game Mute switch is drawn properly. The in-game dialog used an old theme.
+
+### Added
+
+- The join log names the network it binds to, for example `bound to network 108 (wlan0)`, or the default route and why.
+- Diagnostics for #3 and #13, written to `adb logcat -s HW_Engine` only while the feature is in use:
+  - `death boom: ...` lines for the setting, each hedgehog's explosion size and each death explosion;
+  - `aim helper: angle ... power ... path points ... lands at ...` lines while charging.
+- Test tooling: `scripts/net-suite.sh` runs the network scenarios three at a time, about 2.3 times faster. `docs/TESTING.md` has the testing strategy.
+
+### Still open
+
+- #3 Death explosion size: the engine stores the right size (Boom 90 at 300%), but the device saw no difference. The new log lines will show what happens on the phone.
+- #13 A level shot at land about 150 px away drew no path on the Moto G6. Not reproduced in the cloud yet. The new log lines will show the path the phone computed.
+
 ## 0.3.0-tv18 (122): fixes from the tv17 device check
 
 `HP_PROFILE=test`, versionName `0.3.0-tv18-test`. Each change answers a finding of RESULT 25 on issue #1. Engine changes are commits on the `tv18` branch of https://github.com/Gadgit83/hw, each opt-in, so the original engine behaves as before. Compat is unchanged (`hwnet-60-sim3`).

@@ -863,7 +863,8 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
         String phase = st == null ? "connecting..." : Json.str(st, "state", "");
         boolean playing = "playing".equals(phase) || NetSession.inGame;
         // Until the relay has said what the game is doing this is "connecting...", never a lobby (a rejoin starts with no state at all).
-        card.addView(ui.hint("State: " + (st == null ? "connecting..." : playing ? "game running" : "lobby (setting up)")));
+        boolean closed = "closed".equals(phase) && !playing;
+        card.addView(ui.hint("State: " + (st == null ? "connecting..." : closed ? "connection lost" : playing ? "game running" : "lobby (setting up)")));
         // A watcher whose game is over (it asked to watch after the game ended, or it was ended while it watched) is told so, and why.
         if (NetSession.watching && !playing && !NetSession.lastEndReason.isEmpty()) {
             card.addView(ui.heading("The game ended"));

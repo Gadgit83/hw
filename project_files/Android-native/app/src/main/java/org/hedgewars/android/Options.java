@@ -45,6 +45,17 @@ public final class Options {
     public boolean healthTags = true;
     public boolean aiQuick = true;     // computer players: quick and smart (the default) or classic (no AI options)
 
+    /** True when the two hold the same options (the date comment of the text is left out). */
+    public boolean sameAs(Options other) {
+        return other != null && strip(toText()).equals(strip(other.toText()));
+    }
+
+    private static String strip(String text) {
+        StringBuilder b = new StringBuilder();
+        for (String line : text.split("\n")) if (!line.startsWith("#")) b.append(line).append('\n');
+        return b.toString();
+    }
+
     public Options copy() {
         return fromText(toText());
     }

@@ -24,6 +24,7 @@ uses uTypes, uFloat;
 
 procedure doMakeExplosion(X, Y, Radius: LongInt; AttackingHog: PHedgehog; Mask: Longword);
 procedure doMakeExplosion(X, Y, Radius: LongInt; AttackingHog: PHedgehog; Mask: Longword; const Tint: LongWord);
+function  LandBoomRadius(Radius: LongInt): LongInt;
 procedure AddSplashForGear(Gear: PGear; justSkipping: boolean);
 procedure AddBounceEffectForGear(Gear: PGear; imageScale: Single);
 procedure AddBounceEffectForGear(Gear: PGear);
@@ -91,6 +92,13 @@ begin
     doMakeExplosion(X, Y, Radius, AttackingHog, Mask, $FFFFFFFF);
 end;
 
+// radius of the land removed by an explosion of Radius (setup $landboompct); 100 leaves it unchanged
+function LandBoomRadius(Radius: LongInt): LongInt;
+begin
+LandBoomRadius:= Radius;
+if cLandBoomPercent <> 100 then LandBoomRadius:= Radius * cLandBoomPercent div 100;
+end;
+
 procedure doMakeExplosion(X, Y, Radius: LongInt; AttackingHog: PHedgehog; Mask: Longword; const Tint: LongWord);
 var Gear: PGear;
     dmg, dmgBase, landR: LongInt;
@@ -127,8 +135,7 @@ if (Mask and EXPLAutoSound) <> 0 then PlaySound(sndExplosion);
 dmgBase:= Radius shl 1 + cHHRadius div 2;
 
 // radius of the land removed (setup $landboompct); damage above still uses Radius. 100 leaves it unchanged.
-landR:= Radius;
-if cLandBoomPercent <> 100 then landR:= Radius * cLandBoomPercent div 100;
+landR:= LandBoomRadius(Radius);
 
 // we might have to run twice if weWrap is enabled
 wrap:= false;

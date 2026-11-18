@@ -672,7 +672,9 @@ public final class Ui {
     }
 
     public Switch toggle(String label, boolean value, java.util.function.Consumer<Boolean> on) {
-        Switch s = new Switch(ctx);
+        // The app theme, whatever screen the switch is on: the game's own theme (GameTheme, a Holo theme) drew the Mute switch on
+        // Android 9 as a bare "OFF"/"ON" label with no track or thumb. Every other switch is drawn with AppTheme.
+        Switch s = new Switch(new android.view.ContextThemeWrapper(ctx, R.style.AppTheme));
         s.setText(label);
         s.setTextSize(14);
         s.setTextColor(Color.WHITE);

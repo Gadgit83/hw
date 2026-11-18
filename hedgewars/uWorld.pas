@@ -2627,7 +2627,25 @@ if (TargetPoint.X <> NoPointX) and (CurrentTeam <> nil) and (CurrentHedgehog <> 
         end;
     end;
 
-// Aim helper: the path of the shot being charged, on this phone only (display only, see AimHelperRun)
+// Attack bar
+if replicateToLeft then
+    begin
+    ShiftWorld(-1);
+    RenderAttackBar();
+    UnshiftWorld();
+    end;
+
+if replicateToRight then
+    begin
+    ShiftWorld(1);
+    RenderAttackBar();
+    UnshiftWorld();
+    end;
+
+RenderAttackBar();
+
+// Aim helper: the path of the shot being charged, on this phone only (display only, see AimHelperRun).
+// Drawn after the attack bar so the dots and the landing marker show over the charge cone.
 if AimHelperRun then
     begin
     if replicateToLeft then
@@ -2646,23 +2664,6 @@ if AimHelperRun then
 
     RenderAimHelperDots();
     end;
-
-// Attack bar
-if replicateToLeft then
-    begin
-    ShiftWorld(-1);
-    RenderAttackBar();
-    UnshiftWorld();
-    end;
-
-if replicateToRight then
-    begin
-    ShiftWorld(1);
-    RenderAttackBar();
-    UnshiftWorld();
-    end;
-
-RenderAttackBar();
 
 // World edge
 RenderWorldEdge();

@@ -67,12 +67,56 @@ public final class Store {
         prefs(c).edit().putString("setup", m.toText()).apply();
     }
 
+    /**
+     * The options, read fresh from their own file every time. The game runs in its own process, which keeps its own copy of the
+     * app's preferences, so the options are not kept in the preferences: a write of a preferences copy that was loaded earlier
+     * (the main process rewrites its whole copy) put old options back, lost the saved controls layout and undid volume changes
+     * made in a game. Until the file is first written, the options of an older version are read from the preferences.
+     */
     public static Options loadOptions(Context c) {
-        return Options.fromText(prefs(c).getString("options", null));
+        String text = readText(optionsFile(c));
+        if (text == null) text = prefs(c).getString("options", null);
+        return Options.fromText(text);
     }
 
     public static void saveOptions(Context c, Options o) {
-        // commit, not apply: the game runs in another process and reads this file when it starts.
-        prefs(c).edit().putString("options", o.toText()).commit();
+        writeAtomic(optionsFile(c), o.toText());
+    }
+
+    /** Forgets the options: the next read gives the defaults (Reset setup and options). */
+    public static void clearOptions(Context c) {
+        optionsFile(c).delete();
+    }
+
+    private static File optionsFile(Context c) {
+        return new File(c.getFilesDir(), "options.txt");
+    }
+
+    /** The text of a file, or null when it does not exist. */
+    private static String readText(File f) {
+        if (!f.exists()) return null;
+        try (java.io.FileInputStream in = new java.io.FileInputStream(f)) {
+            java.io.ByteArrayOutputStream b = new java.io.ByteArrayOutputStream();
+            byte[] buf = new byte[1024];
+            int n;
+            while ((n = in.read(buf)) != -1) b.write(buf, 0, n);
+            return new String(b.toByteArray(), java.nio.charset.StandardCharsets.UTF_8);
+        } catch (java.io.IOException e) {
+            android.util.Log.w(Diag.TAG, "options not read: " + e);
+            return null;
+        }
+    }
+
+    /** Writes a file in one piece: a temporary file, synced, then renamed over the old one. */
+    private static void writeAtomic(File f, String text) {
+        File tmp = new File(f.getPath() + ".tmp");
+        try (java.io.FileOutputStream out = new java.io.FileOutputStream(tmp)) {
+            out.write(text.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            out.getFD().sync();
+        } catch (java.io.IOException e) {
+            android.util.Log.w(Diag.TAG, "options not saved: " + e);
+            return;
+        }
+        if (!tmp.renameTo(f)) android.util.Log.w(Diag.TAG, "options not saved: rename failed");
     }
 }

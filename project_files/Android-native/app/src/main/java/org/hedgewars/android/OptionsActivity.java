@@ -39,6 +39,8 @@ public class OptionsActivity extends SetupActivity {
 
     private Ui ui;
     private Options o;
+    /** The options as they were when this screen opened: a change is what gets saved. */
+    private Options loaded;
     private int tab;
     private LinearLayout root, holder, topBar;
     private Ui.Tabs tabs;
@@ -51,6 +53,7 @@ public class OptionsActivity extends SetupActivity {
         Ui.edgeToEdge(this);
         String fromGame = getIntent() == null ? null : getIntent().getStringExtra(EXTRA_OPTIONS);
         o = fromGame != null ? Options.fromText(fromGame) : Store.loadOptions(this);
+        loaded = Options.fromText(o.toText());
         tab = getSharedPreferences(Store.PREFS_NAME, MODE_PRIVATE).getInt("optionsTab", 0);
         if (tab < 0 || tab > 2) tab = 0;
         int asked = getIntent() == null ? -1 : getIntent().getIntExtra(EXTRA_TAB, -1);
@@ -72,7 +75,9 @@ public class OptionsActivity extends SetupActivity {
 
     @Override
     protected void onPause() {
-        Store.saveOptions(this, o);
+        // Only a change is written: the options are read when this screen opens, and a copy that was not changed must not
+        // write back what a game changed since (see Store.loadOptions).
+        if (!o.sameAs(loaded)) Store.saveOptions(this, o);
         getSharedPreferences(Store.PREFS_NAME, MODE_PRIVATE).edit().putInt("optionsTab", tab).apply();
         super.onPause();
     }
@@ -256,8 +261,15 @@ public class OptionsActivity extends SetupActivity {
             enableAll(walk, !c);
         }));
         buttons.addView(ui.hint("The High jump button sits left of Jump. Press it twice quickly for a back flip."));
-        buttons.addView(ui.toggle("Swap Fire and Jump", o.swapFireJump, c -> o.swapFireJump = c));
+        // A saved controls layout places the buttons itself, so the swap has no effect then: it is greyed out until the layout is reset
+        boolean layoutSaved = !o.touchLayout.isEmpty();
+        android.widget.Switch swap = ui.toggle("Swap Fire and Jump", o.swapFireJump, c -> o.swapFireJump = c);
+        buttons.addView(swap);
         buttons.addView(ui.hint("Puts Jump where Fire is, and Fire where Jump is, mirrored."));
+        android.widget.TextView swapNote = ui.hint("Not available while a custom controls layout is saved. Reset the layout to use it.");
+        swapNote.setVisibility(layoutSaved ? View.VISIBLE : View.GONE);
+        buttons.addView(swapNote);
+        enableAll(swap, !layoutSaved);
         walk.addView(ui.toggle("With one jump button: Jump while walking does the long forward jump", o.jumpWhileMoving,
                 c -> o.jumpWhileMoving = c));
         walk.addView(ui.hint("Only with one jump button. While a left or right move is held, Jump jumps forward. "
@@ -399,7 +411,9 @@ public class OptionsActivity extends SetupActivity {
 
     private void resetSettings() {
         getSharedPreferences(Store.PREFS_NAME, MODE_PRIVATE).edit().clear().commit();
+        Store.clearOptions(this);
         o = new Options();
+        loaded = Options.fromText(o.toText());
         Toast.makeText(this, "Setup and options reset.", Toast.LENGTH_LONG).show();
         finish();
     }

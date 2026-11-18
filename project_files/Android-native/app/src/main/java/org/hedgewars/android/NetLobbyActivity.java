@@ -165,10 +165,11 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
         if (NetSession.hosting) NetSession.startTicker();
         sendForeground(true);
         if (BackConfirm.takeLeave(getFilesDir()) && NetSession.joined && NetSession.watching) {
-            // "Stop watching" was confirmed in the game screen: leave the relay now and show the chooser.
+            // "Stop watching" was confirmed in the game screen: leave the relay now and show the chooser. A hosting phone that watches
+            // its own game only stops watching: its hosting, seat and rejoin window go on.
             NetSession.pendingStart = null;
             NetSession.inGame = false;
-            leaveOrStop();
+            if (NetSession.hosting) NetSession.stopOwnWatch(); else leaveOrStop();
         }
         if (!NetSession.joined && !NetSession.hosting) startSearch(false);
         getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
@@ -184,6 +185,7 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
     @Override
     protected void onPause() {
         NetSession.lobbyVisible = false;
+        tickHandler.removeCallbacks(countdownTick);
         stopSearch();
         sendForeground(false);
         saveFields();
@@ -256,6 +258,48 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
             NetDiag.clear(this);
             startActivity(new Intent(this, GameActivity.class));
         });
+    }
+
+    // Rejoin countdown ---------------------------------------------------------------------------
+
+    /** The label of a sitting-out phone, with its teams; only its number is counted down. */
+    private static final class Countdown {
+        final TextView view;
+        final long id;
+        final String teams;
+        Countdown(TextView view, long id, String teams) { this.view = view; this.id = id; this.teams = teams; }
+    }
+
+    /** The labels of the phones that are sitting out, as the last drawing made them (see lobby()). */
+    private final List<Countdown> countdowns = new java.util.ArrayList<>();
+    private final android.os.Handler tickHandler = new android.os.Handler(android.os.Looper.getMainLooper());
+    /** Counts the rejoin windows down on screen: the relay's number is only sent when its state changes, so a second clock is kept here. */
+    private final Runnable countdownTick = new Runnable() {
+        @Override public void run() {
+            if (destroyed) return;
+            refreshCountdowns();
+            if (!countdowns.isEmpty()) tickHandler.postDelayed(this, 1000);
+        }
+    };
+
+    @SuppressWarnings("unchecked")
+    private void refreshCountdowns() {
+        Map<String, Object> st = NetSession.state;
+        long now = System.currentTimeMillis();
+        List<Countdown> still = new java.util.ArrayList<>();
+        for (Countdown c : countdowns) {
+            Map<String, Object> found = null;
+            if (st != null) for (Object o : Json.list(st, "players")) {
+                Map<String, Object> p = (Map<String, Object>) o;
+                if (Json.num(p, "id", -1) == c.id) found = p;
+            }
+            if (found == null || !Json.bool(found, "away", false)) continue;
+            c.view.setText(c.teams + "  (sitting out; can rejoin for about "
+                    + NetSession.awayLeftSeconds(Json.num(found, "awayLeftMs", 0), NetSession.stateAt, now) + " s)");
+            still.add(c);
+        }
+        countdowns.clear();
+        countdowns.addAll(still);
     }
 
     // Screens -----------------------------------------------------------------------------------
@@ -505,6 +549,7 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
         searchDone = false;
         searchStatus = "Searching for hosts on this Wi-Fi...";
         hosts.clear();
+        NetSession.goneHost = "";
         renderHosts();
         final android.content.Context app = getApplicationContext();
         // The search starts at once; the fingerprint of this phone's data (which can take a while the first time) is read
@@ -641,11 +686,13 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
                 row.addView(coloured("Cannot join: " + why, Ui.DANGER));
             }
             LinearLayout bt = ui.row();
+            boolean gone = (h.host + ":" + h.port).equals(NetSession.goneHost);
+            if (gone) row.addView(ui.hint("This host has stopped hosting. Search again to find it."));
             Button play = ui.button("Join to play", true, v -> pickHost(h, false));
-            play.setEnabled(why == null);
+            play.setEnabled(why == null && !gone);
             Button watch = ui.button("Join to watch", false, v -> pickHost(h, true));
             watch.setBackground(ui.inset(ui.pressable(Ui.FIELD, Color.rgb(40, 60, 46), 9), 0, (Ui.TOUCH_DP - Ui.LOOK_DP) / 2));   // the row is as light as a plain button
-            watch.setEnabled(why == null);
+            watch.setEnabled(why == null && !gone);
             bt.addView(play, ui.weight(1f));
             bt.addView(watch, ui.margins(Ui.lp(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f), 8, 0, 0, 0));
             row.addView(bt);
@@ -744,6 +791,8 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
     @SuppressWarnings("unchecked")
     private void lobby() {
         Map<String, Object> st = NetSession.state;
+        countdowns.clear();
+        tickHandler.removeCallbacks(countdownTick);
         LinearLayout card = ui.card();
         boolean host = NetSession.hosting;
         // The long explanations are collected and shown at the end of the card, so the addresses, the TVs and the phones come first.
@@ -848,8 +897,12 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
                 LinearLayout row = ui.card();
                 row.setBackground(ui.round(Ui.PANEL_HI, 10));
                 row.addView(ui.text(line, 16, Color.WHITE));
-                row.addView(ui.hint(watcher ? "watching only, no teams" : teams.length() == 0 ? "no teams" : teams.toString()
-                        + (away ? "  (sitting out; can rejoin for about " + (Json.num(p, "awayLeftMs", 0) + 999) / 1000 + " s)" : gone ? "  (sitting out)" : "")));
+                String teamsText = watcher ? "watching only, no teams" : teams.length() == 0 ? "no teams" : teams.toString();
+                TextView hint = ui.hint(teamsText + (away ? "  (sitting out; can rejoin for about "
+                        + NetSession.awayLeftSeconds(Json.num(p, "awayLeftMs", 0), NetSession.stateAt, System.currentTimeMillis()) + " s)"
+                        : gone ? "  (sitting out)" : ""));
+                row.addView(hint);
+                if (away) countdowns.add(new Countdown(hint, Json.num(p, "id", -1), teamsText));   // counted down each second (countdownTick)
                 if (host && !playing && !watcher && !me && !Json.bool(p, "host", false)) {
                     final long pid = Json.num(p, "id", -1);
                     final String who = Json.str(p, "name", "?");
@@ -921,9 +974,12 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
             // The host sends every team of its setup; a joining phone sends only its own team.
             c.setTeams(host ? Store.loadSetup(this, Store.data(this)).teams : Collections.singletonList(Store.joinTeam(this, Store.data(this))));
         }), ui.margins(Ui.lp(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT), 8, 0, 0, 0));
+        if (host && NetSession.watching) buttons.addView(ui.button("Stop watching", false, v -> NetSession.stopOwnWatch()),
+                ui.margins(Ui.lp(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT), 8, 0, 0, 0));
         buttons.addView(ui.button(host ? "Stop hosting" : NetSession.watching ? "Stop watching" : "Leave", false, v -> leaveOrStop()),
                 ui.margins(Ui.lp(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT), 8, 0, 0, 0));
         card.addView(buttons, ui.margins(Ui.lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT), 0, 10, 0, 0));
+        if (!countdowns.isEmpty()) tickHandler.postDelayed(countdownTick, 1000);
         card.addView(ui.hint(host ? "Your teams and the map and rules come from the setup screen. Leaving the game screen does not stop hosting."
                 : NetSession.watching ? "You are watching: no teams, no controls. The game starts on this phone when the host presses Start, or at once if one is running."
                 : "Your team is the one under Your team on the Network screen. Press Ready; the host starts when everyone is ready."));

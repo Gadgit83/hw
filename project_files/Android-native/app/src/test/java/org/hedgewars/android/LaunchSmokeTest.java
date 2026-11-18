@@ -459,6 +459,7 @@ public class LaunchSmokeTest {
         java.lang.reflect.Field f = NetSession.class.getDeclaredField("state");
         f.setAccessible(true);
         f.set(null, org.hedgewars.android.net.Json.parseObject(stateJson));
+        NetSession.stateAt = System.currentTimeMillis();     // as the relay's state arriving would set it
         NetSession.joined = true;
         NetSession.hosting = hosting;
         NetSession.target = "192.168.1.20:46633";
@@ -1038,6 +1039,18 @@ public class LaunchSmokeTest {
         assertFalse("a running game has no Start game: " + running, running.contains("Start game"));
         TestSupport.resetStatics();
         System.out.println("SDK " + android.os.Build.VERSION.SDK_INT + ": NetLobbyActivity no stale lobby ok");
+    }
+
+    /** The rejoin countdown counts down from the relay's number by the time since its state arrived, rounded up, and stops at 0. */
+    @Test
+    public void netSession_awayCountdownTicks() {
+        assertEquals(120L, NetSession.awayLeftSeconds(120000L, 1000L, 1000L));          // just arrived: the relay's number
+        assertEquals(120L, NetSession.awayLeftSeconds(120000L, 1000L, 1500L));          // half a second on: 119.5 s, rounded up
+        assertEquals(119L, NetSession.awayLeftSeconds(120000L, 1000L, 2000L));          // one second on: 119 s
+        assertEquals(119L, NetSession.awayLeftSeconds(120000L, 1000L, 2001L));          // a second and a bit: 118.999 s, rounded up
+        assertEquals(88L, NetSession.awayLeftSeconds(88000L, 5000L, 5000L));            // the host's own frozen 88 s now counts down
+        assertEquals(0L, NetSession.awayLeftSeconds(2000L, 0L, 9000L));                 // past the window: 0, never negative
+        assertEquals(0L, NetSession.awayLeftSeconds(0L, 0L, 0L));
     }
 
     /** The offer rule as a truth table (NetSession.offerWatch). */

@@ -42,6 +42,10 @@ final class NetSession {
     static volatile boolean watching;
     static volatile String target = "";
     static volatile Map<String, Object> state;
+    /** When {@link #state} arrived (System.currentTimeMillis), so a countdown the relay sent can be counted down on this phone. */
+    static volatile long stateAt;
+    /** host:port of a host that said "The host left." (it stopped hosting): its entry in the Join list is not offered until a search finds it again. */
+    static volatile String goneHost = "";
     /** Why the relay ended the last game (from its summary), so a normal end is not shown as an engine error. */
     static volatile String lastEndReason = "";
     static volatile String closedReason = "", notice = "";
@@ -220,6 +224,7 @@ final class NetSession {
     private static final RelayClient.Handler HANDLER = new RelayClient.Handler() {
         @Override public void onState(Map<String, Object> s) {
             state = s;
+            stateAt = System.currentTimeMillis();
             // The host let us in, so the password we sent (if any) is right: keep it for this app session.
             String k = sentPinKey, pn = sentPin;
             if (k != null && !pn.isEmpty()) knownPins.put(k, pn);
@@ -298,6 +303,7 @@ final class NetSession {
         }
 
         @Override public void onClosed(String reason) {
+            if ("The host left.".equals(reason)) goneHost = lastHostName + ":" + lastPort;
             // A connection that ended outside a game leaves nothing to come back to; one that ended in a running game keeps its note.
             Map<String, Object> st0 = state;
             boolean running = inGame || (st0 != null && "playing".equals(org.hedgewars.android.net.Json.str(st0, "state", "")));
@@ -441,13 +447,36 @@ final class NetSession {
         ping();
     }
 
+    /** The hosting phone stops watching its own game: only the watching link closes; the seat, the hosting and the rejoin window stay. */
+    static void stopOwnWatch() {
+        RelayClient w;
+        synchronized (NetSession.class) {
+            w = watchLink;
+            watchLink = null;
+            watching = false;
+        }
+        if (w != null) w.close();
+        ping();
+    }
+
+    /**
+     * Seconds left in a sitting-out phone's rejoin window, counted down from the relay's number (what it had left when it sent the state)
+     * by the time since the state arrived. Rounded up, and never below 0.
+     */
+    static long awayLeftSeconds(long awayLeftMs, long stateAtMs, long nowMs) {
+        long left = awayLeftMs - Math.max(0L, nowMs - stateAtMs);
+        return left <= 0 ? 0 : (left + 999) / 1000;
+    }
+
     /**
      * Handler of a hosting phone's watching link. It passes on what a watcher is sent, like HANDLER, but its end clears only the watching
      * link: the seat's client, joined flag and locks are not touched, and its join does not replace the seat's rejoin token.
      */
     private static RelayClient.Handler watchHandler(final RelayClient[] self) {
         return new RelayClient.Handler() {
-            @Override public void onState(Map<String, Object> s) { HANDLER.onState(s); }
+            // The watching link's state says who "you" is for the watcher, so it must not replace the seat's state (the host's
+            // Rejoin and its countdown are read from that): the screen only needs to be drawn again.
+            @Override public void onState(Map<String, Object> s) { ping(); }
             @Override public void onStart(RelayClient.StartInfo s) { HANDLER.onStart(s); }
             @Override public void onSummary(Map<String, Object> m) { HANDLER.onSummary(m); }
             @Override public void onNotice(String t) { HANDLER.onNotice(t); }

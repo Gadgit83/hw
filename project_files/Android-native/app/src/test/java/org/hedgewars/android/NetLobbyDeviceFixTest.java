@@ -12,6 +12,8 @@ import android.widget.TextView;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import java.net.InetAddress;
+import java.net.ServerSocket;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -203,5 +205,73 @@ public class NetLobbyDeviceFixTest {
         c.pause().resume();
         assertEquals("the Network screen follows the device again", ActivityInfo.SCREEN_ORIENTATION_USER,
                 c.get().getRequestedOrientation());
+    }
+
+    // 5. The chooser keeps a search running, so it ends in "Search again" (device report, item 1) -----
+
+    @Test
+    public void aChooserShownAfterAJoinStartsASearchAgain() throws Exception {
+        NetLobbyActivity a = chooser().get();
+        assertEquals("the screen searches on start", 1, listeners.size());
+        call(a, "stopSearch");                          // what a join does when it starts
+        NetSession.goneHost = HOST_ADDRESS;             // then the host left and the lobby closed
+        NetSession.closedReason = "The host left.";
+        redraw(a, "render");                            // the chooser is drawn again
+        assertEquals("the chooser searches again, so the search ends with a Search again button", 2, listeners.size());
+    }
+
+    // 6. A fresh search that finds the host again ends the "The host left." banner (device report, item 2) -----
+
+    @Test
+    public void theHostLeftBannerEndsWhenAFreshSearchFindsTheHost() throws Exception {
+        NetLobbyActivity a = chooser().get();
+        NetSession.goneHost = HOST_ADDRESS;
+        NetSession.closedReason = "The host left.";
+        call(a, "startSearch", true);                   // Search again: a new search
+        listeners.get(listeners.size() - 1).hosts(Arrays.asList(found(HOST)));
+        assertEquals("the grey-out ends when the new search lists the host", "", NetSession.goneHost);
+        assertEquals("the banner's reason is cleared", "", NetSession.closedReason);
+    }
+
+    // 7. A refused join marks the host as stopped and says so (device report, item 3) -----
+
+    @Test
+    public void aRefusedJoinGreysTheHostOutWithAClearMessage() throws Exception {
+        int port;
+        try (ServerSocket s = new ServerSocket(0, 1, InetAddress.getByName("127.0.0.1"))) {
+            port = s.getLocalPort();                    // nothing listens on this port any more: the join is refused
+        }
+        NetLobbyActivity a = chooser().get();
+        listeners.get(0).hosts(Arrays.asList(foundAt("127.0.0.1", port)));
+        call(a, "connectTo", "127.0.0.1", port, false, "");
+        for (int i = 0; i < 100 && NetSession.goneHost.isEmpty(); i++) TestSupport.settle(100);
+        assertEquals("the refused host is marked as having stopped hosting", "127.0.0.1:" + port, NetSession.goneHost);
+        TestSupport.settle(200);
+        String problem = (String) field(a, "problem");
+        assertTrue("the message says the host is not hosting any more: " + problem, problem.contains("not hosting"));
+        assertTrue("the row is greyed out", anyContains(texts(a), "stopped hosting"));
+    }
+
+    private static HostAdvert.Found foundAt(String host, int port) {
+        HostAdvert.Found f = found(host);
+        f.port = port;
+        return f;
+    }
+
+    /** Calls a private method of the screen by name (the overload with the given number of arguments). */
+    private static Object call(NetLobbyActivity a, String name, Object... args) throws Exception {
+        for (Method m : NetLobbyActivity.class.getDeclaredMethods()) {
+            if (m.getName().equals(name) && m.getParameterTypes().length == args.length) {
+                m.setAccessible(true);
+                return m.invoke(a, args);
+            }
+        }
+        throw new NoSuchMethodException(name);
+    }
+
+    private static Object field(NetLobbyActivity a, String name) throws Exception {
+        Field f = NetLobbyActivity.class.getDeclaredField(name);
+        f.setAccessible(true);
+        return f.get(a);
     }
 }

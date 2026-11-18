@@ -57,6 +57,15 @@ final class NetSession {
      */
     static boolean noticeStillHolds(String text, Map<String, Object> st) {
         if (text == null || text.isEmpty() || st == null) return true;
+        // The notice about this phone's own seat names no phone: it holds while this seat is given up, and ends when it is not.
+        if (text.equals(org.hedgewars.android.net.Relay.GAVE_UP_TEXT) || text.equals(org.hedgewars.android.net.Relay.GAVE_UP_HOST_TEXT)) {
+            long you = org.hedgewars.android.net.Json.num(st, "you", -1);
+            for (Object o : org.hedgewars.android.net.Json.list(st, "players")) {
+                Map<String, Object> p = (Map<String, Object>) o;
+                if (org.hedgewars.android.net.Json.num(p, "id", -2) == you) return org.hedgewars.android.net.Json.bool(p, "gaveUp", false);
+            }
+            return false;
+        }
         java.util.regex.Matcher m = PHONE_NOTICE.matcher(text);
         if (!m.find()) return true;
         String who = m.group(1);
@@ -292,6 +301,11 @@ final class NetSession {
             lastEndReason = "";
             gaveUp = false;
             notice = "";
+            // The game-end summary cleared the note, and a joiner that stayed in the lobby never joins again: keep the note for this game.
+            Context nc = HpApp.appContext;
+            if (nc != null && !lastHostName.isEmpty() && !rejoinToken.isEmpty() && !seatName.isEmpty()) {
+                saveRejoin(nc, lastHostName, lastPort, seatName, rejoinToken, hosting);
+            }
             Listener l = listener;
             if (l != null && lobbyVisible) {
                 l.startGame(s);

@@ -65,6 +65,7 @@ final class TestSupport {
         set(NetSession.class, "target", "");
         set(NetSession.class, "state", null);
         set(NetSession.class, "closedReason", "");
+        set(NetSession.class, "goneHost", "");
         set(NetSession.class, "notice", "");
         set(NetSession.class, "relaySummary", "");
         set(NetSession.class, "pendingStart", null);

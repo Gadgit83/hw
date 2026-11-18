@@ -1253,7 +1253,7 @@ public class LaunchSmokeTest {
         assertTrue("the join says it tries again: " + trying, trying.contains("Trying again (2 of 3)..."));
         TestSupport.settle(4500);                       // three attempts, 1.5 s apart
         String after = TestSupport.texts(a.getWindow().getDecorView());
-        assertTrue("the tap tried to reach the host: " + after, after.contains("Could not reach 127.0.0.1:1"));
+        assertTrue("the tap tried to reach the host and was refused: " + after, after.contains("127.0.0.1:1 is not hosting any more"));
         assertTrue("the host picked is remembered",
                 app().getSharedPreferences(Store.PREFS_NAME, Context.MODE_PRIVATE).getString("lasthost", "").equals("Fairphone"));
         System.out.println("SDK " + android.os.Build.VERSION.SDK_INT + ": discovered hosts list ok");

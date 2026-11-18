@@ -1112,6 +1112,31 @@ UISwapOut;
 {$ENDIF}
 end;
 
+// An aim arrow that shows stays at its shown place. animateWidget turns the slide round each time an arrow shows or hides,
+// so a shown arrow is at the source of its slide, while InitTouchLegacy, InitTouchPlaced and placeTouchControl set the hidden
+// place as the frame and the target. A layout change restores the show flag only, so after a Reset to default with the arrows
+// shown both arrows lay on the hidden place (the Down arrow over the Up arrow). The shown place becomes the frame and target.
+procedure showAimArrowAtShownPlace(widget: POnScreenWidget);
+var sx, sy: LongInt;
+begin
+{$IFDEF USE_TOUCH_INTERFACE}
+with widget^ do
+    begin
+    sx:= moveAnim.source.x;
+    sy:= moveAnim.source.y;
+    moveAnim.source:= moveAnim.target;
+    moveAnim.target.x:= sx;
+    moveAnim.target.y:= sy;
+    moveAnim.animate:= false;
+    moveAnim.startTime:= 0;
+    frame.x:= sx;
+    frame.y:= sy;
+    active.x:= sx;
+    active.y:= sy;
+    end;
+{$ENDIF}
+end;
+
 // The new layout applies at once (the touchlayout command, and --touch-layout at start). The controls that are shown now stay
 // shown: the placement sets the show flags again, so they are kept across it.
 procedure SetTouchLayout(spec: shortstring);
@@ -1144,6 +1169,8 @@ AMWidget.show:= k8;
 pauseButton.show:= k9;
 utilityWidget.show:= k10;
 utilityWidget2.show:= k11;
+if k6 then showAimArrowAtShownPlace(@arrowUp);
+if k7 then showAimArrowAtShownPlace(@arrowDown);
 ReportTouchLayout;
 {$ENDIF}
 end;

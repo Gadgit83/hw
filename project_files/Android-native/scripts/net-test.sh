@@ -64,6 +64,11 @@
 #               Add "slow" (hostalone-ai3slow, hostalone-human3slow): the rejoining engine loads for 20 s before it links to the relay
 #               and hands its replay late (HP_NET_RX_DELAY_MS, the first 450 messages), as a Moto G6 does. Before the fix this dropped
 #               the phone ("no messages for 20 s while it was the one expected to play") and its teams never came back.
+#   hostwatch   the host plays alone (its human team and two computer teams, 2 hogs each, turn time 15 s), leaves during a computer team's
+#               turn, watches its own game over a second loopback link (what the Watch the game button does) and rejoins its seat after
+#               NET_WATCH_HOLD_S (default 40 s). The watching engine must follow the game to its real end: the same turn checksums as
+#               every phone, 0 desync, exit 0. KNOWN FAILING (open): the watching engine still ends early (WINNERS while the host's teams are
+#               away), so this scenario is not in "all" until it passes. Reproduces the device report's #22 "Watch the game" failure.
 #   all         every scenario above in turn, with a summary at the end
 # Exit status: 0 only if the scenario passed. A positive scenario fails on any "Desync detected", "Unexpected protocol"
 # or engine queue error, a non-zero engine exit (except the victim's), differing per-turn checksums, differing relay and

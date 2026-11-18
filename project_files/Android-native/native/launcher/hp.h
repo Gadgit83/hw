@@ -16,6 +16,8 @@ void hp_ipc_join(void);
 /* Called from the server thread when the engine reports a fatal error ('E' message). The text
  * is NUL terminated and valid only during the call. Optional; the desktop test leaves it unset. */
 void hp_ipc_set_error_handler(void (*handler)(const char *message));
+/* Nonzero when the relay ended the game because the host ended it: a normal end that is not an engine error. */
+int hp_ipc_relay_ended(void);
 
 /* The player confirmed leaving the game: tells the relay (control frame Q) and makes the engine quit whatever its UI state.
  * Returns 0 when the engine was asked to quit. */

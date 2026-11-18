@@ -117,6 +117,8 @@ static unsigned long g_watch_blocked;     /* engine messages a watching phone's 
 static int g_net_pending;                 /* config sent, connect to the relay after the engine's next '?' */
 static int g_relay_fd = -1;
 static volatile int g_net_up, g_net_ending, g_net_lost;
+/* Set when the relay ended the game because the host ended it: a normal end, not an engine error (see net_ended). */
+static volatile int g_relay_ended;
 static pthread_mutex_t g_wr_lock = PTHREAD_MUTEX_INITIALIZER;   /* all writes to the engine socket */
 static pthread_mutex_t g_relay_wr_lock = PTHREAD_MUTEX_INITIALIZER;   /* all writes to the relay link: sender thread and control frames */
 static int g_engine_fd = -1;
@@ -236,6 +238,24 @@ static void net_lost(const char *reason)
     pthread_mutex_lock(&g_fd_lock);
     if (g_client_fd >= 0) shutdown(g_client_fd, SHUT_RDWR);
     pthread_mutex_unlock(&g_fd_lock);
+}
+
+/* The relay ended the game because the host ended it ("The host ended the game"): the engine is stopped as for any end, but nothing is
+ * recorded as an engine error, so the Network screen shows the relay's own end notice and not "Engine error: The host ended the game". */
+static void net_ended(const char *reason)
+{
+    if (g_net_ending || __sync_lock_test_and_set(&g_net_lost, 1)) return;
+    LOGI("relay: %s", reason);
+    diag("LINK %s", reason);
+    g_relay_ended = 1;
+    pthread_mutex_lock(&g_fd_lock);
+    if (g_client_fd >= 0) shutdown(g_client_fd, SHUT_RDWR);
+    pthread_mutex_unlock(&g_fd_lock);
+}
+
+int hp_ipc_relay_ended(void)
+{
+    return g_relay_ended;
 }
 
 static void note_digest(const char *dir, const unsigned char *m, int len)
@@ -453,9 +473,13 @@ static void *down_thread(void *arg)
                 char m[300];
                 /* The relay's reason is shown to the player: "The host ended the game" is a sentence of its own, anything else
                  * (a desync, every engine gone) follows "The game ended:". */
-                if (!strncmp(t, "The host ended the game", 23)) snprintf(m, sizeof m, "%s", t);
-                else snprintf(m, sizeof m, "The game ended: %s", t);
-                net_lost(m);
+                if (!strncmp(t, "The host ended the game", 23)) {
+                    snprintf(m, sizeof m, "%s", t);
+                    net_ended(m);
+                } else {
+                    snprintf(m, sizeof m, "The game ended: %s", t);
+                    net_lost(m);
+                }
             }
             if (len == 2 && (msg[1] == 'P' || msg[1] == 'R')) net_apply_pause(msg[1] == 'P');
             if (len == 2 && msg[1] == 'L') net_apply_loneback();

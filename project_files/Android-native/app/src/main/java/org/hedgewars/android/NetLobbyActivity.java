@@ -159,6 +159,8 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
     @Override
     protected void onResume() {
         super.onResume();
+        // The game screen (its own process) asked for sensor landscape; this screen follows the device again, as its manifest says.
+        setRequestedOrientation(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_USER);
         NetSession.listener = this;
         NetSession.lobbyVisible = true;
         NetSession.cancelStartNotification(this);
@@ -584,7 +586,8 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
                     if (destroyed || discovery != mine) return;      // a late call from an earlier search
                     hosts.clear();
                     hosts.addAll(all);
-                    renderHosts();
+                    // A host found again ends its grey-out and the "The host left." banner, which render() draws.
+                    if (NetSession.hostBack(all)) render(); else renderHosts();
                 });
             }
 
@@ -688,7 +691,7 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
             }
             LinearLayout bt = ui.row();
             boolean gone = (h.host + ":" + h.port).equals(NetSession.goneHost);
-            if (gone) row.addView(ui.hint("This host has stopped hosting. Search again to find it."));
+            if (gone) row.addView(ui.hint("This host has stopped hosting. It can be joined again once a search finds it."));
             Button play = ui.button("Join to play", true, v -> pickHost(h, false));
             play.setEnabled(why == null && !gone);
             Button watch = ui.button("Join to watch", false, v -> pickHost(h, true));

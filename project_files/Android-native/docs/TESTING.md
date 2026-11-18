@@ -56,7 +56,7 @@ Short answer: probably yes for most scenarios, by a factor of 3 to 4, but only w
 
 ### Estimate (not measured)
 
-- Current: about 200 to 320 s per turn-driven scenario, almost all of it game ticks. Game ticks are about 80 percent of a typical scenario by the turn count (about 15 s per turn for about 20 turns).
+- Current: about 200 to 320 s per turn-driven scenario, almost all of it game ticks. Most of that is game ticks, but the split is not measured yet.
 - With K = 4 and the AI delays left in: about 70 to 100 s per scenario, a factor of 3. With the AI delays also scaled: about 50 to 70 s, a factor of 4 to 5, limited by launch and map loading.
 - A full suite of 41 at -j 3: about 2.5 h serially, about 1 h at -j 3 now (the suite measured 591 s for six scenarios at -j 3). With K = 4 for the turn-driven subset, about 25 to 35 min.
 - Effort: about one hour for the engine option and the first check, plus a checksum comparison of `basic` at K = 1 and K = 4 (the decider for the determinism question). Not started; it needs the heavy lock and a pas2c rebuild.

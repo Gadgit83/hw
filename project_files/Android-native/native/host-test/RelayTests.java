@@ -1881,7 +1881,13 @@ public class RelayTests {
         ew.send("Lxx"); ew.send("NABCDEFGH"); ew.send("Mevil"); ew.send("FAlpha"); ew.send("hxx"); ew.send("epause"); ew.send("y1");
         ew.send(new byte[] { 0, 'P' }); ew.send(new byte[] { 0, 'R' }); ew.send(new byte[] { 0, 'X', 'e' });
         Thread.sleep(500);
-        check(g.ea.received.size() == beforeA && g.eb.received.size() == beforeB, "a watcher's game messages reach no player");
+        // Check what arrived, not how much: each player may still be receiving the other's digest from above, which is
+        // fine. None of the watcher's own messages may reach a player.
+        java.util.List<String> fromWatcher = java.util.Arrays.asList("Lxx", "NABCDEFGH", "Mevil", "FAlpha", "hxx", "epause", "y1");
+        boolean leaked = false;
+        for (String m : g.ea.received.subList(beforeA, g.ea.received.size())) leaked |= fromWatcher.contains(m);
+        for (String m : g.eb.received.subList(beforeB, g.eb.received.size())) leaked |= fromWatcher.contains(m);
+        check(!leaked, "a watcher's game messages reach no player");
         check(g.ea.controls.isEmpty() && g.eb.controls.isEmpty(), "  its pause and resume do nothing (no control frame went out)");
         check(g.f.logged("Eye sent a 'L' message") && g.f.logged("Eye asked to pause: ignored"), "  they are logged as ignored");
         check(g.f.relay.turns() == 0, "  no turn checksum was taken from it");

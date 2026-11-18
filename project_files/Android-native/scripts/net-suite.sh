@@ -43,7 +43,7 @@ done
 shift $((OPTIND - 1))
 case "$JOBS" in ''|*[!0-9]*|0) echo "-j needs a number of at least 1"; exit 2 ;; esac
 case "$BASE" in ''|*[!0-9]*) echo "-d needs a display number"; exit 2 ;; esac
-if [ $# -gt 0 ]; then SEL=("$@"); else read -ra SEL <<< "$ALL"; fi
+if [ $# -gt 0 ]; then SEL=("$@"); else read -ra SEL <<< "$(tr "\n" " " <<< "$ALL")"; fi   # the list spans several lines
 
 T="$BUILD_DIR/host-test"; W="$T/suite-logs"
 mkdir -p "$W" "$(dirname "$RESULTS")"; touch "$RESULTS"

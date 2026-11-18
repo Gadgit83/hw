@@ -9,7 +9,7 @@
 #             for a fresh run of the same scenarios.
 #   -d N      the first X display: scenario slot k runs on display N+k (default 70). The spectator port of the viewer
 #             scenarios follows the display (NET_SPEC_PORT = 18700 + display, as net-test.sh does).
-#   scenario  names as net-test.sh takes them. Without names, the full release list (42 scenarios; about 2.5 hours serially).
+#   scenario  names as net-test.sh takes them. Without names, the full release list (44 scenarios; about 2.5 hours serially).
 #
 # The build (the engine if it is missing, the launcher, the viewer stand-in when a viewer scenario is listed) runs once up
 # front; the scenarios then run with NET_SKIP_BUILD=1. A failed scenario is retried once, at the end of the queue. The suite
@@ -29,7 +29,7 @@ fi
 ALL="malformed basic basic3 dropout dropout3 stall slowstart negcontrol solo settings viewer1 viewer2 viewer3 viewerflap
 hostquit hostleave hostend rejoin rejoinlate lonerejoin lonerejoinb lonerejoinc joinerquit hostquitchat joinerquitchat injecte
 hidden watch1 watchlate watchflap watchsend watchpause hostpause hostpausequit joinerpause pausecap hostalone-ai3
-hostalone-human3 hostalone-ai3slow hostalone-human3slow hostalone-ai85 hostwatch"
+hostalone-human3 hostalone-ai3slow hostalone-human3slow hostalone-ai85 hostwatch hostrejoinpause hostrejoinslow"
 
 JOBS=3; BASE=70; RESULTS="$BUILD_DIR/host-test/net-suite.tsv"
 while getopts "j:r:d:h" o; do

@@ -4,6 +4,29 @@ All notable changes to the native Android app (`project_files/Android-native`), 
 
 Only some builds were put on a phone, so a version below is a build that was made, not necessarily one that was released. Releases are tags on `android-master` with the APK attached; there is none yet.
 
+## 0.3.0-tv20 (124): fixes from the tv19 device check
+
+`HP_PROFILE=test`, versionName `0.3.0-tv20-test`. Each change answers a finding of RESULT 27 on issue #1. Engine changes are commits on the `tv20` branch of https://github.com/Gadgit83/hw, each opt-in. Compat is unchanged (`hwnet-60-sim3`).
+
+### Fixed
+
+- #13 Aim helper: the dots were drawn before the charge cone, so the cone covered them. A level shot at land close ahead therefore showed no path at all, although the path was computed (the Moto G6 case). The dots and the landing marker are now drawn over the cone and still under the HUD. The look is unchanged.
+- Relay, a joiner dropped during the host's pause:
+  - the half-open link check ran during a pause, and the end of a pause did not restart the quiet time;
+  - a phone that has rejoined and is still replaying is no longer blamed for silence (for up to 120 s, the rejoin window, not counting paused time).
+- Relay: the host gave up asking for its own teams after it had rejoined, because the 90 s wait ran through a pause. The wait now skips paused time.
+- A joiner whose link closed during a game, or whose game ended, no longer shows "game running".
+- Lobby:
+  - banners about a phone ("lost connection", "did not come back") clear when that phone is back;
+  - the greyed host row no longer points at a Search again button that is not there;
+  - the red "The host left." banner and the grey-out clear when a search finds the host again;
+  - the Network screen follows the phone's orientation again after a game.
+
+### Tests
+
+- New scenarios `hostrejoinpause` and `hostrejoinslow`. Both fail on tv19 with the device's symptoms and pass on tv20 six times out of six.
+- New tests `NetLobbyDeviceFixTest` and `NetSessionStaleStateTest`.
+
 ## 0.3.0-tv19 (123): fixes from the tv18 device check
 
 `HP_PROFILE=test`, versionName `0.3.0-tv19-test`. Each change answers a finding of RESULT 26 on issue #1. Engine changes are commits on the `tv19` branch of https://github.com/Gadgit83/hw, each opt-in. Compat is unchanged (`hwnet-60-sim3`).

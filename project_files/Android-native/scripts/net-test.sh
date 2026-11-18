@@ -64,6 +64,11 @@
 #               Add "slow" (hostalone-ai3slow, hostalone-human3slow): the rejoining engine loads for 20 s before it links to the relay
 #               and hands its replay late (HP_NET_RX_DELAY_MS, the first 450 messages), as a Moto G6 does. Before the fix this dropped
 #               the phone ("no messages for 20 s while it was the one expected to play") and its teams never came back.
+#   hostwatch   the host and phone B play (two human and two computer teams). The host leaves during a computer team's turn and comes
+#               back inside its rejoin window (NET_WATCH_WINDOW_MS, default 20 s; it leaves after NET_WATCH_AWAY_S, default 3 s): Rejoin is
+#               its only offer then. It leaves again; once its window has run out (phone B plays on, so the game goes on) its own loopback
+#               link watches the game (what the Watch the game button does). The watching engine must follow the game to its real end:
+#               the same turn checksums as every phone, 0 desync, exit 0.
 #   all         every scenario above in turn, with a summary at the end
 # Exit status: 0 only if the scenario passed. A positive scenario fails on any "Desync detected", "Unexpected protocol"
 # or engine queue error, a non-zero engine exit (except the victim's), differing per-turn checksums, differing relay and

@@ -59,7 +59,7 @@ static void on_engine_error(const char *message)
  * read the engine's 'E' message yet, so give it a moment before assuming there was none. */
 static void on_exit_hook(void)
 {
-    if (g_clean) return;
+    if (g_clean || hp_ipc_relay_ended()) return;
     for (int i = 0; i < 40 && !g_error_set; i++) usleep(10000);
     record_error("The game engine ended the program unexpectedly (it called exit without a message).");
 }
@@ -375,7 +375,8 @@ int SDL_main(int argc, char **argv)
     int rc = hwengine_RunEngine(n, args);
     LOGI("engine returned %d", rc);
     hp_ipc_join();
-    if (rc == 0) {
+    /* A game the host ended for everyone is a normal end, whatever the engine's exit code (its link was closed by the relay). */
+    if (rc == 0 || hp_ipc_relay_ended()) {
         g_clean = 1;
         unlink(g_marker_path);
     } else {

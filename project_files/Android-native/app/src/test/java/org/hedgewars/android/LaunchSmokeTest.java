@@ -974,15 +974,34 @@ public class LaunchSmokeTest {
                 + "\"canStart\":false,\"game\":1,\"watching\":0}";
     }
 
-    /** The Watch the game button (issue 22, device): offered for a joiner that is away, gave up, or arrived late, and for the host when its seat is out. */
+    /**
+     * The Watch the game button (issue 22, device). Owner decision: a phone that is away inside its rejoin window is offered Rejoin only
+     * (its teams can still come back); Watch is offered only to a phone with no teams in the running game (its window ran out while the
+     * game goes on, or it arrived late / joined to watch), for the host as well.
+     */
     @Test
     public void netLobbyActivity_watchButtonVisibility() throws Exception {
         TestSupport.installData(app());
-        // away: the Rejoin button and the Watch button are both there
+        // away inside the window: Rejoin only, never Watch (its teams can still come back)
         netState(runningState(true, true), false);
         NetSession.inGame = false;
         String away = launch(NetLobbyActivity.class, null, 600);
-        assertTrue("away: Rejoin and Watch both offered: " + away, away.contains("Rejoin the game") && away.contains("Watch the game"));
+        assertTrue("away: Rejoin offered: " + away, away.contains("Rejoin the game"));
+        assertFalse("away inside the window: no Watch: " + away, away.contains("Watch the game"));
+        TestSupport.resetStatics();
+        // away, and a stale line on the screen offers watching: still Rejoin only
+        netState(runningState(true, true), false);
+        NetSession.inGame = true;
+        NetSession.notice = "The game ended. You can watch.";
+        String awayNotice = launch(NetLobbyActivity.class, null, 600);
+        assertTrue("away with a stale offer: Rejoin, no Watch: " + awayNotice, awayNotice.contains("Rejoin the game") && !awayNotice.contains("Watch the game"));
+        TestSupport.resetStatics();
+        // the host away inside its window: Rejoin only (it cannot watch while its own teams can come back)
+        netState(runningState(false, false).replace("\"you\":2", "\"you\":1"), true);
+        NetSession.inGame = false;
+        String hostAway = launch(NetLobbyActivity.class, null, 600);
+        assertTrue("host away: Rejoin offered: " + hostAway, hostAway.contains("Rejoin the game"));
+        assertFalse("host away inside its window: no Watch: " + hostAway, hostAway.contains("Watch the game"));
         TestSupport.resetStatics();
         // a joiner who arrived late (the game runs, this phone is not in it)
         netState(runningState(false, true), false);
@@ -1053,15 +1072,27 @@ public class LaunchSmokeTest {
         assertEquals(0L, NetSession.awayLeftSeconds(0L, 0L, 0L));
     }
 
-    /** The offer rule as a truth table (NetSession.offerWatch). */
+    /** The offer rule as a truth table (NetSession.offerWatch, fed by NetSession.holdsTeamsInGame). */
     @Test
     public void netSession_offerWatchRule() {
         assertFalse(NetSession.offerWatch(true, false, true, true, ""));                 // already watching
-        assertTrue(NetSession.offerWatch(false, false, true, false, ""));                // away or late: game runs, not in it
+        assertTrue(NetSession.offerWatch(false, false, true, false, ""));                // a joiner who arrived late: game runs, no teams in it
         assertFalse(NetSession.offerWatch(false, true, true, false, ""));                // playing in it
-        assertTrue(NetSession.offerWatch(false, true, true, true, ""));                  // gave up
+        assertTrue(NetSession.offerWatch(false, false, true, true, ""));                 // window ran out (gaveUp), the game goes on
+        assertFalse(NetSession.offerWatch(false, true, true, false, "You can watch."));  // away inside the window: Rejoin only, even with a stale line
         assertFalse(NetSession.offerWatch(false, false, false, false, ""));              // no game, nothing offered
         assertTrue(NetSession.offerWatch(false, false, false, false, "The game ended. You can watch."));   // a line that offers it
+    }
+
+    /** Whether the seat holds teams in the running game: playing in it, or away inside its window; not after the window ran out. */
+    @Test
+    public void netSession_holdsTeamsInGame() {
+        assertTrue(NetSession.holdsTeamsInGame(true, true, false, false));               // playing in it
+        assertTrue(NetSession.holdsTeamsInGame(true, true, true, false));                // away inside the window (left the game screen)
+        assertTrue(NetSession.holdsTeamsInGame(true, false, true, false));               // away, its engine already gone
+        assertFalse(NetSession.holdsTeamsInGame(true, false, false, false));             // a late joiner: not in the game, no teams in it
+        assertFalse(NetSession.holdsTeamsInGame(true, true, true, true));                // the window ran out: teams sit out
+        assertFalse(NetSession.holdsTeamsInGame(false, false, false, false));            // no game running
     }
 
     /**
@@ -1348,9 +1379,15 @@ public class LaunchSmokeTest {
         text = launch(NetLobbyActivity.class, null, 600);
         assertTrue("the chooser offers the game back: " + text, text.contains("Rejoin your game") && text.contains("Fairphone") && text.contains("192.168.1.20:46633")
                 && text.contains("Rejoin the game") && text.contains("Forget it") && text.contains("Host network game"));
+        // Before any attempt, and while the window is still open, the note offers Rejoin only (no Join to watch): the teams can come back.
+        // (the chooser's own Join list has one "Join to watch" button: the note adds one only after a refusal)
+        NetSession.rejoinRefusal = "";
+        text = launch(NetLobbyActivity.class, null, 600);
+        int withoutRefusal = text.split("Join to watch", -1).length - 1;
         NetSession.rejoinRefusal = "rejoin-late";
         text = launch(NetLobbyActivity.class, null, 600);
-        assertTrue("after a late attempt it says why and offers watching: " + text, text.contains("You were away too long") && text.contains("Join to watch"));
+        int afterRefusal = text.split("Join to watch", -1).length - 1;
+        assertTrue("after a late attempt it says why and the note offers watching: " + text, text.contains("You were away too long") && afterRefusal == withoutRefusal + 1);
         NetSession.rejoinRefusal = "";
         NetSession.clearRejoin(app());
         assertTrue("forgotten", NetSession.loadRejoin(app()) == null);

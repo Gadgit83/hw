@@ -397,12 +397,21 @@ final class NetSession {
     }
 
     /**
-     * Whether the lobby offers "Watch the game": not while this phone is already watching, and whenever a game is running on the host and
-     * this phone is not playing in it (away, gave up, or a joiner who arrived late), or a line on the screen offers watching.
+     * Whether this phone's seat holds teams in the running game: it is playing in it, or it is away inside its rejoin window (its teams
+     * can still come back). A seat whose window ran out (gaveUp) holds none. A phone that holds teams is offered Rejoin, never Watch.
      */
-    static boolean offerWatch(boolean watching, boolean playingHere, boolean gameRunning, boolean gaveUp, String notice) {
-        if (watching) return false;
-        return (gameRunning && !playingHere) || gaveUp || offersWatch(notice);
+    static boolean holdsTeamsInGame(boolean playing, boolean inGame, boolean away, boolean gaveUp) {
+        return playing && !gaveUp && (inGame || away);
+    }
+
+    /**
+     * Whether the lobby offers "Watch the game". Only a phone with no teams in the running game is offered it: its rejoin window has run
+     * out while the game goes on, or it arrived late or joined to watch. Never while this phone is already watching, never while its
+     * teams hold a seat in the game (playing, or away inside the window), and never on a stale line that offers it.
+     */
+    static boolean offerWatch(boolean watching, boolean holdsTeams, boolean gameRunning, boolean gaveUp, String notice) {
+        if (watching || holdsTeams) return false;
+        return gameRunning || gaveUp || offersWatch(notice);
     }
 
     /** True while the relay says a game runs (its state is "playing"): the only time a hosting phone can watch its own game. */

@@ -492,8 +492,9 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
         } else {
             row.addView(ui.button("Try again", false, v -> rejoinFromNote()), ui.weight(1f));
         }
-        // A hosting phone cannot watch its own game; a joiner that can no longer play can watch the same game.
-        if (!n.asHost) row.addView(ui.button("Join to watch", false, v -> connectTo(n.host, n.port, true)), ui.margins(Ui.lp(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f), 8, 0, 0, 0));
+        // A hosting phone cannot watch its own game. A joiner can watch the same game only once the relay has refused its seat (its
+        // window ran out or the seat is gone): while the window is open its teams can still come back, so it is offered Rejoin only.
+        if (!n.asHost && code.startsWith("rejoin-")) row.addView(ui.button("Join to watch", false, v -> connectTo(n.host, n.port, true)), ui.margins(Ui.lp(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f), 8, 0, 0, 0));
         row.addView(ui.button("Forget it", false, v -> { NetSession.clearRejoin(this); NetSession.rejoinRefusal = ""; render(); }),
                 ui.margins(Ui.lp(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT), 8, 0, 0, 0));
         card.addView(row, ui.margins(full(), 8, 0, 0, 0));
@@ -926,8 +927,8 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
         // joiner who arrived late), and the lines that offer it after the game ended (the notice stays on the screen). It joins as a
         // watcher; the relay sends the running game or the last summary. A hosting phone watches over its own loopback relay, so
         // its hosting goes on. The hosting phone is offered it only while the relay says the game runs (after the end it is not).
-        boolean playingHere = playing && NetSession.inGame && !iAmAway && !iGaveUp;
-        if (NetSession.offerWatch(NetSession.watching, playingHere, playing, iGaveUp, NetSession.notice) && (!host || NetSession.gameRunning())) {
+        boolean holdsTeams = NetSession.holdsTeamsInGame(playing, NetSession.inGame, iAmAway, iGaveUp);
+        if (NetSession.offerWatch(NetSession.watching, holdsTeams, playing, iGaveUp, NetSession.notice) && (!host || NetSession.gameRunning())) {
             if (iGaveUp && NetSession.notice.isEmpty()) card.addView(coloured(host ? Relay.GAVE_UP_HOST_TEXT : Relay.GAVE_UP_TEXT, Ui.ACCENT));
             card.addView(ui.button("Watch the game", true, v -> watchTheGame()), ui.margins(full(), 6, 0, 0, 4));
         }
@@ -1164,6 +1165,7 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
 
     /** "Watch the game": a joiner leaves its seat and joins as a watcher; a hosting phone watches its own game over loopback (not stopped). */
     private void watchTheGame() {
+        if (seatHoldsTeams()) return;      // away inside the rejoin window: the seat comes back by Rejoin, never by watching
         final String h = NetSession.lastHostName;
         final int pt = NetSession.lastPort;
         if (NetSession.hosting) {
@@ -1175,6 +1177,25 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
         }
         leaveOrStop();
         if (!h.isEmpty()) connectTo(h, pt, true);
+    }
+
+    /** This phone's own seat from the relay's state: whether its teams hold it in the running game (see NetSession.holdsTeamsInGame). */
+    @SuppressWarnings("unchecked")
+    private static boolean seatHoldsTeams() {
+        Map<String, Object> st = NetSession.state;
+        boolean away = false, gone = NetSession.gaveUp;
+        if (st != null) {
+            long you = Json.num(st, "you", -1);
+            for (Object o : Json.list(st, "players")) {
+                Map<String, Object> p = (Map<String, Object>) o;
+                if (Json.num(p, "id", 0) == you) {
+                    away = Json.bool(p, "away", false);
+                    gone |= Json.bool(p, "gaveUp", false);
+                }
+            }
+        }
+        boolean playing = (st != null && "playing".equals(Json.str(st, "state", ""))) || NetSession.inGame;
+        return NetSession.holdsTeamsInGame(playing, NetSession.inGame, away, gone);
     }
 
     private void watchOwnGame(final int port) {

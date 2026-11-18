@@ -83,6 +83,8 @@
 # Environment: HP_TEST_DISPLAY, a bare display number (default 66, as host-test.sh: no colon), NET_SEED,
 #   NET_TURNS_BEFORE_KILL, NET_TIMEOUT_S, NET_SILENCE_MS, NET_GRACE_MS, NET_DELAY_MS (slowstart), NET_SCRIPT,
 #   NET_INPUT=1 (scripted touch input for the human teams), ASAN=ON
+#   NET_BUILD_ONLY=1 builds the engine, launcher and viewer stand-in, then exits; NET_SKIP_BUILD=1 skips every build step
+#   (scripts/net-suite.sh builds once and runs the scenarios with it; the viewer stand-in paths are still exported)
 . "$(dirname "$0")/common.sh"
 SCEN="${1:-basic}"
 if [ "$SCEN" = all ]; then
@@ -111,24 +113,30 @@ if [ "$SCEN" = malformed ]; then
   exit "$rc"
 fi
 export CC=clang
-if [ ! -d "$BUILD_DIR/engine-c-host" ] || [ ! -f "$BUILD_DIR/rust-host/libhwengine_future.so" ]; then
-  log "engine for the host (scripts/host-test.sh builds the same)"; HP_TEST_SCENARIO=ai "$HOST_DIR/scripts/host-test.sh" 1 >/dev/null 2>&1 || true
-fi
-log "launcher (network mode)"
-cmake -S "$HOST_DIR/native/host-test" -B "$B" -G Ninja -DCMAKE_BUILD_TYPE=Release -DHP_ASAN="${ASAN:-OFF}" >/dev/null
-ninja -C "$B" | tail -1
+PC="$BUILD_DIR/host-test/pc_host"
 if [[ "$SCEN" == viewer* || "$SCEN" == hostpause || "$SCEN" == settings ]]; then
-  # The existing TV stand-ins from hedgewars-party (tv/e2e-host): the viewer page's test client and the spectator engine launcher.
-  PARTY="${PARTY_REPO:-/home/user/hedgewars-party}"; PC="$BUILD_DIR/host-test/pc_host"; mkdir -p "$PC/src"
-  { git -C "$PARTY" show origin/main:tv/e2e-host/src/pc_host.c; echo 'void hw_device_rumble(int ms) { (void)ms; }   /* the engine now calls this hook */'; } > "$PC/src/pc_host.c"
-  git -C "$PARTY" show origin/main:tv/e2e-host/src/CMakeLists.txt | sed "s/HP_GLES1=0/HW_GLES1=0/" > "$PC/src/CMakeLists.txt"   # the app renamed this define
-  git -C "$PARTY" show origin/main:tv/e2e-host/tools/viewer-sim.js > "$PC/viewer-sim.js"
-  # The relay also sends WebSocket text frames (the away/back/gaveup overlay): the stand-in keeps them apart from the game stream.
-  sed -i "s|^  const buf = Buffer.from(ev.data);|  if (typeof ev.data === 'string') { (res.overlay = res.overlay \|\| []).push(ev.data); return; }\n  const buf = Buffer.from(ev.data);|" "$PC/viewer-sim.js"
-  cmake -S "$PC/src" -B "$PC/build" -G Ninja -DCMAKE_BUILD_TYPE=Release -DHP_ENGINE_SRC="$REPO_DIR" -DHP_ENGINE_C="$BUILD_DIR/engine-c-host" \
-    -DHP_RUST_LIB="$BUILD_DIR/rust-host/libhwengine_future.so" >/dev/null && ninja -C "$PC/build" | tail -1
   export NET_PCHOST="$PC/build/pc_host" NET_VIEWER_SIM="$PC/viewer-sim.js"
 fi
+if [ -z "${NET_SKIP_BUILD:-}" ]; then
+  if [ ! -d "$BUILD_DIR/engine-c-host" ] || [ ! -f "$BUILD_DIR/rust-host/libhwengine_future.so" ]; then
+    log "engine for the host (scripts/host-test.sh builds the same)"; HP_TEST_SCENARIO=ai "$HOST_DIR/scripts/host-test.sh" 1 >/dev/null 2>&1 || true
+  fi
+  log "launcher (network mode)"
+  cmake -S "$HOST_DIR/native/host-test" -B "$B" -G Ninja -DCMAKE_BUILD_TYPE=Release -DHP_ASAN="${ASAN:-OFF}" >/dev/null
+  ninja -C "$B" | tail -1
+  if [[ "$SCEN" == viewer* || "$SCEN" == hostpause || "$SCEN" == settings ]]; then
+    # The existing TV stand-ins from hedgewars-party (tv/e2e-host): the viewer page's test client and the spectator engine launcher.
+    PARTY="${PARTY_REPO:-/home/user/hedgewars-party}"; mkdir -p "$PC/src"
+    { git -C "$PARTY" show origin/main:tv/e2e-host/src/pc_host.c; echo 'void hw_device_rumble(int ms) { (void)ms; }   /* the engine now calls this hook */'; } > "$PC/src/pc_host.c"
+    git -C "$PARTY" show origin/main:tv/e2e-host/src/CMakeLists.txt | sed "s/HP_GLES1=0/HW_GLES1=0/" > "$PC/src/CMakeLists.txt"   # the app renamed this define
+    git -C "$PARTY" show origin/main:tv/e2e-host/tools/viewer-sim.js > "$PC/viewer-sim.js"
+    # The relay also sends WebSocket text frames (the away/back/gaveup overlay): the stand-in keeps them apart from the game stream.
+    sed -i "s|^  const buf = Buffer.from(ev.data);|  if (typeof ev.data === 'string') { (res.overlay = res.overlay \|\| []).push(ev.data); return; }\n  const buf = Buffer.from(ev.data);|" "$PC/viewer-sim.js"
+    cmake -S "$PC/src" -B "$PC/build" -G Ninja -DCMAKE_BUILD_TYPE=Release -DHP_ENGINE_SRC="$REPO_DIR" -DHP_ENGINE_C="$BUILD_DIR/engine-c-host" \
+      -DHP_RUST_LIB="$BUILD_DIR/rust-host/libhwengine_future.so" >/dev/null && ninja -C "$PC/build" | tail -1
+  fi
+fi
+if [ -n "${NET_BUILD_ONLY:-}" ]; then log "build only: done"; exit 0; fi
 log "relay and harness classes"
 rm -rf "$OUT"; mkdir -p "$OUT"
 javac -d "$OUT" "$JSRC"/net/*.java "$JSRC/GameConfig.java" "$JSRC/GameData.java" "$JSRC/Rules.java" "$JSRC/SchemeData.java" \
@@ -140,6 +148,7 @@ Xvfb "$DISPLAY" -screen 0 1280x720x24 >/dev/null 2>&1 &
 XP=$!
 trap 'kill $XP 2>/dev/null' EXIT
 sleep 1
+kill -0 "$XP" 2>/dev/null || { echo "Xvfb did not start on $DISPLAY (is the display taken?)"; exit 1; }
 log "scenario $SCEN"
 set +e
 java -cp "$OUT" NetHarness "$BUILD_DIR/assets/Data" "$T/net-$SCEN" "$B/hp_hosttest" "$SCEN" 2>&1 | grep --line-buffered -v "Picked up" | tee "$T/net-$SCEN.log"

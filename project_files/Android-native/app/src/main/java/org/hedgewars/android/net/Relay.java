@@ -528,6 +528,8 @@ public final class Relay {
         /** Seat state in a running game (all under the lock): away = connection lost or left, inside the window; gaveUp = the window ran out. */
         boolean away, gaveUp, awayOnPurpose, rejoinPending, endAll;
         long awayAt, rejoinAt, linkUpAt;
+        /** Until this time a rejoined phone may still be replaying the game (its engine is silent while it does): nobody is blamed then. */
+        long replayUntil;
         /** Set from the moment the engine link of a rejoining phone is up until its teams are back: what it sends is not forwarded. */
         boolean catchUp;
         /** Its engine has been told it is alone (the start line or control frame L): it answers for its own teams. */
@@ -1342,6 +1344,7 @@ public final class Relay {
             q.engineOut = box[0];
             q.ready = q.host;
             q.away = q.gaveUp = q.rejoinPending = q.catchUp = q.endAll = q.awayOnPurpose = false;
+            q.replayUntil = 0;
             q.backPending.clear();
             q.rejoins = 0;
         }
@@ -1805,6 +1808,7 @@ public final class Relay {
         me.fatal = null;
         me.lastMsg = me.lastRx = now;
         me.linkUpAt = now;
+        me.replayUntil = now + cfg.rejoinMs;       // its engine replays the whole game, silently and slowly, within its rejoin window
         me.rejoins++;
         me.toHash = new Fnv();
         me.toMsgs = 0;
@@ -1866,7 +1870,8 @@ public final class Relay {
     private void tryInjectBack(Game g, long now, List<Runnable> after) {
         // The give-up check runs on every call, not only when a turn message arrived, so a TV is never left showing "away".
         for (Player q : new ArrayList<>(players.values())) {
-            if (!q.linkOpen || q.dropped || q.backPending.isEmpty() || now - q.linkUpAt <= cfg.backWaitMs) continue;
+            // Not while the game is paused: the held game cannot hand the phone its teams, and the wait does not count the pause (endPause).
+            if (!q.linkOpen || q.dropped || g.paused || q.backPending.isEmpty() || now - q.linkUpAt <= cfg.backWaitMs) continue;
             g.events.add(q.name + "'s teams did not come back within " + cfg.backWaitMs / 1000 + " s; the relay stopped asking");
             log(q.name + "'s teams did not come back; giving up asking");
             q.backPending.clear();
@@ -2102,6 +2107,13 @@ public final class Relay {
         g.pausedTotalMs += len;
         g.lastKeptAt = now;
         g.gateOpenAt += len;
+        // The link clocks restart too: a link that did not answer during the pause gets its full window from now (linkLiveness).
+        for (Player q : players.values()) q.lastRx = Math.max(q.lastRx, now);
+        for (Spectator q : spectators.values()) q.lastRx = Math.max(q.lastRx, now);
+        // The team-back wait does not count the pause: nobody can be asked for teams while the game is held (tryInjectBack).
+        for (Player q : players.values()) if (!q.backPending.isEmpty()) q.linkUpAt += len;
+        // The replay window does not count the pause either: a replaying phone gets all of its window once the game runs again.
+        for (Player q : players.values()) if (q.replayUntil > 0) q.replayUntil += len;
         g.events.add(what + " after " + len / 1000 + " s");
         log(what + " after " + len / 1000 + " s");
     }
@@ -2662,8 +2674,13 @@ public final class Relay {
             for (Spectator q : spectators.values())
                 if (q.linkOpen && q.engineOut != null) q.engineOut.offer(k);
         }
+        // Like the silence rule, this is off while the host has paused: nobody sends anything then, and the pings are answered on the
+        // launcher's own thread, so a silent link during a pause is not a half-open one (the clocks restart when the pause ends, endPause).
+        if (g.paused) return;
         for (Player q : new ArrayList<>(players.values())) {
-            if (q.linkOpen && !q.dropped && !q.finished && now - q.lastRx > cfg.linkDeadMs && !hiddenNow(q.hidden, q.hiddenAt, now)) {
+            // A phone that is replaying after a rejoin answers the pings only after the replay it is handed (its launcher hands each message to
+            // the engine in turn), so it is not judged half-open within its rejoin window (replayUntil).
+            if (q.linkOpen && !q.dropped && !q.finished && now - q.lastRx > cfg.linkDeadMs && q.replayUntil <= now && !hiddenNow(q.hidden, q.hiddenAt, now)) {
                 dropPlayer(q, "its engine link was silent for " + (now - q.lastRx) / 1000 + " s and did not answer the link pings (half-open link)",
                         "You were dropped from the game: your phone did not answer for " + (now - q.lastRx) / 1000 + " s." + rejoinHint(), true, false);
                 checkEnd();
@@ -2687,15 +2704,17 @@ public final class Relay {
      * the last sender (with exactly two phones the other one; null when that cannot be told), otherwise the last sender.
      */
     private Player silenceCulprit(Game g, List<Player> live) {
+        // A phone that is still catching up after a rejoin (replaying the game, or waiting for its own teams, which are sat out until its
+        // engine answers) is silent by design: nobody is blamed while it does, whichever phone is the next to play, since that phone may be
+        // waiting for its team. The window is bounded by backWaitMs (replayUntil, catchUp), then the normal rule applies again.
+        long now = System.currentTimeMillis();
+        for (Player q : players.values()) if ((q.catchUp || q.replayUntil > now) && q.linkOpen && !q.dropped) return null;
         if (g.lastType == 'N' || g.lastType == 'M') {
             Player culprit = null;
             for (Player q : live) if (q.id != g.lastSender) { if (culprit == null) culprit = q; else return null; }
             return culprit;
         }
         Player last = players.get(g.lastSender);
-        // A phone that is still catching up after a rejoin is waiting for its own teams (they are sat out until its engine answers):
-        // the silence rule does not blame it. The wait is bounded by backWaitMs, then the relay stops asking as before.
-        if (last != null && last.catchUp) return null;
         return last;
     }
 

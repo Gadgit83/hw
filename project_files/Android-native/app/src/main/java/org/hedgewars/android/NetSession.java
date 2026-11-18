@@ -14,6 +14,7 @@ import java.net.Inet4Address;
 import java.net.InetAddress;
 import java.net.NetworkInterface;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -305,6 +306,8 @@ final class NetSession {
 
         @Override public void onSummary(Map<String, Object> m) {
             inGame = false;
+            // The game is over: the cached relay state must not still say "playing" (the lobby would show a game running).
+            if ("playing".equals(org.hedgewars.android.net.Json.str(state, "state", ""))) state = withPhase(state, "lobby");
             gaveUp = false;
             Context rc = HpApp.appContext;
             if (rc != null) clearRejoin(rc);            // the game is over: there is nothing to come back to
@@ -352,12 +355,22 @@ final class NetSession {
             joined = false;
             watching = false;
             inGame = false;
+            // The link is gone, so the cached state is no longer what the relay says: the lobby shows "connection lost", not the old game.
+            if ("playing".equals(org.hedgewars.android.net.Json.str(st0, "state", ""))) state = withPhase(st0, "closed");
             client = null;
             releaseLocks();
             JoinService.stop(HpApp.appContext);
             ping();
         }
     };
+
+    /** The same relay state with its phase replaced (null stays null). */
+    static Map<String, Object> withPhase(Map<String, Object> m, String phase) {
+        if (m == null) return null;
+        HashMap<String, Object> c = new HashMap<>(m);
+        c.put("state", phase);
+        return c;
+    }
 
     /**
      * What a phone is told when the game ends: the host that chose to end it sees "You ended the game", the other phones

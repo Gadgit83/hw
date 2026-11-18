@@ -872,9 +872,9 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
         // Whatever offers watching comes with this button: a game running that this phone is not playing in (away, gave up, or a
         // joiner who arrived late), and the lines that offer it after the game ended (the notice stays on the screen). It joins as a
         // watcher; the relay sends the running game or the last summary. A hosting phone watches over its own loopback relay, so
-        // its hosting goes on.
+        // its hosting goes on. The hosting phone is offered it only while the relay says the game runs (after the end it is not).
         boolean playingHere = playing && NetSession.inGame && !iAmAway && !iGaveUp;
-        if (NetSession.offerWatch(NetSession.watching, playingHere, playing, iGaveUp, NetSession.notice)) {
+        if (NetSession.offerWatch(NetSession.watching, playingHere, playing, iGaveUp, NetSession.notice) && (!host || NetSession.gameRunning())) {
             if (iGaveUp && NetSession.notice.isEmpty()) card.addView(coloured(host ? Relay.GAVE_UP_HOST_TEXT : Relay.GAVE_UP_TEXT, Ui.ACCENT));
             card.addView(ui.button("Watch the game", true, v -> watchTheGame()), ui.margins(full(), 6, 0, 0, 4));
         }
@@ -1111,7 +1111,10 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
         final String h = NetSession.lastHostName;
         final int pt = NetSession.lastPort;
         if (NetSession.hosting) {
-            watchOwnGame(pt);
+            // The host's own seat stays where it is (watchOwnHostedGame never closes it). A Watch tapped after the game ended shows the
+            // ended state instead of connecting.
+            if (NetSession.gameRunning()) watchOwnGame(pt);
+            else changed();
             return;
         }
         leaveOrStop();

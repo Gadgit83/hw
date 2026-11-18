@@ -35,6 +35,8 @@ final class NetSession {
 
     static volatile Listener listener;
     static volatile RelayClient client;
+    /** The hosting phone's watching link, open beside its seat ({@link #client}) while it watches its own game. Guarded by NetSession.class. */
+    private static RelayClient watchLink;
     static volatile boolean hosting, joined;
     /** This phone joined only to watch (no teams): the lobby offers Watch instead of Ready, and the game screen has no controls. */
     static volatile boolean watching;
@@ -397,16 +399,69 @@ final class NetSession {
         return (gameRunning && !playingHere) || gaveUp || offersWatch(notice);
     }
 
+    /** True while the relay says a game runs (its state is "playing"): the only time a hosting phone can watch its own game. */
+    static boolean gameRunning() {
+        Map<String, Object> st = state;
+        return st != null && "playing".equals(org.hedgewars.android.net.Json.str(st, "state", ""));
+    }
+
     /**
      * A hosting phone whose own seat is out of the game watches it over its loopback relay (the relay admits a watcher whose hello is not
-     * flagged as host). The hosting goes on: HostService and its relay are not stopped, and the phone still hosts afterwards.
+     * flagged as host). The watching link is opened BESIDE the seat: the seat's lobby socket is never closed here, because the relay
+     * treats the host's lobby link closing in the setup as "The host left" and closes every phone. Only a running game is watched; a
+     * Watch tapped after the end connects nothing. The hosting goes on: HostService and its relay are not stopped.
      */
     static void watchOwnHostedGame(Context c, String nick, int port) throws IOException {
-        String pin = hostPin == null ? "" : hostPin;
-        connect(c, "127.0.0.1", port, nick, false, true, pin);
+        final RelayClient[] self = new RelayClient[1];
+        RelayClient rc = new RelayClient("127.0.0.1", port, nick, Diag.versionName(c), false, new ArrayList<SetupModel.Team>(),
+                watchHandler(self)).watch(true).identity(org.hedgewars.android.net.Compat.VALUE, dataDigest(c))
+                .pin(hostPin == null ? "" : hostPin).socketFactory(NetworkPicker.socketFactory(c, "127.0.0.1"));
+        self[0] = rc;
         synchronized (NetSession.class) {
-            if (client != null) hosting = true;
+            if (!gameRunning() || watchLink != null) throw new Cancelled();
+            watchLink = rc;
         }
+        try {
+            rc.connect();                        // loopback: no reason to retry
+        } catch (IOException e) {
+            synchronized (NetSession.class) {
+                if (watchLink != rc) throw new Cancelled();      // left while it connected: not an error to show
+                watchLink = null;
+            }
+            throw e;
+        }
+        synchronized (NetSession.class) {
+            if (watchLink != rc) {
+                // leave() ran while the link connected: it must not stay open.
+                rc.close();
+                throw new Cancelled();
+            }
+            watching = true;
+        }
+        ping();
+    }
+
+    /**
+     * Handler of a hosting phone's watching link. It passes on what a watcher is sent, like HANDLER, but its end clears only the watching
+     * link: the seat's client, joined flag and locks are not touched, and its join does not replace the seat's rejoin token.
+     */
+    private static RelayClient.Handler watchHandler(final RelayClient[] self) {
+        return new RelayClient.Handler() {
+            @Override public void onState(Map<String, Object> s) { HANDLER.onState(s); }
+            @Override public void onStart(RelayClient.StartInfo s) { HANDLER.onStart(s); }
+            @Override public void onSummary(Map<String, Object> m) { HANDLER.onSummary(m); }
+            @Override public void onNotice(String t) { HANDLER.onNotice(t); }
+            @Override public void onGaveUp(String reason) { HANDLER.onGaveUp(reason); }
+            @Override public void onRefused(String code, String reason) { HANDLER.onRefused(code, reason); }
+            @Override public void onClosed(String reason) {
+                synchronized (NetSession.class) {
+                    if (watchLink != self[0]) return;
+                    watchLink = null;
+                    watching = false;
+                }
+                ping();
+            }
+        };
     }
 
     /**
@@ -519,7 +574,7 @@ final class NetSession {
     }
 
     static void leave() {
-        RelayClient p, rc;
+        RelayClient p, rc, w;
         synchronized (NetSession.class) {
             p = pending;
             pending = null;
@@ -527,6 +582,8 @@ final class NetSession {
             connectGen++;
             rc = client;
             client = null;
+            w = watchLink;
+            watchLink = null;
             joined = false;
             watching = false;
             inGame = false;                      // a game this phone left (or whose host it stopped) is not running for it any more
@@ -536,6 +593,7 @@ final class NetSession {
         }
         if (p != null) p.close();
         if (rc != null) rc.close();
+        if (w != null) w.close();
         releaseLocks();
         JoinService.stop(HpApp.appContext);
     }

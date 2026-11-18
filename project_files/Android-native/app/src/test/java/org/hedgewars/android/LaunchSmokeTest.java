@@ -4,6 +4,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
@@ -11,6 +12,13 @@ import android.app.Activity;
 import android.view.View;
 import android.content.Context;
 import android.content.Intent;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.net.InetAddress;
+import java.net.ServerSocket;
+import java.net.Socket;
+import java.net.SocketTimeoutException;
+import java.nio.charset.StandardCharsets;
 import org.hedgewars.android.net.RelayClient;
 
 import org.junit.Before;
@@ -994,6 +1002,12 @@ public class LaunchSmokeTest {
         String host = launch(NetLobbyActivity.class, null, 600);
         assertTrue("host out of the game: Watch offered: " + host, host.contains("Watch the game"));
         TestSupport.resetStatics();
+        // the host after the game ended: no Watch, even when a line on the screen offers it (a stale tap must not connect)
+        netState(LOBBY_WATCH.replace("\"you\":3", "\"you\":1"), true);
+        NetSession.notice = "The game ended. You can watch.";
+        String ended = launch(NetLobbyActivity.class, null, 600);
+        assertFalse("the host after the end: no Watch button: " + ended, ended.contains("Watch the game"));
+        TestSupport.resetStatics();
         // a watching phone never offers it again
         netState(runningState(true, true), false);
         NetSession.watching = true;
@@ -1035,6 +1049,78 @@ public class LaunchSmokeTest {
         assertTrue(NetSession.offerWatch(false, true, true, true, ""));                  // gave up
         assertFalse(NetSession.offerWatch(false, false, false, false, ""));              // no game, nothing offered
         assertTrue(NetSession.offerWatch(false, false, false, false, "The game ended. You can watch."));   // a line that offers it
+    }
+
+    /**
+     * A host that watches its own running game: its seat's lobby link stays open (the relay closes every phone when the host's lobby link
+     * closes in the setup), and the watching link is a second connection that says it watches and is not a host.
+     */
+    @Test
+    public void netSession_hostWatchKeepsTheSeatOpen() throws Exception {
+        TestSupport.installData(app());
+        try (ServerSocket relay = new ServerSocket(0, 4, InetAddress.getByName("127.0.0.1"))) {
+            relay.setSoTimeout(5000);
+            NetSession.connect(app(), "127.0.0.1", relay.getLocalPort(), "Pixel", true);
+            Socket seatSock = relay.accept();
+            try {
+                RelayClient seat = NetSession.client;
+                netState(runningState(false, false), true);
+                NetSession.watchOwnHostedGame(app(), "Pixel", relay.getLocalPort());
+                Socket watchSock = relay.accept();
+                String hello = new BufferedReader(new InputStreamReader(watchSock.getInputStream(), StandardCharsets.UTF_8)).readLine();
+                assertTrue("the watching link says it watches and is not the host: " + hello,
+                        hello.contains("\"watch\":true") && hello.contains("\"host\":false"));
+                assertSame("the host's seat is still the client after Watch", seat, NetSession.client);
+                assertTrue("the host is watching", NetSession.watching);
+                seatSock.setSoTimeout(300);
+                int b;
+                try {
+                    b = seatSock.getInputStream().read();
+                } catch (SocketTimeoutException stillOpen) {
+                    b = -2;
+                }
+                assertTrue("the host's lobby link was not closed (read " + b + ")", b != -1);
+                watchSock.close();
+            } finally {
+                seatSock.close();
+                NetSession.leave();
+                TestSupport.resetStatics();
+            }
+        }
+    }
+
+    /** A Watch tapped after the game has ended connects nothing: the seat stays, no second link is accepted, nothing is watched. */
+    @Test
+    public void netSession_hostWatchAfterTheGameEndedConnectsNothing() throws Exception {
+        TestSupport.installData(app());
+        try (ServerSocket relay = new ServerSocket(0, 4, InetAddress.getByName("127.0.0.1"))) {
+            relay.setSoTimeout(5000);
+            NetSession.connect(app(), "127.0.0.1", relay.getLocalPort(), "Pixel", true);
+            Socket seatSock = relay.accept();
+            try {
+                RelayClient seat = NetSession.client;
+                netState(LOBBY_WATCH.replace("\"you\":3", "\"you\":1"), true);       // the relay says the game is over (setup)
+                try {
+                    NetSession.watchOwnHostedGame(app(), "Pixel", relay.getLocalPort());
+                    fail("a game that ended is not watched");
+                } catch (NetSession.Cancelled expected) {
+                    // nothing to connect: the ended state is shown instead
+                }
+                relay.setSoTimeout(300);
+                try {
+                    relay.accept();
+                    fail("a Watch after the end opened a link to the relay");
+                } catch (SocketTimeoutException none) {
+                    // no link was opened
+                }
+                assertSame("the seat is untouched", seat, NetSession.client);
+                assertFalse("nothing is watched", NetSession.watching);
+            } finally {
+                seatSock.close();
+                NetSession.leave();
+                TestSupport.resetStatics();
+            }
+        }
     }
 
     // Phase 5: finding hosts ----------------------------------------------------------------------------------

@@ -46,6 +46,43 @@ final class NetSession {
     static volatile long stateAt;
     /** host:port of a host that said "The host left." (it stopped hosting): its entry in the Join list is not offered until a search finds it again. */
     static volatile String goneHost = "";
+    /** A notice about a phone's connection: "X lost connection; ...", "X left the game; ...", "X did not come back; ...". Group 1 is X. */
+    private static final java.util.regex.Pattern PHONE_NOTICE =
+            java.util.regex.Pattern.compile("^(.+?) (?:lost connection|left the game|did not come back)(?:;| within|$)");
+
+    /**
+     * Whether the notice on the screen still holds for a lobby state. A notice about a phone's connection ends once that phone is
+     * back (neither away nor given up) or is no longer in the game; any other notice stays until the next game.
+     */
+    static boolean noticeStillHolds(String text, Map<String, Object> st) {
+        if (text == null || text.isEmpty() || st == null) return true;
+        java.util.regex.Matcher m = PHONE_NOTICE.matcher(text);
+        if (!m.find()) return true;
+        String who = m.group(1);
+        for (Object o : org.hedgewars.android.net.Json.list(st, "players")) {
+            Map<String, Object> p = (Map<String, Object>) o;
+            if (who.equals(org.hedgewars.android.net.Json.str(p, "name", ""))) {
+                return org.hedgewars.android.net.Json.bool(p, "away", false) || org.hedgewars.android.net.Json.bool(p, "gaveUp", false);
+            }
+        }
+        return false;
+    }
+
+    /**
+     * A search lists the host the Join list greys out: its grey-out and the red "The host left." banner end. Returns whether
+     * either was cleared.
+     */
+    static boolean hostBack(java.util.List<org.hedgewars.android.net.HostAdvert.Found> found) {
+        String gone = goneHost;
+        if (gone.isEmpty()) return false;
+        boolean listed = false;
+        for (org.hedgewars.android.net.HostAdvert.Found h : found) if (gone.equals(h.host + ":" + h.port)) listed = true;
+        if (!listed) return false;
+        goneHost = "";
+        if ("The host left.".equals(closedReason)) closedReason = "";
+        return true;
+    }
+
     /** Why the relay ended the last game (from its summary), so a normal end is not shown as an engine error. */
     static volatile String lastEndReason = "";
     static volatile String closedReason = "", notice = "";
@@ -225,6 +262,8 @@ final class NetSession {
         @Override public void onState(Map<String, Object> s) {
             state = s;
             stateAt = System.currentTimeMillis();
+            // A notice about a phone's connection ends when that phone is back, or gone from the game.
+            if (!noticeStillHolds(notice, s)) notice = "";
             // The host let us in, so the password we sent (if any) is right: keep it for this app session.
             String k = sentPinKey, pn = sentPin;
             if (k != null && !pn.isEmpty()) knownPins.put(k, pn);

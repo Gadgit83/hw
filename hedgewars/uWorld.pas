@@ -2072,6 +2072,10 @@ var
     AimPathX, AimPathY: array[0..cAimHelperMaxSteps] of LongInt;
     AimPathN: LongInt;         // number of points; the first one is the launch point
     AimPathHit: boolean;       // the path ended at a contact with land
+    // the last state written to the log by AimHelperRun (setup $aimhelper > 0 only; logging only)
+    AimLogValid, AimLogRun: boolean;
+    AimLogAngle, AimLogPower, AimLogN, AimLogX, AimLogY: LongInt;
+    AimLogTick: LongWord;
 
 // Repeats the free flight from (x0, y0) with velocity (vx, vy). shellLike: the shell and drill add the wind once a frame
 // before the gravity step, unless gfMoreWind is on (then the falling-gear wind applies as for every other projectile).
@@ -2152,7 +2156,7 @@ for i:= 1 to maxSteps do
 end;
 
 // Works out the preview for the shot the local player is making. False when there is nothing to show.
-function AimHelperRun: boolean;
+function AimHelperCompute: boolean;
 var HHG: PGear;
     at: TAmmoType;
     xx, yy, vx, vy, x0, y0, density, elast, fric: hwFloat;
@@ -2160,7 +2164,7 @@ var HHG: PGear;
     kind: TGearType;
     shellLike, power: boolean;
 begin
-AimHelperRun:= false;
+AimHelperCompute:= false;
 if (cAimHelper = 0) or (CurrentTeam = nil) or (CurrentHedgehog = nil) then
     exit;
 // the local player only: never a team driven from another phone, a computer player, or a shot that is not ours
@@ -2224,7 +2228,58 @@ if (at = amGrenade) or (at = amClusterBomb) or (at = amGasBomb) or (at = amWater
         maxSteps:= fuse
     end;
 AimHelperFlight(x0, y0, vx, vy, kind, radius, density, elast, fric, shellLike, maxSteps);
-AimHelperRun:= AimPathN > 1;
+AimHelperCompute:= AimPathN > 1;
+end;
+
+// Logs the preview (setup $aimhelper > 0) when its state has changed: the run flag, the angle, the power, the number
+// of path points or the landing point (by more than 3 px). At most one line every 500 ms of game time, except that a
+// change of the run flag is always logged. Logging only: nothing here changes the game.
+procedure AimHelperLog(run: boolean; HHG: PGear);
+var changed: boolean;
+    lx, ly, n: LongInt;
+begin
+if HHG = nil then
+    exit;
+// when the run is off the path is not drawn, so the log shows no points
+n:= 0;
+lx:= 0;
+ly:= 0;
+if run and (AimPathN > 0) then
+    begin
+    n:= AimPathN;
+    lx:= AimPathX[AimPathN - 1];
+    ly:= AimPathY[AimPathN - 1];
+    end;
+changed:= (not AimLogValid) or (run <> AimLogRun) or (HHG^.Angle <> AimLogAngle) or (HHG^.Power <> AimLogPower)
+    or (n <> AimLogN) or (abs(lx - AimLogX) > 3) or (abs(ly - AimLogY) > 3);
+if not changed then
+    exit;
+if AimLogValid and (run = AimLogRun) and (GameTicks - AimLogTick < 500) then
+    exit;
+AimLogValid:= true;
+AimLogRun:= run;
+AimLogAngle:= HHG^.Angle;
+AimLogPower:= HHG^.Power;
+AimLogN:= n;
+AimLogX:= lx;
+AimLogY:= ly;
+AimLogTick:= GameTicks;
+if run then
+    WriteLnToConsole('aim helper: angle ' + inttostr(HHG^.Angle) + ' power ' + inttostr(HHG^.Power) + ' path points ' + inttostr(n)
+        + ' lands at ' + inttostr(lx) + ',' + inttostr(ly) + ' run true')
+else
+    WriteLnToConsole('aim helper: angle ' + inttostr(HHG^.Angle) + ' power ' + inttostr(HHG^.Power) + ' path points 0'
+        + ' lands at none run false');
+end;
+
+// The preview of the shot being charged, with its log line when setup $aimhelper is on.
+function AimHelperRun: boolean;
+begin
+AimHelperRun:= AimHelperCompute();
+if (cAimHelper > 0) and (CurrentHedgehog <> nil) and (CurrentHedgehog^.Gear <> nil) then
+    AimHelperLog(AimHelperRun, CurrentHedgehog^.Gear)
+else
+    AimLogValid:= false;
 end;
 
 // The dots of the preview, at the current world offset. Called once for each drawn copy of the world.

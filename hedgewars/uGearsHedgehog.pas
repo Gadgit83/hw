@@ -40,7 +40,7 @@ implementation
 uses uConsts, uVariables, uFloat, uAmmos, uSound, uCaptions,
     uCommands, uLocale, uUtils, uStats, uIO, uScript,
     uGearsList, uCollisions, uRandom, uStore, uTeams,
-    uGearsUtils, uVisualGearsList, uChat, uRust, uLandUtils;
+    uGearsUtils, uVisualGearsList, uChat, uRust, uLandUtils, uConsole;
 
 var GHStepTicks: LongWord = 0;
 
@@ -675,6 +675,8 @@ else if Gear^.Timer = 1 then
     begin
     Gear^.Hedgehog^.Effects[heFrozen]:= 0;
     Gear^.State:= Gear^.State or gstNoDamage;
+    if cDeathBoomPercent <> 100 then
+        WriteLnToConsole('death boom: ' + Gear^.Hedgehog^.Name + ' explodes, radius ' + inttostr(Gear^.Boom) + ', land radius ' + inttostr(LandBoomRadius(Gear^.Boom)));
     doMakeExplosion(hwRound(Gear^.X), hwRound(Gear^.Y), Gear^.Boom, CurrentHedgehog, EXPLAutoSound);
     grave:= AddGear(hwRound(Gear^.X), hwRound(Gear^.Y), gtGrave, 0, _0, _0, 0);
     grave^.Hedgehog:= Gear^.Hedgehog;

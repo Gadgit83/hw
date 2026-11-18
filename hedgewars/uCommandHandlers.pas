@@ -26,7 +26,7 @@ procedure initModule;
 procedure freeModule;
 
 implementation
-uses uCommands, uTypes, uVariables, uIO, uDebug, uConsts, uScript, uUtils, SDLh, uWorld, uRandom, uCaptions, uSound
+uses uCommands, uTypes, uVariables, uIO, uDebug, uConsts, uScript, uUtils, SDLh, uWorld, uRandom, uCaptions, uSound, uConsole
     , uVisualGearsList, uGearsHedgehog, uChat, uRust
      {$IFDEF USE_VIDEO_RECORDING}, uVideoRec {$ENDIF};
 
@@ -942,7 +942,9 @@ cDeathBoomPercent:= StrToInt(s);
 if cDeathBoomPercent < 0 then
     cDeathBoomPercent:= 0
 else if cDeathBoomPercent > 1000 then
-    cDeathBoomPercent:= 1000
+    cDeathBoomPercent:= 1000;
+if cDeathBoomPercent <> 100 then
+    WriteLnToConsole('death boom: setting ' + inttostr(cDeathBoomPercent) + ' percent')
 end;
 
 procedure chLandBoomPercent(var s: shortstring);

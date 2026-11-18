@@ -33,7 +33,7 @@ var curHandledGear: PGear;
 
 implementation
 
-uses uRandom, uUtils, uConsts, uVariables, uAmmos, uTeams, uStats,
+uses uRandom, uUtils, uConsts, uVariables, uAmmos, uTeams, uStats, uConsole,
     uTextures, uScript, uRenderUtils, uAI, uCollisions,
     uGearsRender, uGearsUtils, uDebug, uRust;
 
@@ -307,6 +307,8 @@ begin
       gtMinigunBullet: Gear^.Boom := 2;
              gtSentry: Gear^.Boom := 40;
         end;
+    if (Kind = gtHedgehog) and (cDeathBoomPercent <> 100) then
+        WriteLnToConsole('death boom: hedgehog gear ' + inttostr(gear^.uid) + ' Boom ' + inttostr(gear^.Boom));
 
     case Kind of
          gtGrenade,

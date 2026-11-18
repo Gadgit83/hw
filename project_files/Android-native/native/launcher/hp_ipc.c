@@ -457,6 +457,14 @@ int hp_ipc_relay_frame_ok(unsigned char type)
 }
 
 static unsigned long g_rx_dropped;
+/* Test hook HP_NET_NOACK_MS: until this monotonic time the relay's link pings are not answered (0 when the hook is off). */
+static long long g_noack_until_ms;
+static long long mono_ms(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (long long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+}
 static void *down_thread(void *arg)
 {
     (void)arg;
@@ -481,10 +489,16 @@ static void *down_thread(void *arg)
                     net_lost(m);
                 }
             }
-            if (len == 2 && (msg[1] == 'P' || msg[1] == 'R')) net_apply_pause(msg[1] == 'P');
+            if (len == 2 && (msg[1] == 'P' || msg[1] == 'R')) {
+                /* Test hook (HP_NET_NOACK_MS, host tests only): stop answering the relay's link pings for this long after a pause
+                   arrives, as a phone whose link has gone quiet would. The relay must not call the link half-open during the pause. */
+                const char *na = getenv("HP_NET_NOACK_MS");
+                if (msg[1] == 'P' && na && atoi(na) > 0) g_noack_until_ms = mono_ms() + atoi(na);
+                net_apply_pause(msg[1] == 'P');
+            }
             if (len == 2 && msg[1] == 'L') net_apply_loneback();
             /* The relay's link ping: answered here, on this thread, so it works while the engine generates a map or is paused. */
-            if (len == 2 && msg[1] == 'K') {
+            if (len == 2 && msg[1] == 'K' && mono_ms() >= g_noack_until_ms) {
                 unsigned char k[3] = { 2, 0, 'K' };                    /* straight onto the link: no waiting behind the queue, no log line every 5 s */
                 pthread_mutex_lock(&g_relay_wr_lock);
                 write_full(g_relay_fd, k, sizeof k);

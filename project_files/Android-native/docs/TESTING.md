@@ -1,5 +1,22 @@
 # Testing
 
+## Strategy: what to run, and when
+
+Network scenarios are real games and take about 5 minutes each, so run them only where they can catch something.
+
+1. **While fixing:** run only the tests that cover the change.
+   - **App screens only:** the unit and Robolectric tests (`scripts/ui-smoke-test.sh`). No network scenarios and no APK build.
+   - **Relay or launcher:** the two or three scenarios that cover the change, plus `malformed` if message parsing changed.
+   - **Engine:** `settings` and `basic`. Add the layout tests if the change touches the touch controls.
+   - **Every fix:** show it failing first, on the unfixed code, then passing.
+2. **After merging a branch:** the build, plus the scenarios for the merged area.
+3. **Before a device build:** the full suite once, with `scripts/net-suite.sh` (about an hour at `-j 3`), then `scripts/config-test.sh` and `scripts/build-apk.sh` for both ABIs.
+4. **A late fix after the full suite:** rerun only the scenarios for its area, not the whole suite.
+
+Make the cloud look like the phones. The UI scale, the slow-phone timing and short-range aiming each caused a bug that passed in the cloud and failed on a phone. So when a change touches one of these, test it with the phone's arguments and screen size (2340x1080, the app's own launcher arguments), and with a slow phone (the `*slow` scenarios).
+
+Device requests on issue #1 give exact steps, the logs to capture (`adb logcat -s HW_Engine` and the relay log), and a screenshot at the moment that matters.
+
 ## Network scenarios in parallel: `scripts/net-suite.sh`
 
 `scripts/net-test.sh SCENARIO` runs one network scenario (see its header for the list). `scripts/net-suite.sh` runs many of them.

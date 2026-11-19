@@ -81,7 +81,6 @@ public final class Ui {
      */
     public FrameLayout scrollWithHint(ScrollView sv) {
         FrameLayout f = new FrameLayout(ctx);
-        f.addView(sv, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         final TextView hint = text("More below \u25be", 12, ACCENT);
         hint.setTypeface(Typeface.DEFAULT_BOLD);
         hint.setPadding(dp(12), dp(3), dp(12), dp(3));
@@ -90,14 +89,12 @@ public final class Ui {
         FrameLayout.LayoutParams hp = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
                 Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
         hp.bottomMargin = dp(6);
+        // The hint has a strip of its own under the scrolled view, so it never covers a row's buttons (device report, tv22, item 2).
+        hint.measure(View.MeasureSpec.UNSPECIFIED, View.MeasureSpec.UNSPECIFIED);
+        FrameLayout.LayoutParams sp = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
+        sp.bottomMargin = hint.getMeasuredHeight() + hp.bottomMargin;
+        f.addView(sv, sp);
         f.addView(hint, hp);
-        final View content = sv.getChildAt(0);
-        if (content != null) {
-            // Reserve room below the last row for the hint, so the end of the list is never under it.
-            hint.measure(View.MeasureSpec.UNSPECIFIED, View.MeasureSpec.UNSPECIFIED);
-            content.setPadding(content.getPaddingLeft(), content.getPaddingTop(), content.getPaddingRight(),
-                    content.getPaddingBottom() + hint.getMeasuredHeight() + hp.bottomMargin + dp(4));
-        }
         final Runnable update = () -> {
             View c = sv.getChildAt(0);
             hint.setVisibility(c != null && sv.getScrollY() + sv.getHeight() < c.getHeight() - dp(6) ? View.VISIBLE : View.GONE);

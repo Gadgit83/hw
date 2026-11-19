@@ -54,6 +54,8 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
     /** The address a join is connecting to ("host:port"), shown at once while it runs; empty for a host's own connect. */
     private static volatile String joinTarget = "";
     private String problem = "";
+    /** Set by a join: the page then goes to the top, where its message is (the join was started from a row or the address field below). */
+    private boolean scrollToProblem;
     private boolean destroyed;
     // Finding hosts (docs/tv-viewer-plan.md section 5.1)
     private HostDiscovery discovery;
@@ -352,6 +354,12 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
         }
         if (NetSession.joined) lobby(); else choose();
         if (!NetSession.relaySummary.isEmpty()) report();
+        // The message of a join is drawn at the top of the page; a join started from a row further down would otherwise leave it out of
+        // view (device report, tv22, item 1). The page goes to the top, where the message is.
+        if (scrollToProblem) {
+            scrollToProblem = false;
+            if (!problem.isEmpty()) scroll.post(() -> scroll.scrollTo(0, 0));
+        }
     }
 
     private TextView coloured(String s, int colour) {
@@ -731,14 +739,16 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
         if (box == null) return;
         box.removeAllViews();
         box.addView(ui.heading("Hosts on this Wi-Fi"));
-        if (!searchStatus.isEmpty()) box.addView(ui.hint(searchStatus));
+        // What sits above the rows is always there, so the rows stay where they are when a search starts or ends (device report, tv22,
+        // item 3): the status line is empty when it says nothing, and Search again is greyed out while a search runs.
+        box.addView(ui.hint(searchStatus));
         // Search again is above the rows: under a long list of hosts it was below the fold (device report, issue #1, item 3).
-        if (searchDone) {
-            box.addView(ui.button("Search again", false, v -> startSearch(true)), ui.margins(Ui.lp(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT), 0, 6, 0, 0));
-        }
+        Button again = ui.button("Search again", false, v -> startSearch(true));
+        again.setEnabled(searchDone);
+        box.addView(again, ui.margins(Ui.lp(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT), 0, 6, 0, 0));
         final String digest = myDigest;
         // Until this phone's own data fingerprint is known, the data check is left out (the host checks it again at the join).
-        if (digest == null && !hosts.isEmpty()) box.addView(ui.hint("Checking this phone's game data..."));
+        box.addView(ui.hint(digest == null && !hosts.isEmpty() ? "Checking this phone's game data..." : ""));
         for (final HostAdvert.Found h : sortedHosts()) {
             String why = h.incompatibility(org.hedgewars.android.net.Compat.VALUE, Diag.versionName(this), digest != null ? digest : h.data);
             LinearLayout row = ui.card();
@@ -1172,6 +1182,7 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
     private void join(final boolean watch) {
         saveFields();
         problem = "";
+        scrollToProblem = true;
         // What the field shows, which may be the phone's own prefix that the person has not finished.
         String a = (addressField != null ? addressField.getText().toString() : address).trim();
         if (a.isEmpty()) {
@@ -1226,8 +1237,10 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
                     NetSession.goneHost = host + ":" + port;
                     searchDone = true;
                     problem = host + ":" + port + " is not hosting any more: nothing answers on its port. Search again to look for it.";
+                    scrollToProblem = true;
                 } else if (seq == joinSeq) {
                     problem = "Could not reach " + host + ":" + port + " (" + e.getMessage() + "). Same Wi-Fi? Is the host hosting?";
+                    scrollToProblem = true;
                 }
             } finally {
                 if (seq == joinSeq) {

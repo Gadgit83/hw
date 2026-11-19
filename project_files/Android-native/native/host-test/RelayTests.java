@@ -1849,6 +1849,13 @@ public class RelayTests {
         RelayClient host = join(f0, hp, "Host", true, team("H", 0, 0));
         List<RelayClient> clients = new ArrayList<>();
         for (int i = 1; i < Relay.MAX_PLAYERS; i++) clients.add(join(f0, new P(), "Pl" + i, false, team("T" + i, i % 8, 0)));
+        // A join only connects; the relay registers the phone when its hello is read. Wait until all eight are in the
+        // host's state, or under load the ninth phone's hello can be read first, and a later player is refused instead.
+        check(waitFor(() -> {
+            if (hp.state == null || player(hp.state, "Host") == null) return false;
+            for (int i = 1; i < Relay.MAX_PLAYERS; i++) if (player(hp.state, "Pl" + i) == null) return false;
+            return true;
+        }, 3000), "the host and " + (Relay.MAX_PLAYERS - 1) + " players are all registered");
         P late = new P();
         RelayClient ninth = join(f0, late, "Ninth", false, team("N9", 1, 0));
         check(waitFor(() -> !late.closed.isEmpty(), 3000) && late.closed.contains("full"), "the player cap is " + Relay.MAX_PLAYERS + ": a ninth player is refused (" + late.closed + ")");

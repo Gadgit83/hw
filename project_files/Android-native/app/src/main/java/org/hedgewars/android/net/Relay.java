@@ -2087,7 +2087,11 @@ public final class Relay {
             log(p.name + " asked to " + (pause ? "pause" : "resume") + ": ignored, " + why);
             return;
         }
-        if (pause == g.paused) return;
+        if (pause == g.paused) {
+            // Nothing changes, but a repeated pause is logged, so a second tap is visible in the relay log.
+            if (pause) log(p.name + " asked to pause: already paused");
+            return;
+        }
         if (pause) {
             g.paused = true;
             g.pausedAt = now;

@@ -171,6 +171,21 @@ public class GameActivity extends SDLActivity {
         });
     }
 
+    private PauseOverlay pauseOverlay;
+
+    /**
+     * Called from the native launcher (hp_main.c, through JNI) when the pause of a network game changes (hp_ipc.c, the
+     * PauseOverlay states). Runs on the IPC thread, so it hands over to the UI thread.
+     */
+    @SuppressWarnings("unused")
+    public void pauseStatus(int state) {
+        uiHandler.post(() -> {
+            if (isFinishing()) return;
+            if (pauseOverlay == null) pauseOverlay = new PauseOverlay(this, PauseOverlay.rejoined(getFilesDir()));
+            pauseOverlay.onStatus(state);
+        });
+    }
+
     private android.app.AlertDialog optionsDialog;
 
     /**

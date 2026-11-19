@@ -1401,7 +1401,16 @@ public class LaunchSmokeTest {
         NetSession.state = null;
         NetSession.clearRejoin(app());
         assertTrue("no note, no offer", !launch(NetLobbyActivity.class, null, 600).contains("Rejoin your game"));
-        NetSession.saveRejoin(app(), "192.168.1.20", 46633, "Fairphone", "0123456789abcdef0123456789abcdef", false);
+        NetSession.saveRejoin(app(), "192.168.1.20", 46633, "Fairphone", "0123456789abcdef0123456789abcdef", false, "5");
+        // The card is offered only while the host the note names is found and reports game 5 still playing (its probe reply).
+        String digest0 = NetSession.dataDigest(app());
+        fakeHosts(advert("Host phone", "192.168.1.20", 46633, org.hedgewars.android.net.Compat.VALUE, Diag.versionName(app()), digest0));
+        java.util.Map<String, String> rec = org.hedgewars.android.net.HostAdvert.txt(Diag.versionName(app()), org.hedgewars.android.net.Compat.VALUE,
+                org.hedgewars.android.net.Compat.ENGINE_PROTOCOL, "Host phone", 8766, digest0);
+        rec.putAll(org.hedgewars.android.net.HostAdvert.liveFields(5, true));
+        final org.hedgewars.android.net.HostAdvert.Found live = org.hedgewars.android.net.HostAdvert.parseProbe(
+                org.hedgewars.android.net.HostAdvert.probeReply(rec), "192.168.1.20", 46633);
+        NetSession.hostProbe = (c, host, port) -> live;
         NetSession.RejoinNote n = NetSession.loadRejoin(app());
         assertTrue("the note round trips", n != null && n.host.equals("192.168.1.20") && n.port == 46633 && n.name.equals("Fairphone") && n.token.equals("0123456789abcdef0123456789abcdef"));
         text = launch(NetLobbyActivity.class, null, 600);
@@ -1418,6 +1427,7 @@ public class LaunchSmokeTest {
         assertTrue("after a late attempt it says why and the note offers watching: " + text, text.contains("You were away too long") && afterRefusal == withoutRefusal + 1);
         NetSession.rejoinRefusal = "";
         NetSession.clearRejoin(app());
+        NetSession.hostProbe = NetSession::probeHost;
         assertTrue("forgotten", NetSession.loadRejoin(app()) == null);
         System.out.println("SDK " + android.os.Build.VERSION.SDK_INT + ": NetLobbyActivity rejoin offers ok");
     }

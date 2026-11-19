@@ -30,6 +30,9 @@ public final class HostAdvert {
     public static final String PROBE_HELLO = "{\"t\":\"hello\",\"role\":\"probe\"}";
     /** The marker in a probe reply, so that another service's JSON is not taken for a host. */
     public static final String PROBE_APP = "hedgeparty";
+    /** The game states a probe reply names (the live part of the reply; not in the NSD record). */
+    public static final String STATE_PLAYING = "playing", STATE_SETUP = "setup";
+
     /** The longest probe reply a phone reads. */
     public static final int PROBE_MAX_LINE = 4096;
 
@@ -67,7 +70,41 @@ public final class HostAdvert {
             if (o instanceof String) attrs.put(k, ((String) o).getBytes(StandardCharsets.UTF_8));
         }
         Found f = parse(serviceName(Json.str(m, "name", "")), host, port, attrs);
-        return f.parsedOk ? f : null;
+        if (!f.parsedOk) return null;
+        if (m.get("state") instanceof String) {
+            f.liveKnown = true;
+            f.state = Json.str(m, "state", "");
+            f.game = gameNumber(Json.str(m, "game", ""));
+        }
+        return f;
+    }
+
+    /**
+     * What the Rejoin card does with a rejoin note (issue #1, a force-stopped phone): SHOW the card, WAIT (nothing shown, the note kept:
+     * the host is not found, or not asked yet), or DROP the note quietly (the host runs another game or none).
+     */
+    public enum RejoinOffer { SHOW, WAIT, DROP }
+
+    /**
+     * The rule. {@code live} is the host's probe reply (null: not found, or no answer). A reply without the live fields is an older host,
+     * which keeps today's behaviour (SHOW). Otherwise the card is shown only when the host runs the same game the note names, still playing.
+     */
+    public static RejoinOffer rejoinOffer(String noteGame, Found live) {
+        if (live == null) return RejoinOffer.WAIT;
+        if (!live.liveKnown) return RejoinOffer.SHOW;
+        boolean same = noteGame != null && !noteGame.isEmpty() && noteGame.equals(Long.toString(live.game));
+        return same && STATE_PLAYING.equals(live.state) ? RejoinOffer.SHOW : RejoinOffer.DROP;
+    }
+
+    /**
+     * The live part of a probe reply: the relay's game number (0 for none) and its state. It goes into the probe reply only: the NSD record
+     * is announced once and cannot be updated, so it would show a game that has since started or ended.
+     */
+    public static Map<String, String> liveFields(long game, boolean playing) {
+        Map<String, String> m = new LinkedHashMap<>();
+        m.put("game", Long.toString(game));
+        m.put("state", playing ? STATE_PLAYING : STATE_SETUP);
+        return m;
     }
 
     public static Map<String, String> txt(String version, String compat, int protocol, String hostName, int tvPort, String dataDigest) {
@@ -102,6 +139,11 @@ public final class HostAdvert {
         public boolean parsedOk;
         /** The host asks for a game password (TXT pin=1). A record without the key (an older host) means no. */
         public boolean pinRequired;
+        /** The probe reply says what game the host runs and its state (this version's reply); false for an older host. */
+        public boolean liveKnown;
+        /** The game number the host's relay counts (0: none) and STATE_PLAYING or STATE_SETUP, from the probe reply only. */
+        public long game;
+        public String state = "";
 
         /** Why this phone cannot join, or null. */
         public String incompatibility(String myCompat, String myVersion, String myData) {
@@ -159,6 +201,13 @@ public final class HostAdvert {
             if (t != Character.CONTROL && t != Character.FORMAT) b.appendCodePoint(cp);
         });
         return b.toString();
+    }
+
+    /** A game number from a probe reply: digits only, 0 when it is not one. */
+    static long gameNumber(String s) {
+        if (s.isEmpty() || s.length() > 18) return 0;
+        for (int i = 0; i < s.length(); i++) if (!Character.isDigit(s.charAt(i))) return 0;
+        return Long.parseLong(s);
     }
 
     private static int num(Map<String, byte[]> a, String k) {

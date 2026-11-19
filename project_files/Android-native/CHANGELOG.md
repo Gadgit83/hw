@@ -4,6 +4,21 @@ All notable changes to the native Android app (`project_files/Android-native`), 
 
 Only some builds were put on a phone, so a version below is a build that was made, not necessarily one that was released. Releases are tags on `android-master` with the APK attached; there is none yet.
 
+## 0.3.0-tv22 (126): the refused-join crash and the Rejoin card
+
+`HP_PROFILE=test`, versionName `0.3.0-tv22-test`. It answers the early findings of RESULT 29 on issue #1. There is no engine change. Compat is unchanged (`hwnet-60-sim3`).
+
+### Fixed
+
+- **Crash on a refused join.** The app was closed on Android 12 and later (`ForegroundServiceDidNotStartInTimeException`, FP3, Android 13) when a join was refused because a game was running. The joining service was started as soon as the connection opened, before the host accepted the seat, and was stopped by the refusal before it had shown its notification. It now starts only once the seat is accepted, and it goes to the foreground as soon as it is created, so an early stop is safe.
+- **No Rejoin card after a relaunch during game 2.** When the search listed the host, the screen redrew only the host list, so the check that asks the host whether the game still runs never started. A check that got no answer was also never asked again. The screen now redraws the card and retries an unanswered check after 3 s.
+- The Search again button sits above the host rows, so a long list no longer pushes it off the screen.
+
+### Tests
+
+- New `JoinServiceTest`, plus new cases in `RejoinCardTest` and `NetLobbyDeviceFixTest`; each failed on tv21.
+- `scripts/net-suite.sh` runs on under a parent `flock` of the same lock instead of waiting for ever.
+
 ## 0.3.0-tv21 (125): fixes from the tv20 device check
 
 `HP_PROFILE=test`, versionName `0.3.0-tv21-test`. Each change answers a finding of RESULT 28 on issue #1. There is no engine change. Compat is unchanged (`hwnet-60-sim3`).

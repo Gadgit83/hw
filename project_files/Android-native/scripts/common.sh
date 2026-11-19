@@ -32,3 +32,26 @@ case "$HP_PROFILE" in
 esac
 export HP_PROFILE
 log() { printf '\n==> %s\n' "$*"; }
+
+# The machine's heavy lock, shared with the other workers (docs/TESTING.md). heavy CMD... runs a heavy step under it. A
+# caller that already holds the lock (HP_HEAVY_HELD=1) runs the command directly.
+HP_HEAVY_LOCK="${HP_HEAVY_LOCK:-/tmp/claude-0/-home-user/ac142ab0-1bea-5b6c-a7cb-3a9f55df2846/scratchpad/heavy.lock}"
+heavy() {
+  if [ -n "${HP_HEAVY_HELD:-}" ]; then "$@"; return; fi
+  flock "$HP_HEAVY_LOCK" env HP_HEAVY_HELD=1 "$@"
+}
+
+# One hash of what git knows about some paths of a checkout: the blob id of every tracked file, the content of each file that
+# differs from the index (or is gone), and the content of each untracked file. Git's own diff shows a binary file only as
+# "differ", so the content is hashed here. Fails when GITDIR is not a git checkout (the caller then never matches a stamp).
+tree_fingerprint() { # GITDIR PATH...
+  local g="$1" f; shift
+  git -C "$g" rev-parse --show-toplevel >/dev/null 2>&1 || return 1
+  {
+    git -C "$g" ls-files -s -- "$@"
+    git -C "$g" diff --name-only -- "$@" | sort | while IFS= read -r f; do
+      echo "changed $f"; sha256sum "$g/$f" 2>/dev/null || echo gone; done
+    git -C "$g" ls-files -o --exclude-standard -- "$@" | sort | while IFS= read -r f; do
+      echo "untracked $f"; sha256sum "$g/$f"; done
+  } | sha256sum | cut -d' ' -f1
+}

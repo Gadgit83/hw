@@ -7,6 +7,10 @@
 #                             pack, a few hats); see README "Build profiles". full (default) is unchanged.
 # The data folder ends with a marker, Data/.profile, holding the profile it was staged for. The Gradle build refuses
 # to package data staged for the other profile (app/build.gradle, preBuild).
+#   stage-assets.sh          stage only when its inputs changed: a stamp (build/stage-assets.stamp) keyed on the engine's data
+#                            (the tracked files' blob ids, and the content of changed or untracked ones), the profile, HP_MUSIC,
+#                            HP_LOCALES and these two scripts. A matching stamp with the data in place skips the staging.
+#   stage-assets.sh --force  stage again regardless
 . "$(dirname "$0")/common.sh"
 SRC="$HW_ENGINE_DIR/share/hedgewars/Data"
 OUT="$BUILD_DIR/assets/Data"
@@ -14,6 +18,23 @@ OUT="$BUILD_DIR/assets/Data"
 HP_MUSIC="${HP_MUSIC:-lite}"
 HP_LOCALES="${HP_LOCALES:-en}"
 [ -d "$SRC" ] || { echo "game data not found at $SRC"; exit 1; }
+
+FORCE=0; [ "${1:-}" = --force ] && FORCE=1
+# The stamp sits beside build/assets, not inside it: the Gradle build packages build/assets as the app's assets.
+STAMP="$BUILD_DIR/stage-assets.stamp"
+stage_key() { # a key over everything the staged folder depends on; fails when the engine is not a git checkout
+  local data mobile
+  data="$(tree_fingerprint "$HW_ENGINE_DIR" share/hedgewars/Data)" || return 1
+  mobile="$(tree_fingerprint "$HW_ENGINE_DIR" project_files/Android-build/SDL-android-project/assets/Data)" || return 1
+  printf '%s\n' "profile $HP_PROFILE music $HP_MUSIC locales $HP_LOCALES" "data $data" "mobile $mobile" \
+    "script $(sha256sum "$0" | cut -d' ' -f1) $(sha256sum "$(dirname "$0")/common.sh" | cut -d' ' -f1)" | sha256sum | cut -d' ' -f1
+}
+KEY="$(stage_key)" || KEY=""
+if [ "$FORCE" = 0 ] && [ -n "$KEY" ] && [ -f "$OUT/.profile" ] && [ -f "$STAMP" ] && grep -qx "key $KEY" "$STAMP"; then
+  echo "staged game data is up to date ($OUT, profile $HP_PROFILE)"
+  exit 0
+fi
+rm -f "$STAMP"
 
 log "staging game data -> $OUT"
 rm -rf "$OUT"
@@ -96,4 +117,5 @@ printf '%s\n' "$HP_PROFILE" > "$OUT/.profile"
 # Licence texts travel with the data (GFDL art and sound, GPL engine).
 cp "$HW_ENGINE_DIR/COPYING" "$OUT/COPYING" 2>/dev/null || true
 cp "$HW_ENGINE_DIR/CREDITS" "$OUT/CREDITS" 2>/dev/null || true
+if [ -n "$KEY" ]; then printf 'key %s\n' "$KEY" > "$STAMP"; fi
 du -sh "$OUT"; find "$OUT" -type f | wc -l

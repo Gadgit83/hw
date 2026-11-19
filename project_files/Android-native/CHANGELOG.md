@@ -4,6 +4,25 @@ All notable changes to the native Android app (`project_files/Android-native`), 
 
 Only some builds were put on a phone, so a version below is a build that was made, not necessarily one that was released. Releases are tags on `android-master` with the APK attached; there is none yet.
 
+## 0.3.0-tv23 (127): fixes from RESULT 29 and RESULT 30
+
+`HP_PROFILE=test`, versionName `0.3.0-tv23-test`. App changes only: no relay, launcher or engine change. Compat is unchanged (`hwnet-60-sim3`).
+
+### Fixed
+
+- "Paused, catching up…" (owner decision, tv21) was taken down within milliseconds. The relay's pause reached the phone at once, while the engine pauses only after its replay, and the overlay was hidden on the relay's pause. It now stays up from the host's pause until the game is resumed.
+- "<name> did not come back; their teams sit out" was only a passing chat line. The single notice slot was overwritten by the host's own rejoin notice. The host lobby now shows a lasting banner for each phone whose teams sit out while the game runs. The banners are built from the relay's state, whichever screen was in front.
+- "You left the game. You can rejoin within 2 minutes." is cleared when the game ends.
+- Network screen:
+  - a refused join scrolls the page to its message;
+  - the "More below" chip has its own strip and no longer covers buttons (shared with the other screens);
+  - Search again, the status line and the data-check line keep their places during a search, so the host rows no longer jump about 140 px when it ends.
+
+### Tests
+
+- New `NetLobbyLayoutTest`, at a portrait phone size.
+- New cases in `PauseOverlayTest` and `NetSessionDeviceFixTest`.
+
 ## 0.3.0-tv22 (126): the refused-join crash and the Rejoin card
 
 `HP_PROFILE=test`, versionName `0.3.0-tv22-test`. It answers the early findings of RESULT 29 on issue #1. There is no engine change. Compat is unchanged (`hwnet-60-sim3`).

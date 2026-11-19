@@ -20,6 +20,12 @@
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 LOCK="${HP_HEAVY_LOCK:-/tmp/claude-0/-home-user/ac142ab0-1bea-5b6c-a7cb-3a9f55df2846/scratchpad/heavy.lock}"
+# Called inside `flock <the same lock> scripts/net-suite.sh ...`, the suite would wait for ever on the lock its own parent
+# holds. The parent's command line names the lock, so that case runs on under the parent's lock instead.
+if [ -z "${HP_SUITE_LOCKED:-}" ] && ps -o args= -p "$PPID" 2>/dev/null | grep -qF -- "flock $LOCK"; then
+  echo "already inside the heavy lock (the parent flock holds it); not taking it again"
+  HP_SUITE_LOCKED=1
+fi
 if [ -z "${HP_SUITE_LOCKED:-}" ]; then
   echo "waiting for the heavy lock $LOCK"
   exec flock "$LOCK" env HP_SUITE_LOCKED=1 "$0" "$@"

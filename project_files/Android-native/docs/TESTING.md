@@ -33,7 +33,7 @@ Device requests on issue #1 give exact steps, the logs to capture (`adb logcat -
 - Results file (default `build/host-test/net-suite.tsv`): one line per attempt, tab-separated: scenario, attempt, PASS or FAIL, seconds, exit status, the RESULT line. Lines starting with `#` are run markers.
 - Resume: a scenario with a PASS line in the results file is skipped. After a container restart or the 2-hour job limit, rerun the same command with the same `-r` file; only scenarios that did not pass run again.
 - Retry: a failed scenario is retried once at the end of the queue. The suite exits 1 if any scenario failed twice, and prints the summary.
-- Lock: the suite holds the machine's heavy lock (`HP_HEAVY_LOCK`, default the lock the other workers use) for its whole run, so one suite runs at a time. Ctrl-C or TERM stops only the processes the suite started.
+- Lock: the suite holds the machine's heavy lock (`HP_HEAVY_LOCK`, default the lock the other workers use) for its whole run, so one suite runs at a time. Do not wrap it in `flock` yourself: it takes the lock on its own (and, if it finds its parent already holds that lock, runs on under it rather than waiting for ever). Ctrl-C or TERM stops only the processes the suite started.
 - `NET_TIMEOUT_S` (default 900 per attempt) is passed to the harness.
 
 ### Measured (6 scenarios: basic settings dropout hostquit watch1 rejoin, 4-core container, other workers running)

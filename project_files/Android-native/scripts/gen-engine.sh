@@ -6,9 +6,12 @@
 # Output: build/engine-c/*.c|*.h (gitignored) and build/engine-c/.engine-stamp, next to this script's directory.
 #
 # Modes:
-#   gen-engine.sh            always regenerate and write the stamp
+#   gen-engine.sh            always regenerate and write the stamp. The shared cache is not read, but the result is stored in it.
 #   gen-engine.sh --check    exit 1 with a message when the stamp does not match the engine checkout
-#   gen-engine.sh --ensure   regenerate only when the stamp does not match (used by the Gradle build)
+#   gen-engine.sh --ensure   regenerate only when the stamp does not match (used by the Gradle build, build-apk.sh, app-test.sh).
+#                            A stale stamp is then looked for in the shared cache: with HP_BUILD_CACHE=dir (opt-in; off when unset)
+#                            the C generated for the same key is copied in, and ghc and pas2c do not run.
+#   gen-engine.sh --key      print the key of the current engine state (the stamp's "key" line) and exit
 #
 # The stamp records the engine commit and a hash of everything pas2c reads (the committed tree of
 # hedgewars/ and tools/pas2c, the uncommitted diff, untracked files, this script and EXTRA_DEFS).
@@ -57,7 +60,8 @@ stamp_matches() {
   [ -n "$key" ] && grep -qx "key $key" "$STAMP"
 }
 
-case "$MODE" in --check|--ensure|generate) require_git_engine || exit 3 ;; esac
+case "$MODE" in --check|--ensure|generate|--key) require_git_engine || exit 3 ;; esac
+if [ "$MODE" = --key ]; then engine_key; exit 0; fi
 
 case "$MODE" in
   --check)
@@ -67,10 +71,50 @@ case "$MODE" in
     exit 1 ;;
   --ensure)
     if stamp_matches; then echo "engine C is up to date ($(engine_head | cut -c1-9))"; exit 0; fi
-    echo "engine C is stale or missing, regenerating" ;;
+    echo "engine C is stale or missing" ;;
   generate) ;;
-  *) echo "usage: gen-engine.sh [--check|--ensure]" >&2; exit 2 ;;
+  *) echo "usage: gen-engine.sh [--check|--ensure|--key]" >&2; exit 2 ;;
 esac
+
+KEY="$(engine_key)" || exit 1
+CACHE_DIR=""
+[ -n "${HP_BUILD_CACHE:-}" ] && CACHE_DIR="$HP_BUILD_CACHE/engine-c/$KEY"
+
+write_stamp() {
+  {
+    echo "engine $(engine_head)"
+    echo "dirty $(git -C "$HW_ENGINE_DIR" diff HEAD --shortstat -- hedgewars tools/pas2c | tr -s ' ')"
+    echo "defs ${EXTRA_DEFS:-}"
+    echo "key $KEY"
+  } > "$STAMP"
+}
+
+# A complete cache entry is a directory holding the C files and a .complete marker. It is written under a temporary name
+# and renamed into place, so a reader never sees a half-written entry.
+store_in_cache() {
+  local tmp
+  [ -f "$CACHE_DIR/.complete" ] && return 0
+  mkdir -p "$HP_BUILD_CACHE/engine-c" || { echo "warning: cannot create $HP_BUILD_CACHE/engine-c" >&2; return 0; }
+  tmp="$(mktemp -d "$HP_BUILD_CACHE/engine-c/.tmp.XXXXXX")" || return 0
+  if cp "$OUT"/*.c "$OUT"/*.h "$tmp"/ && touch "$tmp/.complete"; then
+    rm -rf "$CACHE_DIR"
+    mv "$tmp" "$CACHE_DIR"
+    echo "stored in the shared cache: $CACHE_DIR"
+  else
+    rm -rf "$tmp"
+    echo "warning: could not store the engine C in the shared cache" >&2
+  fi
+}
+
+if [ "$MODE" = --ensure ] && [ -n "$CACHE_DIR" ] && [ -f "$CACHE_DIR/.complete" ]; then
+  mkdir -p "$OUT"
+  rm -f "$OUT"/*.c "$OUT"/*.h
+  cp "$CACHE_DIR"/*.c "$CACHE_DIR"/*.h "$OUT"/
+  write_stamp
+  echo "engine C restored from the shared cache: $CACHE_DIR"
+  echo "stamp: $(head -1 "$STAMP")"
+  exit 0
+fi
 
 command -v ghc >/dev/null || { echo "ghc not found (apt-get install ghc), needed to regenerate stale engine C"; exit 1; }
 mkdir -p "$P2C_DIR/obj" "$P2C_DIR/alt" "$OUT"
@@ -93,5 +137,7 @@ log "pas2c: Pascal -> C"
 "$P2C_DIR/pas2c" -n hwengine -i "$HW_ENGINE_DIR/hedgewars" -o "$OUT" -a "$P2C_DIR/alt" \
     -d ENDIAN_LITTLE -d DEBUGFILE -d PAS2C_ANDROID ${EXTRA_DEFS:-} >"$P2C_DIR/pas2c.log" 2>&1 || { tail -20 "$P2C_DIR/pas2c.log"; exit 1; }
 echo "generated $(ls "$OUT"/*.c | wc -l) C files in $OUT"
-{ echo "engine $(engine_head)"; echo "dirty $(git -C "$HW_ENGINE_DIR" diff HEAD --shortstat -- hedgewars tools/pas2c | tr -s ' ')"; echo "defs ${EXTRA_DEFS:-}"; echo "key $(engine_key)"; } > "$STAMP"
+write_stamp
 echo "stamp: $(head -1 "$STAMP")"
+[ -n "$CACHE_DIR" ] && store_in_cache
+exit 0

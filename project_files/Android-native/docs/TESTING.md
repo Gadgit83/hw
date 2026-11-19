@@ -5,12 +5,12 @@
 Network scenarios are real games and take about 5 minutes each, so run them only where they can catch something.
 
 1. **While fixing:** run only the tests that cover the change.
-   - **App screens only:** the unit and Robolectric tests (`scripts/ui-smoke-test.sh`). No network scenarios and no APK build.
+   - **App screens only:** `scripts/app-test.sh [TestClass ...]`, the unit and Robolectric tests with no APK and no native build (see "App tests without the APK" below). No network scenarios.
    - **Relay or launcher:** the two or three scenarios that cover the change, plus `malformed` if message parsing changed.
    - **Engine:** `settings` and `basic`. Add the layout tests if the change touches the touch controls.
    - **Every fix:** show it failing first, on the unfixed code, then passing.
 2. **After merging a branch:** the build, plus the scenarios for the merged area.
-3. **Before a device build:** the full suite once, with `scripts/net-suite.sh` (about an hour at `-j 3`), then `scripts/config-test.sh` and `scripts/build-apk.sh` for both ABIs.
+3. **Before a device build:** `scripts/release-check.sh --full` for the full network suite (about an hour at `-j 3`) with the config test, the test APK and the smoke test, or `scripts/release-check.sh` for the tiered check (see "Release check" below). Full `build-apk.sh` runs for a device build are unchanged.
 4. **A late fix after the full suite:** rerun only the scenarios for its area, not the whole suite.
 
 Make the cloud look like the phones. The UI scale, the slow-phone timing and short-range aiming each caused a bug that passed in the cloud and failed on a phone. So when a change touches one of these, test it with the phone's arguments and screen size (2340x1080, the app's own launcher arguments), and with a slow phone (the `*slow` scenarios).
@@ -97,6 +97,63 @@ Short answer: probably yes for most scenarios, by a factor of 3 to 4, but only w
 ### Recommendation
 
 Do the checksum comparison first: K = 1 vs K = 4 on `basic`. If the turn checksums match, extend to the candidate list. If they differ, scale the AI delays with K and compare again. Do not scale the relay or the slow-phone scenarios.
+
+## Build speed: stamps and the shared cache
+
+`build-apk.sh` reuses what has not changed. Each generated input has a stamp keyed on its inputs, and a step whose stamp matches is skipped:
+
+| step | stamp | key over | skipped when |
+|---|---|---|---|
+| `gen-engine.sh --ensure` (engine C, pas2c) | `build/engine-c/.engine-stamp` | the committed tree and diff of `hedgewars/` and `tools/pas2c`, untracked files, `gen-engine.sh`, `EXTRA_DEFS` | the key matches |
+| `build-rust.sh` (one per ABI) | `build/rust-stamps/<abi>.stamp` | the committed tree and diff of `rust/`, untracked files, `build-rust.sh`, the ABI, the NDK, `rustc` and `cargo` versions | the key matches and the library is in place |
+| `stage-assets.sh` (game data) | `build/stage-assets.stamp` | the engine's data folders (blob ids, and the content of changed or untracked files), the profile, `HP_MUSIC`, `HP_LOCALES`, both scripts | the key matches and `Data/.profile` is there |
+
+The stamps sit beside `build/engine-c`, `build/rust` and `build/assets`, not inside the packaged folders, so the APK does not change. Changing a `.pas` or `.rs` file, or the profile, changes the key and the step runs again. A change to one of these scripts changes its key too, so the first run after such a change regenerates once.
+
+- `scripts/build-apk.sh --force` regenerates the engine C and the Rust library and restages the data whatever the stamps say. `gen-engine.sh`, `build-rust.sh --force` and `stage-assets.sh --force` do the same one step at a time.
+- `HP_BUILD_CACHE=/some/dir` (off when unset) shares the generated engine C and the Rust libraries between worktrees. An entry is keyed by the same key as the stamp: a build that finds its key in the cache copies the files instead of running ghc, pas2c or cargo, and a build that generates one stores it. Only those outputs are shared. CMake build folders are never shared, since they hold absolute paths. The Rust libraries are stored after stripping, and their panic messages can carry the path of the build that made them.
+
+Measured on this machine (4 cores, other workers running; test profile, arm64-v8a and armeabi-v7a, `build-apk.sh` with the smoke test):
+
+| run | wall time | engine C | Rust | data | smoke test | Gradle |
+|---|---|---|---|---|---|---|
+| before this change (always regenerate) | 311 s | pas2c and ghc, always | cargo, always | staged, always | 1 run | |
+| first run after the change | 242 s | regenerated once (the script changed) | cargo | staged | 205 s | 18 s |
+| second run, no change | 217 s | skipped, 0 s | skipped, 0 s | skipped, 0 s | 208 s | 9 s |
+
+The smoke test is now most of the time, because it reruns every test task (`--rerun-tasks`). `app-test.sh` is the quick path for screen work.
+
+Measured per step, in a throwaway clone (`build` folders on a copy, so the real build is untouched): engine C regenerated 24.7 s from scratch, 7.9 s after a `.pas` edit, restored from `HP_BUILD_CACHE` in 0.04 s (21.7 s to store it); Rust 6.7 s from the warm target folder, 2.6 s after a `.rs` edit, restored from the cache in 0.12 s; data staged in 0.4 s, skipped in 0.06 s, restaged on an `HP_MUSIC` change and with `--force`. The APK built after the change has the same entries as the one before, byte for byte, except `classes2.dex`: its `BuildConfig` commit reads `216d827cc+local changes` while the scripts are uncommitted, and the string table shifts with it.
+
+## App tests without the APK: `scripts/app-test.sh`
+
+    scripts/app-test.sh                             # every unit test (src/test)
+    scripts/app-test.sh RejoinCardTest              # only that class (simple or fully qualified name)
+    scripts/app-test.sh LaunchSmokeTest RejoinCardTest
+
+It runs the same Gradle setup and environment as `ui-smoke-test.sh` (the Robolectric jars from `fetch-robolectric.sh`, `HP_PROFILE`, `ABIS`). It does not assemble the APK. It reuses the native inputs: the stamps decide, so only what is missing or stale is built. Each run reruns the tests (`cleanTestDebugUnitTest`), so an unchanged test is not skipped.
+
+Measured with a one-line probe in `OptionsActivity.java` (a screen-only change, reverted afterwards), same machine:
+
+| run | wall time |
+|---|---|
+| `build-apk.sh` (smoke test and APK) | 214 s |
+| `app-test.sh RejoinCardTest`, first run | 19 s |
+| `app-test.sh RejoinCardTest`, second run | 22 s |
+
+## Release check: `scripts/release-check.sh`
+
+    scripts/release-check.sh                        # the tiered check, diff against the previous release
+    scripts/release-check.sh --base tv21            # the diff against another release
+    scripts/release-check.sh --full                 # the full network list whatever the diff says
+    scripts/release-check.sh --plan                 # print the steps and the network tier, run nothing
+
+Always, in this order: the test-profile data and `config-test.sh`; the test APK for arm64-v8a and armeabi-v7a (`HP_PROFILE=test`, the smoke test skipped there); `ui-smoke-test.sh` on it. config-test, the APK build and the smoke test each take the heavy lock for their own run. Then the network suite, in one of two tiers:
+
+- **full**: the full release list (`net-suite.sh`) with `--full`, or when `git diff --name-only BASE` touches `app/src/main/java/org/hedgewars/android/net/`, `native/launcher/` or the engine (`hedgewars/`).
+- **core** (otherwise): `malformed basic basic3 rejoin hostleave watch1 hostpause settings`, plus the scenarios named after the changed files: `rejoin`, `rejoinlate` for `Rejoin*`; `joinerquit`, `joinerquitchat` for `Join*`, `NetLobby*`, `NetSession*`; `hostpause`, `hostpausequit`, `joinerpause`, `pausecap` for `Pause*`; `watch1`, `watchlate`, `watchsend` for `Watch*`, `Spectat*`; `viewer1` for `Viewer*`; `hostquitchat` for `Chat*`.
+
+`BASE` defaults to the newest `tvN` tag that HEAD is past (on a release tag, the one before it). The output goes to `build/release-check/<UTC time>/summary.txt`, with each step's result and time, the network results file `net-suite.tsv` and the suite's summary; `build/release-check/latest` links to the newest run. Do not wrap the script in `flock`: it takes the lock for each heavy step, and it refuses to start under a parent `flock` on that lock.
 
 ## Other testing notes
 

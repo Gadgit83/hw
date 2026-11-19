@@ -29,6 +29,13 @@ int hp_ipc_hidden(int hidden);
 
 /* The pause screen's buttons (--pause-menu): called from the server thread with 'q' (Quit game) or 'o' (Options). Optional. */
 void hp_ipc_set_pause_menu_handler(void (*handler)(int action));
+/* The pause of a network game, from the server thread: HP_PAUSE_ASKED_* when this (host) phone asks for it, HP_PAUSE_APPLIED_* when the
+ * relay's pause or resume reaches this phone's engine. Optional. */
+#define HP_PAUSE_ASKED_ON 1
+#define HP_PAUSE_ASKED_OFF 2
+#define HP_PAUSE_APPLIED_ON 3
+#define HP_PAUSE_APPLIED_OFF 4
+void hp_ipc_set_pause_status_handler(void (*handler)(int state));
 /* The controls editor (--touch-layout): called from the server thread for each control's place the engine reports (IPC 'T', e.g.
  * "fire:0.920,0.850,1.000,0.120,0.210"). entry is not NUL-terminated; len is its length. Optional. */
 void hp_ipc_set_touch_layout_handler(void (*handler)(const char *entry, int len));

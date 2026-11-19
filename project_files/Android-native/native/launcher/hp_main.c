@@ -177,6 +177,20 @@ static void on_pause_menu(int action)
     (*env)->DeleteLocalRef(env, act);
 }
 
+/* The pause of a network game (hp_ipc.c): GameActivity.pauseStatus(int) shows or hides the pause overlay. Runs on the IPC thread. */
+static void on_pause_status(int state)
+{
+    JNIEnv *env = (JNIEnv *)SDL_AndroidGetJNIEnv();
+    jobject act = (jobject)SDL_AndroidGetActivity();
+    if (!env || !act) return;
+    jclass cls = (*env)->GetObjectClass(env, act);
+    jmethodID mid = cls ? (*env)->GetMethodID(env, cls, "pauseStatus", "(I)V") : NULL;
+    if (mid) (*env)->CallVoidMethod(env, act, mid, (jint)state);
+    if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
+    if (cls) (*env)->DeleteLocalRef(env, cls);
+    (*env)->DeleteLocalRef(env, act);
+}
+
 /* The controls editor (--touch-layout): one control's place from the engine ('T' message, without the 'T' and the tick). Runs on the
  * IPC thread; GameActivity.touchLayoutReport(String) hands it to the UI thread. */
 static void on_touch_layout(const char *entry, int len)
@@ -293,6 +307,7 @@ int SDL_main(int argc, char **argv)
     atexit(on_exit_hook);
     hp_ipc_set_error_handler(on_engine_error);
     hp_ipc_set_pause_menu_handler(on_pause_menu);
+    hp_ipc_set_pause_status_handler(on_pause_status);
     hp_ipc_set_touch_layout_handler(on_touch_layout);
 
     snprintf(config, sizeof config, "%s/game.ipc", base);

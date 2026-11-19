@@ -377,6 +377,8 @@ public final class RelayClient {
             w.write("diag=" + diagPath + "\n");
             // read by GameActivity (Back, the controls) and by the launcher (the host alone gets the pause button, a watcher sends nothing, see hp_ipc.c)
             w.write("role=" + (s.asWatcher ? "watch" : s.asHost ? "host" : "player") + "\n");
+            // read by GameActivity: this game was sent again to a phone that rejoined, so it is still replaying (see PauseOverlay)
+            if (s.rejoin) w.write("rejoin=1\n");
         }
     }
 }

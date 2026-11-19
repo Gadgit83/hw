@@ -56,6 +56,19 @@ void hp_ipc_set_pause_menu_handler(void (*handler)(int action))
     g_pause_menu_handler = handler;
 }
 
+/* The pause state of a network game, for the app's pause overlay (hp.h). Set by the app; NULL on the desktop. */
+static void (*g_pause_status_handler)(int state);
+
+void hp_ipc_set_pause_status_handler(void (*handler)(int state))
+{
+    g_pause_status_handler = handler;
+}
+
+static void pause_status(int state)
+{
+    if (g_pause_status_handler) g_pause_status_handler(state);
+}
+
 /* --touch-layout: the engine's places of the touch controls, one 'T' message per control (see hp.h). Set by the app; NULL on the desktop. */
 static void (*g_touch_layout_handler)(const char *entry, int len);
 
@@ -419,6 +432,7 @@ static void net_apply_pause(int pause)
     const char *j = getenv("HP_NET_PAUSE_JITTER_MS");
     if (j && atoi(j) > 0) usleep((useconds_t)atoi(j) * 1000u);
     diag("PAUSE %s", pause ? "on (the host paused)" : "off (resumed)");
+    pause_status(pause ? HP_PAUSE_APPLIED_ON : HP_PAUSE_APPLIED_OFF);
     engine_write(frame, n + 1);
 }
 
@@ -441,6 +455,8 @@ static void net_apply_loneback(void)
 static void net_pause_request(int pause)
 {
     if (!g_net_is_host) return;
+    /* Before the send: the app shows its overlay straight away, even when the relay's echo waits behind a replay. */
+    pause_status(pause ? HP_PAUSE_ASKED_ON : HP_PAUSE_ASKED_OFF);
     net_send_control(pause ? 'P' : 'R', "");
 }
 

@@ -389,6 +389,8 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
         // The list of hosts is a card of its own: beside the other two cards when the screen is wide, so Join by address stays in view.
         hostsBox = ui.card();
         renderHosts();
+        // A join stops the search; the chooser shown again (the host left, or the join failed) searches again, so its list ends in "Search again".
+        if (!searching && !searchDone && !connecting && !NetSession.hosting && NetSession.lobbyVisible) startSearch(false);
         LinearLayout join = ui.card();
         join.addView(ui.heading("Join by address"));
         addressField = ui.field(addressToShow(), "Host address, for example 192.168.1.20:46633");
@@ -551,8 +553,7 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
         searching = true;
         searchDone = false;
         searchStatus = "Searching for hosts on this Wi-Fi...";
-        hosts.clear();
-        NetSession.goneHost = "";
+        hosts.clear();                          // NetSession.goneHost stays: a host that stopped hosting is greyed out until a search finds it
         renderHosts();
         final android.content.Context app = getApplicationContext();
         // The search starts at once; the fingerprint of this phone's data (which can take a while the first time) is read
@@ -1147,6 +1148,8 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
         problem = "";
         joinTarget = host + ":" + port;          // "Connecting to ..." is drawn at once, below
         stopSearch();
+        searchDone = false;                      // the chooser searches again when it is shown after this join
+        searchStatus = "";                       // no "Searching..." header while no search runs
         render();
         final int seq = ++joinSeq;
         new Thread(() -> {
@@ -1155,7 +1158,15 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
             } catch (NetSession.Cancelled e) {
                 // given up on purpose (Back, or a newer join): nothing to report
             } catch (Exception e) {
-                if (seq == joinSeq) problem = "Could not reach " + host + ":" + port + " (" + e.getMessage() + "). Same Wi-Fi? Is the host hosting?";
+                if (seq == joinSeq && e instanceof java.net.ConnectException) {
+                    // Refused: nothing listens on the host's port any more, so it stopped hosting. Its row is greyed out until a search
+                    // finds it again, and no new search starts by itself (Search again is offered).
+                    NetSession.goneHost = host + ":" + port;
+                    searchDone = true;
+                    problem = host + ":" + port + " is not hosting any more: nothing answers on its port. Search again to look for it.";
+                } else if (seq == joinSeq) {
+                    problem = "Could not reach " + host + ":" + port + " (" + e.getMessage() + "). Same Wi-Fi? Is the host hosting?";
+                }
             } finally {
                 if (seq == joinSeq) {
                     connecting = false;

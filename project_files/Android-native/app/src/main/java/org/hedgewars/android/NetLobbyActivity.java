@@ -59,6 +59,12 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
     private HostDiscovery discovery;
     private LinearLayout hostsBox;
     private final List<HostAdvert.Found> hosts = new java.util.ArrayList<>();
+    /**
+     * The probe answers for the host a Rejoin note names, by host:port, asked once per search (null: asked, no answer). Main thread only.
+     * {@link #probeGen} changes with each search, so an answer that comes late is not kept for the next one.
+     */
+    private final Map<String, HostAdvert.Found> rejoinProbes = new java.util.HashMap<>();
+    private int probeGen;
     private String searchStatus = "";
     private boolean searchDone, searching, permissionAsked, permissionDenied;
     private volatile String myDigest;
@@ -475,6 +481,12 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
         if (n == null) return;
         // The hosting phone's seat is only there while its hosting runs (HostService); after that there is nothing to come back to.
         if (n.asHost && HostService.relay == null) { NetSession.clearRejoin(this); return; }
+        if (!n.asHost) {
+            // A joiner's note is offered only while the host it names is found and reports the same game still playing (its probe).
+            HostAdvert.RejoinOffer o = rejoinOffer(n);
+            if (o == HostAdvert.RejoinOffer.DROP) { NetSession.clearRejoin(this); return; }
+            if (o == HostAdvert.RejoinOffer.WAIT) return;
+        }
         String code = NetSession.rejoinRefusal;
         LinearLayout card = ui.card();
         card.addView(ui.heading("Rejoin your game"));
@@ -503,6 +515,31 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
                 ui.margins(Ui.lp(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT), 8, 0, 0, 0));
         card.addView(row, ui.margins(full(), 8, 0, 0, 0));
         content.addView(card, ui.margins(full(), 0, 6, 0, 0));
+    }
+
+    /**
+     * The card's rule for a joiner's note, main thread. A host that is listed is asked once per search (in the background); until its
+     * answer is in, nothing is offered. The listed host is matched by the address the note holds.
+     */
+    private HostAdvert.RejoinOffer rejoinOffer(NetSession.RejoinNote n) {
+        boolean listed = false;
+        for (HostAdvert.Found h : hosts) if (h.host.equals(n.host) && h.port == n.port) listed = true;
+        if (!listed) return HostAdvert.RejoinOffer.WAIT;
+        final String key = n.host + ":" + n.port;
+        if (!rejoinProbes.containsKey(key)) {
+            rejoinProbes.put(key, null);                    // asked: the answer replaces this
+            final int gen = probeGen;
+            final android.content.Context app = getApplicationContext();
+            new Thread(() -> {
+                HostAdvert.Found live = NetSession.hostProbe.probe(app, n.host, n.port);
+                runOnUiThread(() -> {
+                    if (destroyed || gen != probeGen) return;
+                    rejoinProbes.put(key, live);
+                    render();
+                });
+            }, "rejoin-probe").start();
+        }
+        return HostAdvert.rejoinOffer(n.game, rejoinProbes.get(key));
     }
 
     private void rejoinFromNote() {
@@ -553,6 +590,8 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
         searching = true;
         searchDone = false;
         searchStatus = "Searching for hosts on this Wi-Fi...";
+        rejoinProbes.clear();
+        probeGen++;
         hosts.clear();                          // NetSession.goneHost stays: a host that stopped hosting is greyed out until a search finds it
         renderHosts();
         final android.content.Context app = getApplicationContext();

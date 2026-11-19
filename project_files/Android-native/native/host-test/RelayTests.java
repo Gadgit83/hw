@@ -2175,6 +2175,9 @@ public class RelayTests {
         }
         check(answered == 12, "12 probes of a host with a game password: each answered with its record (" + answered + ")");
         check(worst < 1000, "each probe is answered at once (slowest " + worst + " ms)");
+        HostAdvert.Found live = HostAdvert.parseProbe(probe(f.port()), "127.0.0.1", f.port());
+        check(live != null && live.liveKnown && HostAdvert.STATE_SETUP.equals(live.state) && live.game == 0,
+                "a probe reply says the host is in setup with no game (" + (live == null ? "no reply" : live.state + " game " + live.game) + ")");
         check(Json.list(f.relay.status(0), "players").size() == 1 && player(f.relay.status(0), "PhoneA") != null,
                 "the probes made no player: only the host is listed");
         P pj = phoneJoin(f, "Pinned", "1234", false, false);

@@ -842,8 +842,10 @@ public final class Relay {
      * simply not read further.
      */
     private void probeConnection(Socket s) throws IOException {
-        String reply = HostAdvert.probeReply(HostAdvert.txt(cfg.build, cfg.compat, Compat.ENGINE_PROTOCOL, cfg.hostName, viewerPort(),
-                cfg.dataDigest, getPin() != null));
+        Map<String, String> record = HostAdvert.txt(cfg.build, cfg.compat, Compat.ENGINE_PROTOCOL, cfg.hostName, viewerPort(),
+                cfg.dataDigest, getPin() != null);
+        record.putAll(liveFields());
+        String reply = HostAdvert.probeReply(record);
         try {
             s.getOutputStream().write((reply + "\n").getBytes(StandardCharsets.UTF_8));
             s.getOutputStream().flush();
@@ -851,6 +853,13 @@ public final class Relay {
             // the probing phone went away first: nothing to answer
         } finally {
             s.close();
+        }
+    }
+
+    /** The game this relay runs and its state, for a probe reply (the Rejoin card asks; see {@link HostAdvert#liveFields}). */
+    private Map<String, String> liveFields() {
+        synchronized (lock) {
+            return HostAdvert.liveFields(game == null ? 0 : game.no, state == S_PLAYING);
         }
     }
 

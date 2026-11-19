@@ -5,6 +5,8 @@ import android.net.wifi.WifiManager;
 import android.os.Build;
 import android.os.PowerManager;
 
+import org.hedgewars.android.net.Frames;
+import org.hedgewars.android.net.HostAdvert;
 import org.hedgewars.android.net.Relay;
 import org.hedgewars.android.net.RelayClient;
 
@@ -82,11 +84,11 @@ final class NetSession {
      * A search lists the host the Join list greys out: its grey-out and the red "The host left." banner end. Returns whether
      * either was cleared.
      */
-    static boolean hostBack(java.util.List<org.hedgewars.android.net.HostAdvert.Found> found) {
+    static boolean hostBack(java.util.List<HostAdvert.Found> found) {
         String gone = goneHost;
         if (gone.isEmpty()) return false;
         boolean listed = false;
-        for (org.hedgewars.android.net.HostAdvert.Found h : found) if (gone.equals(h.host + ":" + h.port)) listed = true;
+        for (HostAdvert.Found h : found) if (gone.equals(h.host + ":" + h.port)) listed = true;
         if (!listed) return false;
         goneHost = "";
         if ("The host left.".equals(closedReason)) closedReason = "";
@@ -123,14 +125,40 @@ final class NetSession {
         final long savedAt;
         /** The seat is this phone's own hosted game (its relay runs in HostService, on loopback). */
         final boolean asHost;
+        /** The game number the seat belongs to (the relay's count of games, as in its "start" message); "" when not known. */
+        final String game;
 
-        RejoinNote(String host, int port, String name, String token, long savedAt, boolean asHost) {
+        RejoinNote(String host, int port, String name, String token, long savedAt, boolean asHost, String game) {
             this.host = host;
             this.port = port;
             this.name = name;
             this.token = token;
             this.savedAt = savedAt;
             this.asHost = asHost;
+            this.game = game;
+        }
+    }
+
+    /** Asks a host about itself (its probe reply). Null when it does not answer as a Hedge Party relay. Replaced by the tests. */
+    interface HostProbe {
+        HostAdvert.Found probe(Context c, String host, int port);
+    }
+
+    static volatile HostProbe hostProbe = NetSession::probeHost;
+
+    /**
+     * A host's probe reply, read on the Wi-Fi a join uses: the game it runs and its state (the Rejoin card asks before it shows). Null when
+     * it does not answer as a relay. Not for the UI thread.
+     */
+    static HostAdvert.Found probeHost(Context c, String host, int port) {
+        try (java.net.Socket s = NetworkPicker.socketFactory(c, host).createSocket()) {
+            s.connect(new java.net.InetSocketAddress(host, port), 3000);
+            s.setSoTimeout(3000);
+            s.getOutputStream().write((HostAdvert.PROBE_HELLO + "\n").getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            s.getOutputStream().flush();
+            return HostAdvert.parseProbe(Frames.readLine(s.getInputStream(), HostAdvert.PROBE_MAX_LINE), host, port);
+        } catch (IOException | RuntimeException e) {
+            return null;
         }
     }
 
@@ -142,9 +170,13 @@ final class NetSession {
     }
 
     static void saveRejoin(Context c, String host, int port, String name, String token, boolean asHost) {
+        saveRejoin(c, host, port, name, token, asHost, "");
+    }
+
+    static void saveRejoin(Context c, String host, int port, String name, String token, boolean asHost, String game) {
         try (java.io.Writer w = new java.io.OutputStreamWriter(new java.io.FileOutputStream(rejoinFile(c)), java.nio.charset.StandardCharsets.UTF_8)) {
             w.write("host=" + host + "\nport=" + port + "\nname=" + name.replace('\n', ' ') + "\ntoken=" + token + "\nsaved=" + System.currentTimeMillis()
-                    + (asHost ? "\nseat=host" : "") + "\n");
+                    + (asHost ? "\nseat=host" : "") + (game.isEmpty() ? "" : "\ngame=" + game) + "\n");
         } catch (IOException e) {
             android.util.Log.w(Diag.TAG, "could not keep the rejoin note: " + e);
         }
@@ -154,7 +186,7 @@ final class NetSession {
     static RejoinNote loadRejoin(Context c) {
         File f = rejoinFile(c);
         if (!f.exists()) return null;
-        String host = "", name = "", token = "", seat = "";
+        String host = "", name = "", token = "", seat = "", game = "";
         int port = 0;
         long saved = 0;
         try (java.io.BufferedReader r = new java.io.BufferedReader(new java.io.InputStreamReader(new java.io.FileInputStream(f), java.nio.charset.StandardCharsets.UTF_8))) {
@@ -168,13 +200,14 @@ final class NetSession {
                 else if (k.equals("token")) token = v;
                 else if (k.equals("saved")) saved = Long.parseLong(v.trim());
                 else if (k.equals("seat")) seat = v.trim();
+                else if (k.equals("game")) game = v.trim();
             }
         } catch (IOException | NumberFormatException e) {
             return null;
         }
         if (host.isEmpty() || port <= 0 || name.isEmpty() || token.isEmpty()) return null;
         if (System.currentTimeMillis() - saved > REJOIN_NOTE_MAX_MS) { f.delete(); return null; }
-        return new RejoinNote(host, port, name, token, saved, seat.equals("host"));
+        return new RejoinNote(host, port, name, token, saved, seat.equals("host"), game);
     }
 
     static void clearRejoin(Context c) {
@@ -287,7 +320,11 @@ final class NetSession {
             synchronized (NetSession.class) { h = pendingIsHost || hosting; }
             Context c = HpApp.appContext;
             // The token is kept in a file, for a joining phone and for the host's own seat (it comes back over loopback to HostService's relay).
-            if (c != null && !lastHostName.isEmpty()) saveRejoin(c, lastHostName, lastPort, name, token, h);
+            // The game it is for is not known until the game starts (the relay's state may not have come yet); onStart writes it again.
+            Map<String, Object> st = state;
+            String game = st != null && "playing".equals(org.hedgewars.android.net.Json.str(st, "state", ""))
+                    ? Long.toString(org.hedgewars.android.net.Json.num(st, "game", 0)) : "";
+            if (c != null && !lastHostName.isEmpty()) saveRejoin(c, lastHostName, lastPort, name, token, h, game);
         }
 
         @Override public void onGaveUp(String reason) {
@@ -304,7 +341,7 @@ final class NetSession {
             // The game-end summary cleared the note, and a joiner that stayed in the lobby never joins again: keep the note for this game.
             Context nc = HpApp.appContext;
             if (nc != null && !lastHostName.isEmpty() && !rejoinToken.isEmpty() && !seatName.isEmpty()) {
-                saveRejoin(nc, lastHostName, lastPort, seatName, rejoinToken, hosting);
+                saveRejoin(nc, lastHostName, lastPort, seatName, rejoinToken, hosting, Integer.toString(s.game));
             }
             Listener l = listener;
             if (l != null && lobbyVisible) {
@@ -321,7 +358,7 @@ final class NetSession {
         @Override public void onSummary(Map<String, Object> m) {
             inGame = false;
             // The game is over: the cached relay state must not still say "playing" (the lobby would show a game running).
-            if ("playing".equals(org.hedgewars.android.net.Json.str(state, "state", ""))) state = withPhase(state, "lobby");
+            if (state != null && "playing".equals(org.hedgewars.android.net.Json.str(state, "state", ""))) state = withPhase(state, "lobby");
             gaveUp = false;
             Context rc = HpApp.appContext;
             if (rc != null) clearRejoin(rc);            // the game is over: there is nothing to come back to

@@ -407,7 +407,7 @@ final class NetSession {
             watching = false;
             inGame = false;
             // The link is gone, so the cached state is no longer what the relay says: the lobby shows "connection lost", not the old game.
-            if ("playing".equals(org.hedgewars.android.net.Json.str(st0, "state", ""))) state = withPhase(st0, "closed");
+            if (st0 != null && "playing".equals(org.hedgewars.android.net.Json.str(st0, "state", ""))) state = withPhase(st0, "closed");
             client = null;
             releaseLocks();
             JoinService.stop(HpApp.appContext);

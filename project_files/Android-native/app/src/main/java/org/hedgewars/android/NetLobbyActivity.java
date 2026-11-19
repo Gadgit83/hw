@@ -60,10 +60,16 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
     private LinearLayout hostsBox;
     private final List<HostAdvert.Found> hosts = new java.util.ArrayList<>();
     /**
-     * The probe answers for the host a Rejoin note names, by host:port, asked once per search (null: asked, no answer). Main thread only.
+     * The probe answers for the host a Rejoin note names, by host:port, asked once per search. A probe that got no answer is not kept: it is
+     * asked again a few seconds later ({@link #probeRetry}). Main thread only.
      * {@link #probeGen} changes with each search, so an answer that comes late is not kept for the next one.
      */
     private final Map<String, HostAdvert.Found> rejoinProbes = new java.util.HashMap<>();
+    /** A joiner's probe that got no answer is asked again after this long: the card waits for the host, it is not hidden for good. */
+    static final long PROBE_RETRY_MS = 3000;
+    private final Runnable probeRetry = () -> {
+        if (!destroyed && NetSession.lobbyVisible) render();
+    };
     private int probeGen;
     private String searchStatus = "";
     private boolean searchDone, searching, permissionAsked, permissionDenied;
@@ -194,6 +200,7 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
     protected void onPause() {
         NetSession.lobbyVisible = false;
         tickHandler.removeCallbacks(countdownTick);
+        searchHandler.removeCallbacks(probeRetry);
         stopSearch();
         sendForeground(false);
         saveFields();
@@ -534,8 +541,15 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
                 HostAdvert.Found live = NetSession.hostProbe.probe(app, n.host, n.port);
                 runOnUiThread(() -> {
                     if (destroyed || gen != probeGen) return;
-                    rejoinProbes.put(key, live);
-                    render();
+                    if (live != null) {
+                        rejoinProbes.put(key, live);
+                        render();
+                    } else {
+                        // No answer: nothing stays cached, so the card asks again after a few seconds.
+                        rejoinProbes.remove(key);
+                        searchHandler.removeCallbacks(probeRetry);
+                        searchHandler.postDelayed(probeRetry, PROBE_RETRY_MS);
+                    }
                 });
             }, "rejoin-probe").start();
         }
@@ -626,8 +640,10 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
                     if (destroyed || discovery != mine) return;      // a late call from an earlier search
                     hosts.clear();
                     hosts.addAll(all);
-                    // A host found again ends its grey-out and the "The host left." banner, which render() draws.
-                    if (NetSession.hostBack(all)) render(); else renderHosts();
+                    // A host found again ends its grey-out and the "The host left." banner, which render() draws. A rejoin note waits for the
+                    // listed host, and only render() asks it: a list that changes redraws the whole screen while a note is kept.
+                    boolean back = NetSession.hostBack(all);
+                    if (back || NetSession.loadRejoin(NetLobbyActivity.this) != null) render(); else renderHosts();
                 });
             }
 
@@ -716,6 +732,10 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
         box.removeAllViews();
         box.addView(ui.heading("Hosts on this Wi-Fi"));
         if (!searchStatus.isEmpty()) box.addView(ui.hint(searchStatus));
+        // Search again is above the rows: under a long list of hosts it was below the fold (device report, issue #1, item 3).
+        if (searchDone) {
+            box.addView(ui.button("Search again", false, v -> startSearch(true)), ui.margins(Ui.lp(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT), 0, 6, 0, 0));
+        }
         final String digest = myDigest;
         // Until this phone's own data fingerprint is known, the data check is left out (the host checks it again at the join).
         if (digest == null && !hosts.isEmpty()) box.addView(ui.hint("Checking this phone's game data..."));
@@ -741,9 +761,6 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
             bt.addView(watch, ui.margins(Ui.lp(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f), 8, 0, 0, 0));
             row.addView(bt);
             box.addView(row, ui.margins(Ui.lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT), 0, 4, 0, 0));
-        }
-        if (searchDone) {
-            box.addView(ui.button("Search again", false, v -> startSearch(true)), ui.margins(Ui.lp(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT), 0, 6, 0, 0));
         }
     }
 

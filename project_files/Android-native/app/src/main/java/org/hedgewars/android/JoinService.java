@@ -28,7 +28,10 @@ public class JoinService extends Service {
     private static final String CHANNEL = "joining";
     private static final int NOTIFICATION_ID = 46635;
 
-    /** Starts the service for a join to {@code host}: must be called once the join has succeeded. Never throws. */
+    /**
+     * Starts the service for a join to {@code host}. Called once the relay has accepted the seat (see {@link NetSession}): a join it refuses
+     * must never start the service. Never throws.
+     */
     static void start(Context c, String host) {
         Intent i = new Intent(c, JoinService.class).setAction(ACTION_START).putExtra(EXTRA_HOST, host);
         try {
@@ -48,6 +51,17 @@ public class JoinService extends Service {
         } catch (RuntimeException e) {
             android.util.Log.w(Diag.TAG, "could not stop the joining service: " + e);
         }
+    }
+
+    /**
+     * Goes to the foreground as soon as the service exists. Android ends a service that was started with startForegroundService and has
+     * not called startForeground within five seconds, with ForegroundServiceDidNotStartInTimeException; a stop that arrives before the
+     * first command (a link that closes at once) would otherwise leave that call out. onDestroy always comes after onCreate.
+     */
+    @Override
+    public void onCreate() {
+        super.onCreate();
+        goForeground("");
     }
 
     @Override

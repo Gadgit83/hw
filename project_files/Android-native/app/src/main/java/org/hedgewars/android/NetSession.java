@@ -303,6 +303,7 @@ final class NetSession {
 
     private static final RelayClient.Handler HANDLER = new RelayClient.Handler() {
         @Override public void onState(Map<String, Object> s) {
+            seatAccepted();
             state = s;
             stateAt = System.currentTimeMillis();
             // A notice about a phone's connection ends when that phone is back, or gone from the game.
@@ -314,6 +315,7 @@ final class NetSession {
         }
 
         @Override public void onJoined(int you, String name, String token) {
+            seatAccepted();
             rejoinToken = token;
             seatName = name;
             boolean h;
@@ -410,7 +412,7 @@ final class NetSession {
             if (st0 != null && "playing".equals(org.hedgewars.android.net.Json.str(st0, "state", ""))) state = withPhase(st0, "closed");
             client = null;
             releaseLocks();
-            JoinService.stop(HpApp.appContext);
+            endJoinService();
             ping();
         }
     };
@@ -632,7 +634,7 @@ final class NetSession {
         sentPinKey = isHost ? null : host + ":" + port;
         sentPinRemembered = !isHost && !sentPin.isEmpty() && sentPin.equals(knownPins.get(sentPinKey));
         final int gen;
-        synchronized (NetSession.class) { gen = ++connectGen; pendingIsHost = isHost; }
+        synchronized (NetSession.class) { gen = ++connectGen; pendingIsHost = isHost; seatHeld = false; }
         closedReason = "";
         notice = "";
         state = null;
@@ -687,9 +689,45 @@ final class NetSession {
             target = host + ":" + port;
         }
         acquireLocks(c);
-        if (!isHost) JoinService.start(c.getApplicationContext(), host);   // keeps this app's lobby link alive while the app is hidden
+        startJoinServiceIfHeld();            // the relay may have accepted the seat before the lines above ran
         if (isHost) startTicker();
         ping();
+    }
+
+    /** Whether the relay has accepted this session's seat: its "joined" message, or (a watcher gets no "joined") its first state. Guarded by NetSession.class. */
+    private static boolean seatHeld;
+    /** Whether the joining service is started for this session. Guarded by NetSession.class. */
+    private static boolean joinServiceUp;
+
+    /**
+     * The relay accepted this phone's seat. Called from the link's handler, on the link's own thread. The joining service starts only now:
+     * a join the relay refuses never starts it (issue #1, item 1).
+     */
+    static void seatAccepted() {
+        synchronized (NetSession.class) { seatHeld = true; }
+        startJoinServiceIfHeld();
+    }
+
+    /**
+     * Starts the joining service once the seat is held and this phone is still joined as a player or watcher. It keeps this app's lobby
+     * link alive while the app is hidden. Guarded so that a leave() cannot be overtaken by a start.
+     */
+    private static void startJoinServiceIfHeld() {
+        Context c = HpApp.appContext;
+        synchronized (NetSession.class) {
+            if (c == null || !seatHeld || !joined || hosting || joinServiceUp) return;
+            joinServiceUp = true;
+            JoinService.start(c.getApplicationContext(), lastHostName);
+        }
+    }
+
+    /** Ends the joining service (the phone left the session, or its link closed). */
+    private static void endJoinService() {
+        synchronized (NetSession.class) {
+            seatHeld = false;
+            joinServiceUp = false;
+            JoinService.stop(HpApp.appContext);      // inside the lock: a start that was just made is stopped after it, never before
+        }
     }
 
     /** A join still connecting (retries can take up to 15 s), and a counter that makes an overtaken one give up. */
@@ -736,7 +774,7 @@ final class NetSession {
         if (rc != null) rc.close();
         if (w != null) w.close();
         releaseLocks();
-        JoinService.stop(HpApp.appContext);
+        endJoinService();
     }
 
     /** Writes game.ipc and net.cfg for the game process. */

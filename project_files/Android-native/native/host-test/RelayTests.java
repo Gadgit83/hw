@@ -137,8 +137,25 @@ public class RelayTests {
         return c;
     }
 
+    /**
+     * How much longer a wait may take than its nominal time. A wait returns as soon as its condition holds, so this only
+     * lengthens the limit, never a passing run. Several scenarios at once (scripts/net-suite.sh) can slow the relay and
+     * the test threads down by seconds, which made checks with short limits fail although nothing was wrong.
+     */
+    static final long SLACK = Long.parseLong(System.getenv().getOrDefault("NET_TEST_SLACK", "4"));
+
+    /** A message as text a log can show: printable characters as they are, the rest as \\uXXXX. */
+    static String printable(String m) {
+        StringBuilder b = new StringBuilder();
+        for (char ch : m.toCharArray()) {
+            if (ch >= 32 && ch < 127) b.append(ch);
+            else b.append(String.format("\\u%04x", (int) ch));
+        }
+        return b.toString();
+    }
+
     static boolean waitFor(java.util.function.BooleanSupplier c, long ms) throws Exception {
-        long end = System.currentTimeMillis() + ms;
+        long end = System.currentTimeMillis() + ms * SLACK;
         while (System.currentTimeMillis() < end) {
             if (c.getAsBoolean()) return true;
             Thread.sleep(20);
@@ -542,7 +559,7 @@ public class RelayTests {
         List<RelayClient> many = new ArrayList<>();
         List<P> hs = new ArrayList<>();
         for (int i = 0; i < Relay.MAX_PLAYERS + 2; i++) { P p = new P(); hs.add(p); many.add(join(f, p, "Extra" + i, false)); Thread.sleep(30); }
-        Thread.sleep(500);
+        waitFor(() -> { int r = 0; for (P p : hs) if (p.closed.contains("full")) r++; return r >= 2; }, 500);
         int refused = 0;
         for (P p : hs) if (p.closed.contains("full")) refused++;
         check(refused >= 2, "players beyond " + Relay.MAX_PLAYERS + " are refused with a clear reason (" + refused + " refused)");
@@ -600,9 +617,10 @@ public class RelayTests {
         g.eb.send(new byte[] { 'M' });
         Thread.sleep(500);
         check(!dropped(g.f, "PhoneA") && !dropped(g.f, "PhoneB"), "junk, control and short frames drop nobody");
-        boolean leaked = false;
-        for (String r : g.ea.received) if (r.startsWith("\u0001") || r.startsWith("h")) leaked = true;
-        check(!leaked, "the other phone received neither the junk type nor the speech for a team that is not the sender's");
+        String leaked = null;
+        for (String r : g.ea.received) if (r.startsWith("\u0001") || r.startsWith("h")) leaked = r;
+        check(leaked == null, "the other phone received neither the junk type nor the speech for a team that is not the sender's"
+                + (leaked == null ? "" : " (it received " + printable(leaked) + ", all: " + g.ea.received.size() + " messages)"));
         check(g.ea.received.stream().anyMatch(r -> r.equals("Z")), "a whitelisted message is forwarded");
         sane(g.f, "after the junk frames");
         g.end();

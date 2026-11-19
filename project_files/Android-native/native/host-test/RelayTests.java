@@ -2622,6 +2622,27 @@ public class RelayTests {
         check(why.contains("cancelled") && took < 2500, "a join closed while retrying gives up at the next attempt (" + took + " ms: " + why + ")");
     }
 
+    /**
+     * The Rejoin card asks the host about itself while a game runs (issue #1, item 2): the probe is answered during a game too, with that
+     * game's number and state "playing", so that a phone that was force-stopped can offer its seat back.
+     */
+    static void testProbeWhilePlaying() throws Exception {
+        System.out.println("m8: a probe during a running game is answered with that game and its state playing (the Rejoin card asks)");
+        Game g = new Game(60000, 1000);
+        try {
+            String line = probe(g.f.port());
+            HostAdvert.Found live = HostAdvert.parseProbe(line, "127.0.0.1", g.f.port());
+            check(live != null, "the probe gets the host's record during a game, not a refusal (" + line + ")");
+            check(live != null && live.liveKnown && HostAdvert.STATE_PLAYING.equals(live.state),
+                    "the reply says the game is playing (" + (live == null ? "no reply" : live.state) + ")");
+            check(live != null && live.game == g.ph.start.game,
+                    "the reply names the running game " + g.ph.start.game + " (" + (live == null ? "no reply" : live.game) + ")");
+            check(Json.list(g.f.relay.status(0), "players").size() == 2, "the probe made no player during the game");
+        } finally {
+            g.end();
+        }
+    }
+
     public static void main(String[] a) throws Exception {
         dataDir = a[0];
         data = new GameData(new File(a[0]));
@@ -2666,6 +2687,7 @@ public class RelayTests {
         testReturnGrace();
         testWatchLate();
         testProbe();
+        testProbeWhilePlaying();
         System.out.println("\nrelay tests: " + checks + " checks, " + failures + " failed");
         System.out.println(failures == 0 ? "RESULT: PASS (the relay survived all malformed input)" : "RESULT: FAIL");
         System.exit(failures == 0 ? 0 : 1);

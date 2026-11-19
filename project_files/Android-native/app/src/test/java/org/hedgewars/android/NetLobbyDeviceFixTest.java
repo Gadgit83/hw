@@ -178,6 +178,28 @@ public class NetLobbyDeviceFixTest {
         assertFalse("the row must not tell the user to press a button the screen does not show", anyContains(texts, "Search again"));
     }
 
+    // 2b. Search again stays above the host rows, so it is in view once hosts are listed (device report, item 3) ----------
+
+    @Test
+    public void searchAgainIsAboveTheHostRows() throws Exception {
+        NetLobbyActivity a = chooser().get();
+        listeners.get(0).hosts(Arrays.asList(found(HOST)));
+        listeners.get(0).status("Search finished.", true);
+        Field f = NetLobbyActivity.class.getDeclaredField("hostsBox");
+        f.setAccessible(true);
+        android.view.ViewGroup box = (android.view.ViewGroup) f.get(a);
+        int button = -1, firstRow = -1;
+        for (int i = 0; i < box.getChildCount(); i++) {
+            android.view.View v = box.getChildAt(i);
+            if (v instanceof android.widget.Button && ((android.widget.Button) v).getText().toString().equals("Search again")) button = i;
+            if (firstRow < 0 && v instanceof android.widget.LinearLayout) firstRow = i;
+        }
+        assertTrue("the search is finished, so Search again is shown", button >= 0);
+        assertTrue("a host row is listed", firstRow >= 0);
+        assertTrue("Search again comes before the host rows, so a listed host does not push it below the fold (button " + button
+                + ", first row " + firstRow + ")", button < firstRow);
+    }
+
     // 3. The red "The host left." banner ends when the host is found again -------------------------------
 
     @Test

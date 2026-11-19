@@ -208,6 +208,40 @@ public class RejoinCardTest {
         assertTrue("the note stays", NetSession.loadRejoin(app()) != null);
     }
 
+    /**
+     * The search finds the host after the screen was drawn (a relaunch: the list is empty at the first draw, and the search fills it).
+     * Nothing else redraws the screen, so the card must be asked for by the list itself (device report, issue #1, item 2).
+     */
+    @Test
+    public void theCardAppearsWhenTheSearchFindsTheHostAfterTheScreenWasDrawn() throws Exception {
+        keepNote("2");
+        answer = probeAnswer(2, true);
+        NetLobbyActivity a = chooser().get();
+        assertFalse("nothing is listed yet, so no card", cardShown(a));
+        listeners.get(0).hosts(Arrays.asList(found(HOST)));          // the search lists the host; no render() call here
+        settle(() -> probes.get() > 0 && cardShown(a));
+        assertTrue("the host was asked once it was listed", probes.get() > 0);
+        assertTrue("the card appears without any other redraw", cardShown(a));
+    }
+
+    /**
+     * A probe that gets no answer (a busy Wi-Fi, a late reply) must not hide the card for the rest of the search: it is asked again.
+     */
+    @Test
+    public void aFailedProbeIsAskedAgainAndTheCardAppears() throws Exception {
+        keepNote("2");
+        answer = null;
+        NetLobbyActivity a = chooser().get();
+        listeners.get(0).hosts(Arrays.asList(found(HOST)));
+        settle(() -> probes.get() > 0);
+        assertFalse("the first probe got no answer: no card yet", cardShown(a));
+        answer = probeAnswer(2, true);
+        Shadows.shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofSeconds(30));   // the retry comes after a few seconds
+        settle(() -> cardShown(a));
+        assertTrue("the host is asked again and its answer shows the card", cardShown(a));
+        assertTrue("the host was asked more than once", probes.get() > 1);
+    }
+
     // The game id in the note ------------------------------------------------------------------
 
     @Test

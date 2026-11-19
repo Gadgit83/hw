@@ -4,6 +4,36 @@ All notable changes to the native Android app (`project_files/Android-native`), 
 
 Only some builds were put on a phone, so a version below is a build that was made, not necessarily one that was released. Releases are tags on `android-master` with the APK attached; there is none yet.
 
+## 0.3.0-tv21 (125): fixes from the tv20 device check
+
+`HP_PROFILE=test`, versionName `0.3.0-tv21-test`. Each change answers a finding of RESULT 28 on issue #1. There is no engine change. Compat is unchanged (`hwnet-60-sim3`).
+
+### Changed
+
+- Pause after a rejoin (owner decision): while a host that has just rejoined is still catching up, its own screen shows "Paused, catching up…" as soon as its pause is accepted. The relay already paused the game for everyone at once, but the host's engine shows the pause only after the replay. A repeated pause tap is now logged by the relay ("already paused").
+- The Rejoin card is shown only once the host is found and reports that the same game is still running. The probe reply now carries the host's game number and state; the TV does not probe. The card no longer appears for a game that has ended, for example after a force-stop.
+
+### Fixed
+
+- After a join ended, the Network screen showed "Searching for hosts…" with no search running and no Search again button. The search now restarts.
+- The red "The host left." banner now clears when a search finds that host again.
+- Joining a host that has stopped hosting greys it out with a clear message, instead of the bare connection error.
+- The Rejoin card was missing for a second game when the joiner stayed in the lobby through the first: the note is written again at each game's start.
+- After a game ended, the host lobby no longer keeps "You were away too long; the game went on without your teams."
+- Two rare crashes when a summary or a closed link arrives before any state.
+
+### Tests
+
+- New unit tests for the card rule, the lobby fixes and the pause overlay.
+- `RelayTests` (the `malformed` scenario):
+  - waits allow for a loaded machine (`NET_TEST_SLACK`), since it failed now and then when run three at a time;
+  - the leak check names the message that got through.
+
+### Open (device logs wanted)
+
+- "Joined / connecting…" stuck after a refused join: not reproduced in 25 cloud attempts.
+- The "did not come back; their teams sit out" banner, not seen on the device: the rule that keeps it holds in the tests.
+
 ## 0.3.0-tv20 (124): fixes from the tv19 device check
 
 `HP_PROFILE=test`, versionName `0.3.0-tv20-test`. Each change answers a finding of RESULT 27 on issue #1. Engine changes are commits on the `tv20` branch of https://github.com/Gadgit83/hw, each opt-in. Compat is unchanged (`hwnet-60-sim3`).

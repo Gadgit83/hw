@@ -974,6 +974,12 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
                 card.addView(row, ui.margins(Ui.lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT), 0, 4, 0, 0));
             }
         }
+        // A phone that did not come back: its teams sit out while the game runs, whichever screen was in front when the relay said so.
+        for (String b : NetSession.sittingOutBanners(st, playing)) {
+            TextView banner = coloured(b, Ui.ACCENT);
+            banner.setBackground(ui.round(Ui.PANEL_HI, 10));
+            card.addView(banner, ui.margins(full(), 6, 0, 0, 0));
+        }
         if (!NetSession.notice.isEmpty()) card.addView(coloured(NetSession.notice, Ui.ACCENT));
         LinearLayout buttons = ui.row();
         if (playing && iAmAway && !iGaveUp) {

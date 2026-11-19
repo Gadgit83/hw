@@ -75,12 +75,36 @@ public class PauseOverlayTest {
         assertEquals(1, overlaysOn(decor(a)));
     }
 
+    /** Device report on issue #1, item 6: the relay's pause reaches the launcher at once (APPLIED_ON) while the engine still replays,
+     *  so the overlay must stay up until the host resumes. */
     @Test
-    public void the_engine_showing_the_pause_takes_the_overlay_down() {
+    public void the_relay_pause_reaching_this_phone_keeps_the_overlay_up() {
         Activity a = activity();
         PauseOverlay o = new PauseOverlay(a, true);
         o.onStatus(ASKED_ON);
         o.onStatus(APPLIED_ON);
+        assertTrue(o.isShowing());
+        assertEquals(1, overlaysOn(decor(a)));
+    }
+
+    @Test
+    public void the_overlay_stays_up_until_the_host_resumes() {
+        Activity a = activity();
+        PauseOverlay o = new PauseOverlay(a, true);
+        o.onStatus(ASKED_ON);
+        o.onStatus(APPLIED_ON);
+        o.onStatus(ASKED_OFF);
+        assertFalse(o.isShowing());
+        assertEquals(0, overlaysOn(decor(a)));
+    }
+
+    @Test
+    public void the_relay_resuming_the_game_takes_the_overlay_down() {
+        Activity a = activity();
+        PauseOverlay o = new PauseOverlay(a, true);
+        o.onStatus(ASKED_ON);
+        o.onStatus(APPLIED_ON);
+        o.onStatus(APPLIED_OFF);
         assertFalse(o.isShowing());
         assertEquals(0, overlaysOn(decor(a)));
     }
@@ -106,17 +130,6 @@ public class PauseOverlayTest {
         assertEquals(0, overlaysOn(decor(a)));
     }
 
-    @Test
-    public void an_engine_already_paused_shows_nothing_until_it_resumes() {
-        Activity a = activity();
-        PauseOverlay o = new PauseOverlay(a, true);
-        o.onStatus(APPLIED_ON);
-        o.onStatus(ASKED_ON);
-        assertFalse(o.isShowing());
-        o.onStatus(APPLIED_OFF);
-        o.onStatus(ASKED_ON);
-        assertTrue(o.isShowing());
-    }
 
     @Test
     public void a_phone_that_did_not_rejoin_shows_nothing() {

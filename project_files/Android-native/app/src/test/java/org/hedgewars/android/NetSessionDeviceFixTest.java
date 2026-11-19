@@ -140,4 +140,49 @@ public class NetSessionDeviceFixTest {
         handler().onState(state("playing", true));
         assertEquals("while the seat is given up the notice still holds", Relay.GAVE_UP_TEXT, NetSession.notice);
     }
+
+    // 8. A phone that did not come back is a banner in the host's lobby, whatever screen was in front ----------
+
+    private static Map<String, Object> twoPhones(String phase, boolean joinerGaveUp, boolean joinerAway) {
+        List<Object> players = new ArrayList<>();
+        players.add(Json.obj("id", 1L, "name", "Me", "host", true, "ready", true, "away", false, "gaveUp", false));
+        players.add(Json.obj("id", 2L, "name", "FP3Joiner", "host", false, "ready", true, "away", joinerAway, "gaveUp", joinerGaveUp));
+        return Json.obj("state", phase, "you", 1L, "players", players);
+    }
+
+    private static final String SITTING_OUT = "FP3Joiner did not come back; their teams sit out";
+
+    @Test
+    public void aPhoneThatDidNotComeBackIsABannerWhileTheGameRuns() {
+        assertEquals(java.util.Collections.singletonList(SITTING_OUT),
+                NetSession.sittingOutBanners(twoPhones("playing", true, false), true));
+    }
+
+    @Test
+    public void the_banner_survives_a_later_notice_in_the_single_notice_slot() throws Exception {
+        handler().onNotice(SITTING_OUT);
+        handler().onNotice("You left the game. You can rejoin within 2 minutes.");   // the host's own notice takes the slot
+        assertEquals("the banner comes from the relay's state, not from the notice slot",
+                java.util.Collections.singletonList(SITTING_OUT),
+                NetSession.sittingOutBanners(twoPhones("playing", true, false), true));
+    }
+
+    @Test
+    public void the_banner_ends_when_the_phone_is_back() {
+        assertEquals(java.util.Collections.emptyList(), NetSession.sittingOutBanners(twoPhones("playing", false, false), true));
+    }
+
+    @Test
+    public void the_banner_ends_with_the_game() {
+        assertEquals(java.util.Collections.emptyList(), NetSession.sittingOutBanners(twoPhones("setup", true, false), false));
+    }
+
+    // 9. The rejoin-window note goes with its game -----------------------------------------------
+
+    @Test
+    public void theRejoinWindowNoticeEndsWithItsGame() throws Exception {
+        NetSession.notice = "You left the game. You can rejoin within 2 minutes.";
+        handler().onSummary(Json.obj("t", "summary", "reason", "every engine finished", "text", "Game over"));
+        assertEquals("the game is over: 'You can rejoin within' is stale and goes", "", NetSession.notice);
+    }
 }

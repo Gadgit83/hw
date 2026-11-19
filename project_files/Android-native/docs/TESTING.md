@@ -19,6 +19,8 @@ Device requests on issue #1 give exact steps, the logs to capture (`adb logcat -
 
 ## Network scenarios in parallel: `scripts/net-suite.sh`
 
+`malformed` (the relay's own unit tests, about 2 minutes, many short timing checks) always runs first and on its own: alongside game scenarios it failed now and then on a different check each time.
+
 `scripts/net-test.sh SCENARIO` runs one network scenario (see its header for the list). `scripts/net-suite.sh` runs many of them.
 
     scripts/net-suite.sh                              # the full release list (41 scenarios), 3 at a time

@@ -105,8 +105,20 @@ run_job() { # scenario attempt slot
   return "$rc"
 }
 
-free=(); for ((i = 0; i < JOBS; i++)); do free+=("$i"); done
 failed_twice=()
+# malformed is the relay's own unit tests (no engine), about 2 minutes, with many short timing checks: run alongside
+# game scenarios it failed now and then on a different check each time. It runs first, on its own.
+rest_s=(); rest_a=()
+for i in "${!todo_s[@]}"; do
+  if [ "${todo_s[$i]}" = malformed ]; then
+    run_job malformed 1 0 || { echo "retrying malformed once"; run_job malformed 2 0 || failed_twice+=(malformed); }
+  else
+    rest_s+=("${todo_s[$i]}"); rest_a+=("${todo_a[$i]}")
+  fi
+done
+todo_s=("${rest_s[@]}"); todo_a=("${rest_a[@]}")
+
+free=(); for ((i = 0; i < JOBS; i++)); do free+=("$i"); done
 while [ ${#todo_s[@]} -gt 0 ] || [ ${#JOB_S[@]} -gt 0 ]; do
   while [ ${#todo_s[@]} -gt 0 ] && [ ${#free[@]} -gt 0 ]; do
     slot=${free[0]}; free=("${free[@]:1}")

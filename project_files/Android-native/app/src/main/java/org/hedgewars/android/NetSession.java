@@ -54,6 +54,30 @@ final class NetSession {
             java.util.regex.Pattern.compile("^(.+?) (?:lost connection|left the game|did not come back)(?:;| within|$)");
 
     /**
+     * The banners of the host's lobby for phones whose teams sit out the running game: "X did not come back; their teams sit out", one for
+     * each phone the relay's state says is given up (this phone itself is not named here). It is read from the state, not from the single
+     * notice slot, so a notice that came while the game screen was in front, or a later notice, cannot hide it. It ends when that phone is
+     * back, or when the game is over.
+     */
+    @SuppressWarnings("unchecked")
+    static java.util.List<String> sittingOutBanners(Map<String, Object> st, boolean playing) {
+        java.util.List<String> out = new java.util.ArrayList<>();
+        if (st == null || !playing) return out;
+        long you = org.hedgewars.android.net.Json.num(st, "you", -1);
+        for (Object o : org.hedgewars.android.net.Json.list(st, "players")) {
+            Map<String, Object> p = (Map<String, Object>) o;
+            if (org.hedgewars.android.net.Json.num(p, "id", -2) == you || !org.hedgewars.android.net.Json.bool(p, "gaveUp", false)) continue;
+            out.add(org.hedgewars.android.net.Json.str(p, "name", "?") + " did not come back; their teams sit out");
+        }
+        return out;
+    }
+
+    /** A notice that only means something during a game: a rejoin window ("... You can rejoin within 2 minutes") or a phone's connection. */
+    static boolean isGameNotice(String t) {
+        return t != null && (t.contains(" You can rejoin within ") || PHONE_NOTICE.matcher(t).find());
+    }
+
+    /**
      * Whether the notice on the screen still holds for a lobby state. A notice about a phone's connection ends once that phone is
      * back (neither away nor given up) or is no longer in the game; any other notice stays until the next game.
      */
@@ -370,7 +394,8 @@ final class NetSession {
             toYouMsgs = org.hedgewars.android.net.Json.num(m, "toYouMsgs", 0);
             relayLogHash = org.hedgewars.android.net.Json.str(m, "logHash", "");
             // A phone that was dropped or left earlier keeps that message; otherwise say how the game ended.
-            if (notice.isEmpty()) notice = endNotice(org.hedgewars.android.net.Json.str(m, "reason", ""), hosting);
+            // A notice about a game in progress (a rejoin window, a phone that did not come back) is stale once the game is over.
+            if (notice.isEmpty() || isGameNotice(notice)) notice = endNotice(org.hedgewars.android.net.Json.str(m, "reason", ""), hosting);
             Context c = HpApp.appContext;
             if (c != null) NetDiag.saveSession(c, relaySummary + "\nStream the relay sent this phone: " + toYouMsgs
                     + " messages, hash " + toYouHash + "\nGame log hash at the relay: " + relayLogHash + "\n");

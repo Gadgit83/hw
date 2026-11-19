@@ -19,8 +19,10 @@ import java.nio.charset.StandardCharsets;
 /**
  * "Paused, catching up..." over the game, for a host that rejoined and asks to pause while its engine still replays the game.
  * The relay pauses the game for everyone at once, but this phone's own engine gets the pause only after its replay, so the host
- * would see nothing. The overlay is shown when the host asks (the launcher's ASKED_ON) and taken down when the pause reaches the
- * engine (APPLIED_ON) or the game is resumed. It takes no touches, so the resume tap reaches the game as usual.
+ * would see nothing. The overlay is shown when the host asks (the launcher's ASKED_ON) and taken down when the host resumes
+ * (ASKED_OFF) or the relay resumes the game for everyone (APPLIED_OFF). It takes no touches, so the resume tap reaches the game.
+ * APPLIED_ON does not take it down: the launcher reports it when the relay's pause reaches the launcher, which is at once, while the
+ * engine applies the pause only after its replay (device report on issue #1, item 6).
  * The states are the HP_PAUSE_* values of native/launcher/hp.h.
  */
 final class PauseOverlay {
@@ -31,9 +33,6 @@ final class PauseOverlay {
     private final Activity activity;
     private final boolean catchingUp;
     private View view;
-    /** The relay's pause has reached the engine and no resume has since. */
-    private boolean applied;
-
     /** {@code catchingUp}: this game was sent again to a rejoined phone ({@link #rejoined}), so its engine may still be replaying. */
     PauseOverlay(Activity activity, boolean catchingUp) {
         this.activity = activity;
@@ -58,17 +57,14 @@ final class PauseOverlay {
     void onStatus(int state) {
         switch (state) {
             case ASKED_ON:
-                if (catchingUp && !applied) show();
+                if (catchingUp) show();
                 break;
             case ASKED_OFF:
                 hide();
                 break;
             case APPLIED_ON:
-                applied = true;
-                hide();
-                break;
+                break;              // the relay's pause reached this phone's launcher; the overlay stays until the game is resumed
             case APPLIED_OFF:
-                applied = false;
                 hide();
                 break;
             default:

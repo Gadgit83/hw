@@ -120,6 +120,21 @@ public class NetLobbyDeviceFixTest {
         return b;
     }
 
+    private static boolean searchAgainEnabled(NetLobbyActivity a) {
+        List<View> all = new ArrayList<>();
+        collectViews(a.getWindow().getDecorView(), all);
+        for (View v : all) if (v instanceof Button && ((Button) v).getText().toString().equals("Search again")) return v.isEnabled();
+        return false;
+    }
+
+    private static void collectViews(View v, List<View> out) {
+        out.add(v);
+        if (v instanceof ViewGroup) {
+            ViewGroup g = (ViewGroup) v;
+            for (int i = 0; i < g.getChildCount(); i++) collectViews(g.getChildAt(i), out);
+        }
+    }
+
     private static boolean anyContains(List<String> all, String part) {
         for (String s : all) if (s.contains(part)) return true;
         return false;
@@ -168,13 +183,14 @@ public class NetLobbyDeviceFixTest {
     public void theGreyedHostRowDoesNotPromiseASearchButtonTheScreenLacks() throws Exception {
         NetLobbyActivity a = chooser().get();
         listeners.get(0).hosts(Arrays.asList(found(HOST)));
-        // The host has left (its join is greyed out) while the search is still running: no "Search again" button is on screen.
+        // The host has left (its join is greyed out) while the search is still running: Search again is there, greyed out (item 3).
         NetSession.goneHost = HOST_ADDRESS;
         redraw(a, "renderHosts");
 
         List<String> texts = texts(a);
         assertTrue("the greyed row is shown", anyContains(texts, "stopped hosting"));
-        assertFalse("the search is running, so there is no Search again button", buttons(a).contains("Search again"));
+        assertTrue("the search is running, so the Search again button is there but greyed out", buttons(a).contains("Search again"));
+        assertFalse("the search is running, so Search again cannot be pressed", searchAgainEnabled(a));
         assertFalse("the row must not tell the user to press a button the screen does not show", anyContains(texts, "Search again"));
     }
 

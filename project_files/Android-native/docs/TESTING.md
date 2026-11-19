@@ -17,6 +17,20 @@ Make the cloud look like the phones. The UI scale, the slow-phone timing and sho
 
 Device requests on issue #1 give exact steps, the logs to capture (`adb logcat -s HW_Engine` and the relay log), and a screenshot at the moment that matters.
 
+## Finding the cause of a device finding
+
+Most wasted time came from one worker being asked to diagnose, reproduce and fix a device finding in one go. Split it:
+
+1. **Evidence, not conclusions.** Cheap workers collect it:
+   - the exact log lines and timestamps from the device report;
+   - every place the relevant value is read or written, returned as the actual code with file and line, not a summary.
+
+   If a snippet points somewhere unexpected, read the whole file.
+2. **Diagnosis by the coordinator,** who knows the project's history and the owner's decisions. Write down the likely causes, ranked, and what would prove or disprove each.
+3. **Proof before a fix.** A test (unit, Robolectric or a net-test scenario) must show the device's exact symptom on the current code. If it cannot, the diagnosis is not finished, so go back to step 2 rather than guess. A scenario that fails the same way on the old and the new code (for example a timeout) proves nothing.
+4. **A precisely specified fix,** with the same test passing, three times for anything timing-related.
+5. **Device logs first** for anything the cloud cannot reproduce: ask the testers for them before writing code.
+
 ## Network scenarios in parallel: `scripts/net-suite.sh`
 
 `malformed` (the relay's own unit tests, about 2 minutes, many short timing checks) always runs first and on its own: alongside game scenarios it failed now and then on a different check each time.

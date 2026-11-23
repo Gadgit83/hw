@@ -11,12 +11,19 @@ import android.widget.Button;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStreamReader;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import java.net.InetAddress;
 import java.net.ServerSocket;
+import java.net.Socket;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BooleanSupplier;
 
 import org.hedgewars.android.net.HostAdvert;
@@ -46,6 +53,7 @@ public class NetLobbyLayoutTest {
     public void freshProcess() throws Exception {
         TestSupport.resetStatics();
         LocalNetwork.forceGranted = true;
+        NetSession.hostProbe = NetSession::probeHost;
         NetSession.discoveryFactory = c -> new HostDiscovery() {
             @Override public void start(Listener l) {
                 listeners.add(l);
@@ -154,6 +162,37 @@ public class NetLobbyLayoutTest {
         for (View v : all) if (v instanceof Button && ((Button) v).getText().toString().equals(label)) return (Button) v;
         throw new AssertionError("no " + label + " button in the host row");
     }
+
+    private static HostAdvert.Found named(HostAdvert.Found f, String name) {
+        f.name = name;
+        return f;
+    }
+
+    /** A host's answer to a probe, as the host gives it while it runs a game ("playing") or waits for players ("setup"). */
+    private static HostAdvert.Found live(String host, int port, String state) {
+        HostAdvert.Found f = found(host, port);
+        f.liveKnown = true;
+        f.state = state;
+        return f;
+    }
+
+    /** A relay stand-in that refuses the first join it gets with this reason, as a host's relay does while a game runs. */
+    private static Thread refusingRelay(ServerSocket relay, String reason) {
+        Thread t = new Thread(() -> {
+            try (Socket s = relay.accept()) {
+                new BufferedReader(new InputStreamReader(s.getInputStream(), StandardCharsets.UTF_8)).readLine();   // the hello
+                s.getOutputStream().write(("{\"t\":\"refuse\",\"reason\":\"" + reason + "\"}\n").getBytes(StandardCharsets.UTF_8));
+                s.getOutputStream().flush();
+            } catch (IOException ignored) {
+                // the phone went away first
+            }
+        });
+        t.setDaemon(true);
+        t.start();
+        return t;
+    }
+
+    private static final String RUNNING = "A game is running on this host. Try again when it has ended.";
 
     private static int closedPort() throws Exception {
         try (ServerSocket s = new ServerSocket(0)) {
@@ -267,6 +306,107 @@ public class NetLobbyLayoutTest {
         redraw(a, "renderHosts");
         layout(a);
         assertEquals("the row does not move when the data check ends", known, rect(hostRow(a))[1]);
+    }
+
+    // 4. A relay's refusal is where the user looks after the search restarts (device report, tv23, item 4a) -----
+
+    @Test
+    public void aRelayRefusedJoinShowsItsMessageWhereTheUserIsLookingAfterTheSearchRestarts() throws Exception {
+        try (ServerSocket relay = new ServerSocket(0, 4, InetAddress.getByName("127.0.0.1"))) {
+            relay.setSoTimeout(5000);
+            Thread host = refusingRelay(relay, RUNNING);
+            NetLobbyActivity a = chooser().get();
+            layout(a);
+            List<HostAdvert.Found> hosts = new ArrayList<>();
+            for (int i = 1; i <= 6; i++) hosts.add(named(found("192.168.1." + (20 + i), Relay.PHONE_PORT), "Decoy " + i));
+            hosts.add(found("127.0.0.1", relay.getLocalPort()));          // listed last: the page is scrolled down to it
+            listeners.get(0).hosts(hosts);
+            settle(() -> dataCheckDone(a));
+            layout(a);
+            ScrollView sv = (ScrollView) field(a, "scroll");
+            sv.scrollTo(0, rect(hostRow(a))[1] - rect(sv)[1]);
+            layout(a);
+            assertTrue("the page is scrolled down, away from its top", sv.getScrollY() > 0);
+            assertTrue("the Join button is enabled for this host", joinButton(hostRow(a), "Join to play").isEnabled());
+            joinButton(hostRow(a), "Join to play").performClick();
+            settle(() -> textView(a, RUNNING) != null);
+            layout(a);
+            TextView message = textView(a, RUNNING);
+            assertTrue("the refusal's message is on the screen", message != null);
+            assertTrue("the message is inside the scrolled view, not above it (message " + Arrays.toString(rect(message))
+                    + ", view " + Arrays.toString(rect(sv)) + ")", inside(rect(message), rect(sv)));
+            host.join(5000);
+        }
+    }
+
+    // 5. A search that restarts keeps the host rows ---------------------------------------------------
+
+    @Test
+    public void theHostRowsStayListedWhenASearchRestarts() throws Exception {
+        NetLobbyActivity a = chooser().get();
+        layout(a);
+        listeners.get(0).hosts(Arrays.asList(found("192.168.1.21", Relay.PHONE_PORT)));
+        settle(() -> dataCheckDone(a));
+        listeners.get(0).status("Search finished.", true);
+        layout(a);
+        assertTrue("the host row is listed before the new search", textView(a, HOST_NAME) != null);
+        searchAgain(a).performClick();
+        layout(a);
+        assertEquals("Search again started a second search", 2, listeners.size());
+        assertTrue("the host row is still listed while the new search runs", textView(a, HOST_NAME) != null);
+    }
+
+    // 6. A "game is running" refusal ends when a new search finds the host in setup (device report, item 2) -----
+
+    @Test
+    public void aGameRunningRefusalEndsWhenANewSearchFindsTheHostInSetup() throws Exception {
+        int port = closedPort();
+        NetSession.lastHostName = "127.0.0.1";
+        NetSession.lastPort = port;
+        NetSession.closedReason = RUNNING;                 // left by the join the host refused while its game ran
+        NetSession.hostProbe = (c, h, p) -> live(h, p, HostAdvert.STATE_SETUP);
+        NetLobbyActivity a = chooser().get();
+        layout(a);
+        listeners.get(0).hosts(Arrays.asList(found("127.0.0.1", port)));
+        settle(() -> NetSession.closedReason.isEmpty());
+        layout(a);
+        assertEquals("the host is in setup, so the refusal no longer holds", "", NetSession.closedReason);
+        assertTrue("the message is gone from the screen", textView(a, RUNNING) == null);
+    }
+
+    @Test
+    public void aGameRunningRefusalStaysWhileTheHostIsStillPlaying() throws Exception {
+        int port = closedPort();
+        NetSession.lastHostName = "127.0.0.1";
+        NetSession.lastPort = port;
+        NetSession.closedReason = RUNNING;
+        AtomicBoolean asked = new AtomicBoolean();
+        NetSession.hostProbe = (c, h, p) -> {
+            asked.set(true);
+            return live(h, p, HostAdvert.STATE_PLAYING);
+        };
+        NetLobbyActivity a = chooser().get();
+        layout(a);
+        listeners.get(0).hosts(Arrays.asList(found("127.0.0.1", port)));
+        settle(asked::get);
+        TestSupport.settle(200);
+        layout(a);
+        assertEquals("the host still plays, so the refusal still holds", RUNNING, NetSession.closedReason);
+        assertTrue("the message is still on the screen", textView(a, RUNNING) != null);
+    }
+
+    @Test
+    public void searchAgainEndsAGameRunningRefusal() throws Exception {
+        NetSession.closedReason = RUNNING;
+        NetLobbyActivity a = chooser().get();
+        layout(a);
+        listeners.get(0).status("Search finished.", true);
+        layout(a);
+        assertTrue("the message is on the screen before Search again", textView(a, RUNNING) != null);
+        searchAgain(a).performClick();
+        layout(a);
+        assertEquals("Search again ends the refusal's message", "", NetSession.closedReason);
+        assertTrue("the message is gone from the screen", textView(a, RUNNING) == null);
     }
 
     private static boolean dataCheckDone(NetLobbyActivity a) {

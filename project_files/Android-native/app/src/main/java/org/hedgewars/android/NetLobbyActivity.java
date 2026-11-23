@@ -75,6 +75,10 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
     private int probeGen;
     private String searchStatus = "";
     private boolean searchDone, searching, permissionAsked, permissionDenied;
+    /** Whether the search under way has listed hosts (its list replaces the rows kept from the search before it). */
+    private boolean searchListed;
+    /** The search whose probe of the host a "game is running" refusal names has been asked (see checkRunningRefusal). */
+    private int runningAskedGen = -1;
     private volatile String myDigest;
     private boolean digestRunning;
     /** Counts joins started on this screen: only the newest may report a problem or end "connecting". */
@@ -337,7 +341,7 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
                     NetSession.sentPin.isEmpty() ? "This host asks for a game password."
                             : NetSession.sentPinRemembered ? "The game password has changed. Ask the host for the new one." : "Wrong password. Try again.");
         }
-        if (NetSession.joined || NetSession.hosting) pinMsg = null;
+        if (NetSession.joined || NetSession.hosting) { pinMsg = null; scrollToProblem = false; }
         if (!problem.isEmpty()) content.addView(coloured(problem, Ui.DANGER));
         if (connecting && !NetSession.connectProgress.isEmpty()) content.addView(ui.hint(NetSession.connectProgress));
         else if (connecting && !joinTarget.isEmpty()) content.addView(ui.hint("Connecting to " + joinTarget + "..."));
@@ -355,10 +359,11 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
         if (NetSession.joined) lobby(); else choose();
         if (!NetSession.relaySummary.isEmpty()) report();
         // The message of a join is drawn at the top of the page; a join started from a row further down would otherwise leave it out of
-        // view (device report, tv22, item 1). The page goes to the top, where the message is.
-        if (scrollToProblem) {
+        // view (device report, tv22, items 1 and 4a). The page goes to the top, where the message is. The request waits for the message:
+        // a relay's refusal arrives after the join has returned. Scrolling to the top stays in view when the page gets shorter later.
+        if (scrollToProblem && (!problem.isEmpty() || !closed.isEmpty())) {
             scrollToProblem = false;
-            if (!problem.isEmpty()) scroll.post(() -> scroll.scrollTo(0, 0));
+            scroll.post(() -> scroll.scrollTo(0, 0));
         }
     }
 
@@ -596,6 +601,7 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
     /** (Re)starts the search for hosts: asks for the local network permission first where this Android has one. */
     private void startSearch(boolean again) {
         if (searching && !again) return;
+        if (again) NetSession.closedReason = "";     // Search again ends the message of the last join (it may no longer hold)
         if (!LocalNetwork.granted(this)) {
             if (!permissionAsked) {
                 permissionAsked = true;
@@ -614,7 +620,9 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
         searchStatus = "Searching for hosts on this Wi-Fi...";
         rejoinProbes.clear();
         probeGen++;
-        hosts.clear();                          // NetSession.goneHost stays: a host that stopped hosting is greyed out until a search finds it
+        // The rows of the last search stay until this one reports (device report, tv23, item 1): the list is not cleared at the start,
+        // so the page keeps its height. A search that lists nothing drops them when it ends. NetSession.goneHost stays as it is.
+        searchListed = false;
         renderHosts();
         final android.content.Context app = getApplicationContext();
         // The search starts at once; the fingerprint of this phone's data (which can take a while the first time) is read
@@ -648,9 +656,11 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
                     if (destroyed || discovery != mine) return;      // a late call from an earlier search
                     hosts.clear();
                     hosts.addAll(all);
+                    searchListed = true;
                     // A host found again ends its grey-out and the "The host left." banner, which render() draws. A rejoin note waits for the
                     // listed host, and only render() asks it: a list that changes redraws the whole screen while a note is kept.
                     boolean back = NetSession.hostBack(all);
+                    checkRunningRefusal();
                     if (back || NetSession.loadRejoin(NetLobbyActivity.this) != null) render(); else renderHosts();
                 });
             }
@@ -663,6 +673,7 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
                     if (finished) {
                         searching = false;
                         searchHandler.removeCallbacks(searchBackstop);
+                        if (!searchListed) hosts.clear();
                     }
                     renderHosts();
                 });
@@ -679,9 +690,37 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
         stopDiscovery();
         searching = false;
         searchDone = true;
+        if (!searchListed) hosts.clear();
         searchStatus = hosts.isEmpty() ? "No host found on this Wi-Fi." : "Search finished.";
         renderHosts();
     };
+
+    /**
+     * A "game is running" refusal holds only while the host it names plays. When a search lists that host, it is asked once (in the
+     * background, as a rejoin note is); when it reports setup, the refusal's message goes (device report, tv23, item 2). Main thread.
+     */
+    private void checkRunningRefusal() {
+        if (!NetSession.GAME_RUNNING_TEXT.equals(NetSession.closedReason) || runningAskedGen == probeGen) return;
+        final String host = NetSession.lastHostName;
+        final int port = NetSession.lastPort;
+        boolean listed = false;
+        for (HostAdvert.Found h : hosts) if (h.host.equals(host) && h.port == port) listed = true;
+        if (!listed) return;
+        runningAskedGen = probeGen;
+        final int gen = probeGen;
+        final android.content.Context app = getApplicationContext();
+        new Thread(() -> {
+            HostAdvert.Found live = NetSession.hostProbe.probe(app, host, port);
+            runOnUiThread(() -> {
+                if (destroyed || gen != probeGen) return;
+                if (live != null && live.liveKnown && HostAdvert.STATE_SETUP.equals(live.state)
+                        && NetSession.GAME_RUNNING_TEXT.equals(NetSession.closedReason)) {
+                    NetSession.closedReason = "";
+                    render();
+                }
+            });
+        }, "running-probe").start();
+    }
 
     private void stopDiscovery() {
         HostDiscovery d = discovery;
@@ -743,7 +782,7 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
         // item 3): the status line is empty when it says nothing, and Search again is greyed out while a search runs.
         box.addView(ui.hint(searchStatus));
         // Search again is above the rows: under a long list of hosts it was below the fold (device report, issue #1, item 3).
-        Button again = ui.button("Search again", false, v -> startSearch(true));
+        Button again = ui.button("Search again", false, v -> { startSearch(true); render(); });   // render: the message of the last join may go
         again.setEnabled(searchDone);
         box.addView(again, ui.margins(Ui.lp(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT), 0, 6, 0, 0));
         final String digest = myDigest;
@@ -1219,6 +1258,8 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
         final String nick = name.isEmpty() ? PlayerNames.current(this) : name;
         connecting = true;
         problem = "";
+        scrollToProblem = true;                  // the join's message is drawn at the top, where the user is sent (see render)
+        NetSession.closedReason = "";            // another join ends the message of the last one
         joinTarget = host + ":" + port;          // "Connecting to ..." is drawn at once, below
         stopSearch();
         searchDone = false;                      // the chooser searches again when it is shown after this join

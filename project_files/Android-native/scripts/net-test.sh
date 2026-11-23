@@ -120,6 +120,11 @@ fi
 if [ -z "${NET_SKIP_BUILD:-}" ]; then
   if [ ! -d "$BUILD_DIR/engine-c-host" ] || [ ! -f "$BUILD_DIR/rust-host/libhwengine_future.so" ]; then
     log "engine for the host (scripts/host-test.sh builds the same)"; HP_TEST_SCENARIO=ai "$HOST_DIR/scripts/host-test.sh" 1 >/dev/null 2>&1 || true
+  else
+    # The host engine exists: regenerate it when the engine sources changed since (the stamp), as host-test.sh does. Without this a
+    # worktree that got a copied build/ (or an older build) kept testing the old engine after an engine change.
+    log "engine for the host is current (or regenerated now)"
+    OUT_DIR="$BUILD_DIR/engine-c-host" EXTRA_DEFS="-d PAS2C_DESKTOP_GL" "$HOST_DIR/scripts/gen-engine.sh" --ensure | tail -1
   fi
   log "launcher (network mode)"
   cmake -S "$HOST_DIR/native/host-test" -B "$B" -G Ninja -DCMAKE_BUILD_TYPE=Release -DHP_ASAN="${ASAN:-OFF}" >/dev/null

@@ -123,7 +123,7 @@ final class NetSession {
     static volatile String lastEndReason = "";
     static volatile String closedReason = "", notice = "";
     /** The relay's refusal of a join while a game runs (its text, as the host's relay sends it). It holds only while that game runs. */
-    static final String GAME_RUNNING_TEXT = "A game is running on this host. Try again when it has ended.";
+    static final String GAME_RUNNING_TEXT = org.hedgewars.android.net.Relay.GAME_RUNNING_TEXT;
     static volatile String relaySummary = "", toYouHash = "", relayLogHash = "";
     static volatile long toYouMsgs;
     static volatile RelayClient.StartInfo pendingStart;

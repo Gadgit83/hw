@@ -89,6 +89,8 @@ public final class Relay {
     /** The same for the hosting phone, which cannot watch its own game (a watcher hello from it is refused). */
     public static final String GAVE_UP_HOST_TEXT = "You were away too long; the game went on without your teams.";
     public static final int MAX_PLAYERS = 8, MAX_CONNECTIONS = 32, MAX_VIEWERS = 16;
+    /** The refusal a phone gets when it tries to join while a game runs; the lobby recognises it (NetSession.GAME_RUNNING_TEXT). */
+    public static final String GAME_RUNNING_TEXT = "A game is running on this host. Try again when it has ended.";
     /** Phones that only watch (they play no team, so they are not players): their own cap, apart from MAX_PLAYERS. */
     public static final int MAX_SPECTATORS = 8;
     /** How long a watching phone's engine link stays open after a game that simply finished, so a phone that is still catching up can see the end. */
@@ -909,7 +911,7 @@ public final class Relay {
                 return;
             }
             if (state != S_SETUP) {
-                refuse(s, "A game is running on this host. Try again when it has ended.");
+                refuse(s, GAME_RUNNING_TEXT);
                 return;
             }
             List<SetupModel.Team> teams = NetTeams.listFromJson(Json.list(hello, "teams"), cfg.data);

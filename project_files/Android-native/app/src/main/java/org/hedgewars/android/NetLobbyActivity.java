@@ -654,6 +654,9 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
             @Override public void hosts(List<HostAdvert.Found> all) {
                 runOnUiThread(() -> {
                     if (destroyed || discovery != mine) return;      // a late call from an earlier search
+                    // The phone's own addresses are published before any host is found, so an empty list can come first. Until this search
+                    // lists a host, the rows of the last search stay (device RESULT 32, item 4a and 4c); the end of the search drops them.
+                    if (all.isEmpty() && !searchListed) return;
                     hosts.clear();
                     hosts.addAll(all);
                     searchListed = true;

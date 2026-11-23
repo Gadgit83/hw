@@ -290,6 +290,25 @@ public class NetLobbyDeviceFixTest {
         assertTrue("the row is greyed out", anyContains(texts(a), "stopped hosting"));
     }
 
+    // 8. The host rows stay while a new search has not yet listed anything (device RESULT 32, item 4a and 4c) -----
+
+    @Test
+    public void theHostRowsStayWhileANewSearchHasNotListedAnything() throws Exception {
+        NetLobbyActivity a = chooser().get();
+        listeners.get(0).hosts(Arrays.asList(found(HOST)));
+        listeners.get(0).status("Search finished.", true);
+        assertTrue("the first search lists the host", anyContains(texts(a), "Host phone"));
+
+        call(a, "startSearch", true);                   // Search again: the phone's own addresses come first, nothing is found yet
+        listeners.get(listeners.size() - 1).hosts(new ArrayList<HostAdvert.Found>());
+        assertTrue("an empty list before the new search lists a host keeps the rows of the last search",
+                anyContains(texts(a), "Host phone"));
+
+        listeners.get(listeners.size() - 1).status("No host found on this Wi-Fi.", true);
+        assertFalse("the search ends with nothing listed, so the row goes", anyContains(texts(a), "Host phone"));
+        assertTrue("the end of the search says so", anyContains(texts(a), "No host found on this Wi-Fi."));
+    }
+
     private static HostAdvert.Found foundAt(String host, int port) {
         HostAdvert.Found f = found(host);
         f.port = port;

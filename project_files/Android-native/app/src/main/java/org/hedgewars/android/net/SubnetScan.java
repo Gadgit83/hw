@@ -11,8 +11,22 @@ import java.util.List;
 public final class SubnetScan {
     /** At most this many addresses in one scan (a /24 has 254 hosts). */
     public static final int MAX_ADDRESSES = 254;
+    /**
+     * The connect timeout of the second pass, when the first found nothing: a host that is busy or saves Wi-Fi power can answer a
+     * connection late, so the quick first pass (300 ms) can miss a listening host.
+     */
+    public static final int SLOW_CONNECT_MS = 1500;
 
     private SubnetScan() { }
+
+    /**
+     * Whether a further pass over the same addresses runs after {@code passesDone} passes that found {@code foundSoFar} hosts, and if so
+     * with what connect timeout. Only a first pass that found nothing is followed by one more pass, the slow one. Returns
+     * {@link #SLOW_CONNECT_MS} for that pass, and -1 when the scan ends.
+     */
+    public static int nextPassConnectMs(int passesDone, int foundSoFar) {
+        return passesDone == 1 && foundSoFar == 0 ? SLOW_CONNECT_MS : -1;
+    }
 
     /**
      * The IPv4 hosts to probe, in ascending order, for a phone at {@code address} with a subnet of {@code prefix} bits. Empty for an

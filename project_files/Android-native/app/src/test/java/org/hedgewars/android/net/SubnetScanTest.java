@@ -76,6 +76,17 @@ public class SubnetScanTest {
     }
 
     @Test
+    public void aSecondSlowerPassRunsOnlyAfterAFirstPassFoundNothing() {
+        assertEquals("the first pass finds nothing: one more pass, with the slower connect timeout",
+                SubnetScan.SLOW_CONNECT_MS, SubnetScan.nextPassConnectMs(1, 0));
+        assertEquals(1500, SubnetScan.SLOW_CONNECT_MS);
+        assertEquals("the first pass found a host: no second pass", -1, SubnetScan.nextPassConnectMs(1, 1));
+        assertEquals("the first pass found several hosts: no second pass", -1, SubnetScan.nextPassConnectMs(1, 3));
+        assertEquals("the second pass has run: it is the last one", -1, SubnetScan.nextPassConnectMs(2, 0));
+        assertEquals("no pass has run yet: nothing to decide", -1, SubnetScan.nextPassConnectMs(0, 0));
+    }
+
+    @Test
     public void dottedNumbersRoundTrip() {
         assertEquals("192.168.1.62", SubnetScan.fromLong(SubnetScan.toLong("192.168.1.62")));
         assertEquals(-1, SubnetScan.toLong("1.2.3.256"));

@@ -27,10 +27,13 @@ import java.util.concurrent.atomic.AtomicInteger;
  * port, for phones where NSD finds nothing (a VPN takes the default network, or the phone filters multicast). {@link NsdFinder} starts
  * it when NSD has found nothing for a few seconds, and stops it with the search.
  *
- * <p>Each probe connects on the Wi-Fi network (so a VPN does not take it), waits {@link #CONNECT_MS} for the connection, sends the probe
- * hello ({@link HostAdvert#PROBE_HELLO}) and reads the relay's one-line answer. A probe is not a join: the relay makes no player of it
- * and checks no password. At most {@link #AT_ONCE} probes run at a time, on a pool of threads that {@link #stop} shuts down and whose
- * sockets it closes. Not run on the build machine: {@link SubnetScan} and {@link HostAdvert#parseProbe} are the tested parts.
+ * <p>Each probe connects on the Wi-Fi network (so a VPN does not take it), waits for the connection (at most {@link #CONNECT_MS} on the
+ * first pass), sends the probe hello ({@link HostAdvert#PROBE_HELLO}) and reads the relay's one-line answer. A probe is not a join: the
+ * relay makes no player of it and checks no password. If the first pass finds no host, one more pass runs over the same addresses with
+ * the longer {@link #CONNECT_SLOW_MS}, for a host that answers late (a busy phone, Wi-Fi power saving); see
+ * {@link SubnetScan#nextPassConnectMs}. At most {@link #AT_ONCE} probes run at a time, on a pool of threads that {@link #stop} shuts
+ * down and whose sockets it closes. Not run on the build machine: {@link SubnetScan} and {@link HostAdvert#parseProbe} are the tested
+ * parts.
  */
 final class SubnetFinder {
     /** Receives each host that answers. Called on a probe thread, never with this finder's lock held. */
@@ -39,7 +42,12 @@ final class SubnetFinder {
     }
 
     static final int CONNECT_MS = 300, READ_MS = 1000, AT_ONCE = 32;
-    /** The longest wait for the probes to end after the last one was started (each takes at most about 1.3 s). */
+    /** The connect timeout of the second pass (see {@link SubnetScan#SLOW_CONNECT_MS}). */
+    static final int CONNECT_SLOW_MS = SubnetScan.SLOW_CONNECT_MS;
+    /**
+     * The longest wait for the probes to end after the last one was started (a probe takes at most about 1.3 s on the first pass and
+     * 2.5 s on the second).
+     */
     private static final long END_WAIT_MS = 60000;
 
     private final Context app;
@@ -89,6 +97,27 @@ final class SubnetFinder {
         Log.i(Diag.TAG, "subnet: scan started, " + targets.size() + " address(es) on " + lan.kind + " " + lan.address + "/" + lan.prefix
                 + ", port " + Relay.PHONE_PORT + ", " + (net != null ? "bound to " + NetworkPicker.describe(app, net)
                 : "on the default route (" + NetworkPicker.defaultRouteWhy(app, lan.address) + ")"));
+        AtomicInteger found = new AtomicInteger();
+        int connectMs = CONNECT_MS;
+        for (int pass = 1; ; pass++) {
+            long p0 = System.currentTimeMillis();
+            int before = found.get();
+            boolean stopped = scanPass(targets, net, connectMs, sink, found);
+            long ms = System.currentTimeMillis() - p0;
+            int passFound = found.get() - before;
+            if (stopped) {
+                Log.i(Diag.TAG, "subnet: scan stopped after " + (System.currentTimeMillis() - t0) + " ms, " + found.get() + " host(s) found");
+                return;
+            }
+            Log.i(Diag.TAG, "subnet: scan ended, " + targets.size() + " address(es) probed, " + passFound + " host(s) found in " + ms + " ms");
+            connectMs = SubnetScan.nextPassConnectMs(pass, found.get());
+            if (connectMs < 0) return;
+            Log.i(Diag.TAG, "subnet: no host on the first pass, probing again with a " + connectMs + " ms connect timeout");
+        }
+    }
+
+    /** One pass over the addresses, at most {@link #AT_ONCE} at a time. True if the scan was stopped (before or during the pass). */
+    private boolean scanPass(List<String> targets, Network net, int connectMs, Sink sink, AtomicInteger found) {
         ExecutorService ex = Executors.newFixedThreadPool(AT_ONCE, r -> {
             Thread th = new Thread(r, "subnet-probe");
             th.setDaemon(true);
@@ -97,35 +126,30 @@ final class SubnetFinder {
         synchronized (lock) {
             if (cancelled) {
                 ex.shutdownNow();
-                return;
+                return true;
             }
             pool = ex;
         }
-        AtomicInteger found = new AtomicInteger();
-        for (String a : targets) ex.execute(() -> probe(a, net, sink, found));
+        for (String a : targets) ex.execute(() -> probe(a, net, connectMs, sink, found));
         ex.shutdown();
         try {
             ex.awaitTermination(END_WAIT_MS, TimeUnit.MILLISECONDS);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
-        boolean stopped;
         synchronized (lock) {
-            stopped = cancelled;
+            return cancelled;
         }
-        long ms = System.currentTimeMillis() - t0;
-        if (stopped) Log.i(Diag.TAG, "subnet: scan stopped after " + ms + " ms, " + found.get() + " host(s) found");
-        else Log.i(Diag.TAG, "subnet: scan ended, " + targets.size() + " address(es) probed, " + found.get() + " host(s) found in " + ms + " ms");
     }
 
     /** One probe. Any failure (refused, silent, not a Hedge Party relay) just means no host at this address. */
-    private void probe(String address, Network net, Sink sink, AtomicInteger found) {
+    private void probe(String address, Network net, int connectMs, Sink sink, AtomicInteger found) {
         Socket s = null;
         HostAdvert.Found h = null;
         try {
             s = NetworkPicker.openSocket(net, n -> n.getSocketFactory().createSocket());
             if (!track(s)) return;
-            s.connect(new InetSocketAddress(address, Relay.PHONE_PORT), CONNECT_MS);
+            s.connect(new InetSocketAddress(address, Relay.PHONE_PORT), connectMs);
             s.setSoTimeout(READ_MS);
             s.getOutputStream().write((HostAdvert.PROBE_HELLO + "\n").getBytes(StandardCharsets.UTF_8));
             s.getOutputStream().flush();

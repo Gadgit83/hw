@@ -93,8 +93,11 @@ final class PauseOverlay {
         t.setClickable(false);
         t.setFocusable(false);
         t.setFocusableInTouchMode(false);
+        // At the top, centred across the screen (owner's decision after RESULT 31 item 1): in the middle it half-hid the engine's own
+        // "Paused" heading once the engine's pause screen came up beneath it.
         FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER);
+                ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP | Gravity.CENTER_HORIZONTAL);
+        lp.topMargin = ui.dp(16);
         activity.addContentView(t, lp);
         view = t;
     }

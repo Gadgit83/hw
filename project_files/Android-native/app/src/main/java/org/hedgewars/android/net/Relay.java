@@ -691,6 +691,8 @@ public final class Relay {
     private final class Game {
         /** The timestamp bytes of the latest timed message from an engine (see appendAndForward). */
         byte lastStamp0, lastStamp1;
+        /** Synced team-back messages (g) per team name, as appended to the log (see startRejoin). */
+        final Map<String, Integer> backCounts = new HashMap<>();
         final int no = ++gameNo;
         long lastLinkPing;
         /** Set once the game's report has noted that every player is away and the game is held (checkEnd). */
@@ -1173,7 +1175,13 @@ public final class Relay {
         p.token = newToken();
         p.rejoinPending = true;
         p.rejoinAt = now;
-        List<String> lines = new ArrayList<>(GameConfig.forRejoin(g.canonical, p.ownedIdx, p.name));
+        // The synced team-backs already in the log, per team (by canonical index): a team back once has its message in the replayed log.
+        int[] backSkip = new int[g.teams.size()];
+        for (int i = 0; i < backSkip.length; i++) {
+            Integer c = g.backCounts.get(g.teams.get(i).name);
+            backSkip[i] = c == null ? 0 : c;
+        }
+        List<String> lines = new ArrayList<>(GameConfig.forRejoin(g.canonical, p.ownedIdx, p.name, backSkip));
         // Alone: nobody else plays, so this engine must answer for its own teams (uTeams.pas, LoneBack). Not sent when another phone plays:
         // that engine answers, and a second answer from this one would put a second, untimely team-back into the log.
         p.loneSent = noOtherPlaying(p);
@@ -2055,7 +2063,12 @@ public final class Relay {
                 }
                 g.mSeen.add(p.id);
             }
-            if (type == 'g' && msg.length > 3) confirmBack(g, new String(msg, 1, msg.length - 3, StandardCharsets.UTF_8));
+            if (type == 'g' && msg.length > 3) {
+                String team = new String(msg, 1, msg.length - 3, StandardCharsets.UTF_8);
+                // Counted per team, as the log holds it: a later rejoin's replay gets this count (startRejoin, GameConfig.forRejoin).
+                g.backCounts.merge(team, 1, Integer::sum);
+                confirmBack(g, team);
+            }
             appendAndForward(g, msg, p, after);
             if (type == 'M') updateArmed(g, p.lastMsg);
             if (impliesOwnTurn(type)) {

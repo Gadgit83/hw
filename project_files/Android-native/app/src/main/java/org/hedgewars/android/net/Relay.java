@@ -1193,7 +1193,7 @@ public final class Relay {
         sendLobby(p, Json.obj("t", "start", "you", (long) p.id, "token", p.token, "nick", p.name,
                 "game", (long) g.no, "lines", out, "rejoin", true));
         g.events.add(p.name + " asked to rejoin (" + (now - p.awayAt) / 1000 + " s after it was lost); sent the game again with " + g.logMsgs + " messages to replay");
-        log(p.name + " rejoining: start message sent, " + g.logMsgs + " messages to replay");
+        log(p.name + " rejoining: start message sent, " + g.logMsgs + " messages to replay, backskip " + java.util.Arrays.toString(backSkip));
     }
 
     /** Lock held. The window ran out: the seat is given up for the rest of the game. */

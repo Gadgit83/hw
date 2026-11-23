@@ -35,7 +35,7 @@ fi
 ALL="malformed basic basic3 dropout dropout3 stall slowstart negcontrol solo settings viewer1 viewer2 viewer3 viewerflap
 hostquit hostleave hostend rejoin rejoinlate lonerejoin lonerejoinb lonerejoinc joinerquit hostquitchat joinerquitchat injecte
 hidden watch1 watchlate watchflap watchsend watchpause hostpause hostpausequit joinerpause pausecap hostalone-ai3
-hostalone-human3 hostalone-ai3slow hostalone-human3slow hostalone-ai85 hostwatch hostrejoinpause hostrejoinslow"
+hostalone-human3 hostalone-ai3slow hostalone-human3slow hostalone-ai85 hostwatch hostrejoinpause hostrejoinslow hostrejoin2 joinerrejoin2"
 
 JOBS=3; BASE=70; RESULTS="$BUILD_DIR/host-test/net-suite.tsv"
 while getopts "j:r:d:h" o; do

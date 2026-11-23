@@ -169,6 +169,17 @@ public final class GameConfig {
      * get an owner line, so the team stays driven from outside on their side. The caller adds {@code e$spectate 1}.
      */
     public static List<String> forRejoin(List<String> canonical, boolean[] owned, String nick) {
+        return forRejoin(canonical, owned, nick, null);
+    }
+
+    /**
+     * As above. {@code backSkip[i]} (the team with index i in the canonical order) is the number of synced team-back messages of that team
+     * already in the log the engine will replay (the relay counts them). For an own team with a count above 0 a line {@code ebackskip <n>}
+     * follows its {@code eowner} line; the engine applies it to the team that line follows (uTeams.pas, chBackSkip). The line carries no
+     * team name, so a name with spaces needs no quoting. No line when the count is 0 or {@code backSkip} is null: the engine then behaves
+     * as before.
+     */
+    public static List<String> forRejoin(List<String> canonical, boolean[] owned, String nick, int[] backSkip) {
         List<String> out = new ArrayList<>();
         int team = 0;
         for (String line : canonical) {
@@ -176,7 +187,10 @@ public final class GameConfig {
             out.add(line);
             if (line.startsWith("eaddteam ")) {
                 out.add("erdriven");
-                if (team < owned.length && owned[team]) out.add("eowner " + nick);
+                if (team < owned.length && owned[team]) {
+                    out.add("eowner " + nick);
+                    if (backSkip != null && team < backSkip.length && backSkip[team] > 0) out.add("ebackskip " + backSkip[team]);
+                }
                 team++;
             }
         }

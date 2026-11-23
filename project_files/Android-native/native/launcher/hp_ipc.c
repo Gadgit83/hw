@@ -788,10 +788,13 @@ static void *server_thread(void *arg)
         } else if (len >= 2 && msg[0] == 'y') {
             if (g_net) net_pause_request(msg[1] == '1');
         } else if (len > 1 && msg[0] == 'E') {
-            /* The engine reports a fatal error and is about to exit the process. */
+            /* The engine reports a fatal error and is about to exit the process. The engine's SendIPC adds the two game tick bytes to every
+             * message, so the text is the message without the type byte and those two (len - 3); a message without them keeps len - 1. */
             char text[256];
-            memcpy(text, msg + 1, (size_t)len - 1);
-            text[len - 1] = 0;
+            size_t tl = len >= 3 ? (size_t)len - 3 : (size_t)len - 1;
+            if (tl > sizeof text - 1) tl = sizeof text - 1;
+            memcpy(text, msg + 1, tl);
+            text[tl] = 0;
             LOGE("engine error: %s", text);
             if (g_net) net_send_control('E', text);          /* before anything else: the process is about to end */
             if (g_error_handler) g_error_handler(text);

@@ -434,6 +434,7 @@ type
             Clan: PClan;
             TeamName: shortstring;
             ExtDriven: boolean;
+            BackSkip: LongInt;   // earlier synced team-backs of this team in a replayed log (the relay's "backskip", a rejoin only; 0 otherwise)
             Binds: TBinds;
             Hedgehogs: array[0..cMaxHHIndex] of THedgehog;
             CurrHedgehog: LongWord;

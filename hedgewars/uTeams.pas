@@ -967,6 +967,13 @@ begin
     LoneBack:= s = '1'
 end;
 
+procedure chBackSkip(var s: shortstring);
+begin
+    if CurrentTeam = nil then
+        OutError(errmsgIncorrectUse + ' "/backskip"', true);
+    CurrentTeam^.BackSkip:= StrToInt(s)
+end;
+
 procedure chTeamBack(var s:shortstring);
 var t: LongInt;
     isSynced: boolean;
@@ -1001,7 +1008,12 @@ begin
                 RecountTeamHealth(TeamsArray[t]);
 
                 if isGoneFlagPendingToBeUnset and (Owner = UserNick) then
-                    ExtDriven:= false;
+                    begin
+                    // A rejoin replays the log, which holds the synced team-backs of earlier rejoins of this team: the relay says how many
+                    // (backskip, after the team's eowner line). Those do not hand the team back to its phone; the next one does.
+                    if BackSkip > 0 then dec(BackSkip)
+                    else ExtDriven:= false
+                    end;
 
                 isGoneFlagPendingToBeUnset:= false;
                 end;
@@ -1105,6 +1117,7 @@ RegisterVariable('hat'     , @chSetHat       , false);
 RegisterVariable('flag'    , @chFlag         , false);
 RegisterVariable('owner'   , @chOwner        , false);
 RegisterVariable('loneback', @chLoneBack     , false);
+RegisterVariable('backskip', @chBackSkip     , false);
 
 CurrentTeam:= nil;
 PreviousTeam:= nil;

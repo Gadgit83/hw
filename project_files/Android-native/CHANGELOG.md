@@ -4,6 +4,27 @@ All notable changes to the native Android app (`project_files/Android-native`), 
 
 Only some builds were put on a phone, so a version below is a build that was made, not necessarily one that was released. Releases are tags on `android-master` with the APK attached; there is none yet.
 
+## 0.3.0-tv24 (128): the desync after a second rejoin
+
+`HP_PROFILE=test`, versionName `0.3.0-tv24-test`. It answers RESULT 31 on issue #1. Engine changes are commits on the `tv24` branch of https://github.com/Gadgit83/hw, each opt-in. Compat is unchanged (`hwnet-60-sim3`).
+
+### Fixed
+
+- **Desync after a player's second rejoin in one game** (the host, and also a joiner).
+  - **Cause:** the history a rejoining phone replays held the first rejoin's synced "team back" message. Replaying it handed the phone its own team in the middle of the replay, so its computer player drove the team while the recorded moves were still being fed in.
+  - **Fix:** on a rejoin, the relay adds `ebackskip <n>` after each of the phone's own teams in its start setup, with the number of that team's earlier team-backs in the history. The engine (opt-in) hands the team back only at the next one.
+  - **Unchanged:** a first rejoin and every other game.
+- **"Desync detected" and other engine errors** carried 1 or 2 garbage characters. They were the 2-byte game clock the engine adds to every message, which the launcher kept in the error text.
+- **Network page:**
+  - a search no longer empties the host list when it starts, so the page does not shrink and a refused join's message is scrolled into view;
+  - "A game is running on this host…" and "The host left." clear when they no longer hold (Search again, another join, or the host found in setup again).
+
+### Tests
+
+- New scenarios `hostrejoin2` and `joinerrejoin2`. Both desynced on tv23 and pass on tv24 three times out of three.
+- `net-test.sh` and `host-test.sh` regenerate the host engine whenever its sources changed. Before, a copied or older `build/engine-c-host` was used as it was, so tests could run an old engine after an engine change.
+- New cases in `NetLobbyLayoutTest`.
+
 ## 0.3.0-tv23 (127): fixes from RESULT 29 and RESULT 30
 
 `HP_PROFILE=test`, versionName `0.3.0-tv23-test`. App changes only: no relay, launcher or engine change. Compat is unchanged (`hwnet-60-sim3`).

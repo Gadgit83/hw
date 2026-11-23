@@ -140,6 +140,19 @@ public class PauseOverlayTest {
         assertEquals(0, overlaysOn(decor(a)));
     }
 
+    /** Owner's decision after RESULT 31 item 1: in the middle the box half-hid the engine's own "Paused" heading on the G6, so it sits at
+     *  the top of the screen, centred across it. */
+    @Test
+    public void the_overlay_sits_at_the_top_centre() {
+        Activity a = activity();
+        new PauseOverlay(a, true).onStatus(ASKED_ON);
+        TextView t = find(decor(a));
+        assertTrue(t != null);
+        android.widget.FrameLayout.LayoutParams lp = (android.widget.FrameLayout.LayoutParams) t.getLayoutParams();
+        assertEquals(android.view.Gravity.TOP | android.view.Gravity.CENTER_HORIZONTAL, lp.gravity);
+        assertTrue("a margin from the top edge (" + lp.topMargin + " px)", lp.topMargin > 0);
+    }
+
     @Test
     public void the_overlay_takes_no_touches() {
         Activity a = activity();

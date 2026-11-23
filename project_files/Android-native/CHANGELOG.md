@@ -4,6 +4,26 @@ All notable changes to the native Android app (`project_files/Android-native`), 
 
 Only some builds were put on a phone, so a version below is a build that was made, not necessarily one that was released. Releases are tags on `android-master` with the APK attached; there is none yet.
 
+## 0.3.0-tv25 (129): fixes from RESULT 32
+
+`HP_PROFILE=test`, versionName `0.3.0-tv25-test`. It answers RESULT 32 on issue #1. No engine change since tv24. Compat is unchanged (`hwnet-60-sim3`).
+
+### Fixed
+
+- **Network page: the host rows emptied about 1 s after a search started** (RESULT 32 items 4a and 4c), so the page moved up about 280 px until the host was found again.
+  - **Cause:** the finder reports its list once as soon as it knows the phone's own addresses, before it has found anything. The page took that empty list as the search's answer. The tv24 fix kept the rows only until that first report.
+  - **Fix:** an empty list before the search has listed any host is ignored. The rows still go when the whole search ends with nothing found.
+- **A search could miss a listening host** (RESULT 32 item 5): the subnet probe gave each address one 300 ms connect, and a phone in a game can answer later. When the first pass finds nothing, one more pass runs with a 1500 ms connect timeout, still inside the 20 s search.
+
+### Changed
+
+- **"Paused, catching up…"** sits at the top of the screen, centred, instead of in the middle, where it half-hid the engine's own "Paused" heading on the G6 (owner's choice, RESULT 31 item 1).
+- **The relay's rejoin log line** gives the backskip counts it sent, one per team, for example `rejoining: start message sent, 1429 messages to replay, backskip [0, 1, 0]`.
+
+### Tests
+
+- New cases in `NetLobbyDeviceFixTest`, `SubnetScanTest` and `PauseOverlayTest`, each failing before its fix.
+
 ## 0.3.0-tv24 (128): the desync after a second rejoin
 
 `HP_PROFILE=test`, versionName `0.3.0-tv24-test`. It answers RESULT 31 on issue #1. Engine changes are commits on the `tv24` branch of https://github.com/Gadgit83/hw, each opt-in. Compat is unchanged (`hwnet-60-sim3`).

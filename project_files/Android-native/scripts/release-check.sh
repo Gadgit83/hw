@@ -6,9 +6,11 @@
 #   core   otherwise: malformed basic basic3 rejoin hostleave watch1 hostpause settings, plus the scenarios named after
 #          the changed files (Rejoin, Join/NetLobby/NetSession, Pause, Watch/Spectat, Viewer, Chat)
 #
-# Usage: release-check.sh [--base REF] [--full] [--plan]
+# Usage: release-check.sh [--base REF] [--full | --core] [--plan]
 #   --base REF   the release the change is measured from. Default: the newest tvN tag that HEAD is past.
 #   --full       the full network list, whatever the diff says
+#   --core       the core tier, whatever the diff says: for a change the coordinator has read and judged not to alter the
+#                relay's or the engine's behaviour (a log line, a helper the relay does not call). The summary records it.
 #   --plan       print the steps and the network tier, run nothing
 # Output: build/release-check/<UTC time>/summary.txt (build/release-check/latest links to the newest one), with the
 # per-step results and times, the network results file (net-suite.tsv) and the suite's summary.
@@ -16,13 +18,14 @@
 # net-suite.sh takes it itself. Do not wrap this script in flock: that would hold the lock while the steps wait for it.
 . "$(dirname "$0")/common.sh"
 S="$HOST_DIR/scripts"
-FULL=0; PLAN=0; BASE=""
+FULL=0; CORE_ONLY=0; PLAN=0; BASE=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --full) FULL=1 ;;
+    --core) CORE_ONLY=1 ;;
     --plan) PLAN=1 ;;
     --base) BASE="${2:?--base needs a ref}"; shift ;;
-    -h|--help) sed -n '2,17p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,18p' "$0"; exit 0 ;;
     *) echo "unknown argument: $1 (see --help)" >&2; exit 2 ;;
   esac
   shift
@@ -55,12 +58,17 @@ while IFS= read -r f; do
       TIER=full; WHY="$WHY $f" ;;
   esac
 done <<< "$CHANGED"
+if [ "$CORE_ONLY" = 1 ] && [ "$FULL" = 0 ]; then
+  [ "$TIER" = full ] && WHY="--core given; the diff alone would pick full:$WHY"
+  TIER=core
+fi
 CORE="malformed basic basic3 rejoin hostleave watch1 hostpause settings"
 EXTRA=""
 add() { local s; for s in "$@"; do case " $CORE $EXTRA " in *" $s "*) ;; *) EXTRA="$EXTRA $s" ;; esac; done; }
 while IFS= read -r f; do   # scenarios named after the changed files (used by the core tier)
   case "$f" in
     *Rejoin*) add rejoin rejoinlate ;;
+    */net/Relay.java) add hostrejoin2 joinerrejoin2 hostrejoinpause ;;
     *JoinService*|*NetLobby*|*NetSession*|*Join*) add joinerquit joinerquitchat ;;
     *Pause*) add hostpause hostpausequit joinerpause pausecap ;;
     *Watch*|*Spectat*) add watch1 watchlate watchsend ;;

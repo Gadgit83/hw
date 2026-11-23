@@ -146,6 +146,8 @@ Measured with a one-line probe in `OptionsActivity.java` (a screen-only change, 
     scripts/release-check.sh                        # the tiered check, diff against the previous release
     scripts/release-check.sh --base tv21            # the diff against another release
     scripts/release-check.sh --full                 # the full network list whatever the diff says
+    scripts/release-check.sh --core                 # the core tier whatever the diff says, for a change read and judged not to
+                                                    # alter the relay or the engine (a log line); a Relay.java change adds the rejoin2 scenarios
     scripts/release-check.sh --plan                 # print the steps and the network tier, run nothing
 
 Always, in this order: the test-profile data and `config-test.sh`; the test APK for arm64-v8a and armeabi-v7a (`HP_PROFILE=test`, the smoke test skipped there); `ui-smoke-test.sh` on it. config-test, the APK build and the smoke test each take the heavy lock for their own run. Then the network suite, in one of two tiers:

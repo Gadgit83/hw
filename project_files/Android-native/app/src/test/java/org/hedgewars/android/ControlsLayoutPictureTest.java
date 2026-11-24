@@ -78,6 +78,23 @@ public class ControlsLayoutPictureTest {
         return c;
     }
 
+    /**
+     * RESULT 34 item 8b (FP4): with a camera cut-out on the left, the editor left an 80 px black strip there, so the left-hand boxes
+     * sat about 70 px right of the game's buttons (the right-hand ones matched: the view was inset by the cut-out while the places are
+     * fractions of the whole screen). The game's window is laid out under the bars and the cut-out: SDLActivity sets
+     * SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN, LAYOUT_HIDE_NAVIGATION and LAYOUT_STABLE with the short-edges cut-out mode. The editor's window
+     * must be laid out the same way. Robolectric does not inset a window for a cut-out, so this pins the window settings themselves.
+     */
+    @Test
+    public void theEditorWindowIsLaidOutUnderTheCutOutAndBarsLikeTheGame() throws Exception {
+        ActivityController<ControlsLayoutActivity> c = editorController(new Options());
+        View decor = c.get().getWindow().getDecorView();
+        int want = View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION | View.SYSTEM_UI_FLAG_LAYOUT_STABLE;
+        assertEquals("laid out under the status bar, the navigation bar and the cut-out", want, decor.getSystemUiVisibility() & want);
+        assertEquals(android.view.WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES,
+                c.get().getWindow().getAttributes().layoutInDisplayCutoutMode);
+    }
+
     private static void touch(View v, int action, float x, float y) {
         MotionEvent e = MotionEvent.obtain(1L, 1L, action, x, y, 0);
         v.dispatchTouchEvent(e);

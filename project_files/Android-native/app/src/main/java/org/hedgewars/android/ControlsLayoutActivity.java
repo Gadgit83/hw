@@ -60,6 +60,7 @@ public class ControlsLayoutActivity extends Activity {
         });
         root.addView(editor, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         setContentView(root);
+        layOutLikeTheGame();
         // The cut-out and the insets are known only once the window is laid out (DisplayCalc reads them), so the defaults wait for that.
         root.post(this::applyDefaults);
     }
@@ -67,7 +68,30 @@ public class ControlsLayoutActivity extends Activity {
     @Override
     public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
-        if (hasFocus) Ui.hideBars(this);
+        if (hasFocus) {
+            Ui.hideBars(this);
+            layOutLikeTheGame();
+        }
+    }
+
+    /**
+     * The window is laid out under the bars and the camera cut-out, as SDLActivity lays out the game's window (the LAYOUT_* flags
+     * with the short-edges cut-out mode). Without them a cut-out on a short edge insets the content: on the FP4 the editor left an
+     * 80 px strip on the left and its left-hand boxes sat about 70 px right of the game's buttons (RESULT 34 item 8b), because the
+     * places are fractions of the whole screen.
+     */
+    @SuppressWarnings("deprecation")
+    private void layOutLikeTheGame() {
+        android.view.Window w = getWindow();
+        View decor = w.getDecorView();
+        decor.setSystemUiVisibility(decor.getSystemUiVisibility() | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION | View.SYSTEM_UI_FLAG_LAYOUT_STABLE);
+        if (android.os.Build.VERSION.SDK_INT >= 30) w.setDecorFitsSystemWindows(false);
+        if (android.os.Build.VERSION.SDK_INT >= 28) {
+            android.view.WindowManager.LayoutParams lp = w.getAttributes();
+            lp.layoutInDisplayCutoutMode = android.view.WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+            w.setAttributes(lp);
+        }
     }
 
     /** The places the engine would report at its default layout for this screen, then the saved layout on top of them. */

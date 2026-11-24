@@ -53,6 +53,15 @@
             android:windowSoftInputMode="adjustResize"
             android:configChanges="keyboardHidden" />
 
+        <!-- The controls layout editor over a picture, from Options (issue #26): landscape and full screen like the game, so a
+             fraction of the screen means the same here as in a game. -->
+        <activity
+            android:name=".ControlsLayoutActivity"
+            android:exported="false"
+            android:screenOrientation="sensorLandscape"
+            android:theme="@style/GameTheme"
+            android:configChanges="layoutDirection|locale|orientation|uiMode|screenLayout|screenSize|smallestScreenSize|keyboard|keyboardHidden|navigation" />
+
         <!-- One team in detail: colour, fort, grave, voice, hats and hedgehog names. -->
         <activity
             android:name=".TeamEditActivity"

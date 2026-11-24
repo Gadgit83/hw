@@ -39,6 +39,8 @@ public class OptionsActivity extends SetupActivity {
     static final String EXTRA_OPTIONS = "gameOptions";
     /** Result extra: the options as they were saved, so a game that opened this screen gets the changes (see GameActivity). */
     static final String RESULT_OPTIONS = "options";
+    /** The request code of the controls layout editor (ControlsLayoutActivity), whose result is the saved layout. */
+    static final int REQUEST_CONTROLS = 1;
 
     private Ui ui;
     private Options o;
@@ -137,6 +139,21 @@ public class OptionsActivity extends SetupActivity {
 
     private boolean wide() {
         return Ui.twoColumns(this, 760);
+    }
+
+    /** The editor starts with the options as this screen holds them, so an unsaved change is in the editor too. */
+    private void openControlsLayout() {
+        Intent i = new Intent(this, ControlsLayoutActivity.class).putExtra(ControlsLayoutActivity.EXTRA_OPTIONS, o.toText());
+        startActivityForResult(i, REQUEST_CONTROLS);
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode != REQUEST_CONTROLS || resultCode != RESULT_OK || data == null) return;
+        String spec = data.getStringExtra(ControlsLayoutActivity.RESULT_TOUCH_LAYOUT);
+        o.touchLayout = spec == null ? "" : TouchLayout.sanitize(spec);
+        show();                                      // the Swap option follows the saved layout
     }
 
     private void show() {
@@ -273,6 +290,9 @@ public class OptionsActivity extends SetupActivity {
         swapNote.setVisibility(layoutSaved ? View.VISIBLE : View.GONE);
         buttons.addView(swapNote);
         enableAll(swap, !layoutSaved);
+        buttons.addView(ui.hint("Move, resize or reset the buttons on a picture of a game. The layout is kept until you reset it."));
+        buttons.addView(ui.button("Controls layout", false, v -> openControlsLayout()),
+                ui.margins(Ui.lp(ViewGroup.LayoutParams.WRAP_CONTENT, ui.dp(Ui.TOUCH_DP)), 0, 2, 0, 0));
         walk.addView(ui.toggle("With one jump button: Jump while walking does the long forward jump", o.jumpWhileMoving,
                 c -> o.jumpWhileMoving = c));
         walk.addView(ui.hint("Only with one jump button. While a left or right move is held, Jump jumps forward. "

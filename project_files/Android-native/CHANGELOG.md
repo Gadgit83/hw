@@ -4,6 +4,26 @@ All notable changes to the native Android app (`project_files/Android-native`), 
 
 Only some builds were put on a phone, so a version below is a build that was made, not necessarily one that was released. Releases are tags on `android-master` with the APK attached; there is none yet.
 
+## 0.3.0-tv26 (130): Join by address and the controls editor from Options
+
+`HP_PROFILE=test`, versionName `0.3.0-tv26-test`. App changes only: no engine, relay or launcher change since tv25. Compat is unchanged (`hwnet-60-sim3`).
+
+### Added
+
+- **Join by address from Options** (issue #21, the owner's 16 Nov addition): Options, Advanced, Network, Join by address opens a box prefilled as on the Network screen (the address used before, else this phone's Wi-Fi prefix). Join opens the Network screen, which joins that address at once through its own Join by address path. An address it cannot use shows the same message, in the box. A join is refused while this phone hosts or has joined a game, since a join would leave that game.
+- **The controls layout editor from Options** (issue #26, owner's choice): Options, Controls layout opens the editor full screen in landscape over a picture of a game, with no game running. The default places come from `TouchDefaults`, a Java copy of the engine's default placement for this screen. Save hands the layout back to the Options screen, which keeps it with its other settings. The in-game editor is unchanged.
+
+### Decisions (owner, 24 Nov)
+
+- #26: moving the HUD is left for now. There is one landscape layout, as the game runs only in landscape.
+
+### Tests and tools
+
+- `TouchDefaultsTest` holds `TouchDefaults` equal to the engine's own reports, to the thousandth, over 16 argument sets (both placement branches, insets, rounded corners, margins, cut-outs, UI scales 100 to 240, one and two jump buttons, Fire and Jump swapped). `scripts/touch-defaults-golden.sh` writes the golden file from the host engine.
+- New `JoinByAddressTest` and `ControlsLayoutPictureTest`, each failing before its change.
+- The heavy lock is taken with `flock -o`, so a background child left by a killed step (an Xvfb) can no longer hold it. This stalled a test run for four minutes.
+- One host engine run ended with a bus error while another run shared its Xvfb display; the rerun passed all 16 sets. Not seen again.
+
 ## 0.3.0-tv25 (129): fixes from RESULT 32
 
 `HP_PROFILE=test`, versionName `0.3.0-tv25-test`. It answers RESULT 32 on issue #1. No engine change since tv24. Compat is unchanged (`hwnet-60-sim3`).

@@ -161,3 +161,4 @@ Always, in this order: the test-profile data and `config-test.sh`; the test APK 
 
 - `scripts/net-test.sh` header lists every scenario and its environment variables. `docs/multiphone-test.md` describes the phone and TV checks.
 - `NET_BUILD_ONLY=1 scripts/net-test.sh viewer1` builds the engine, launcher and viewer stand-in and exits. `NET_SKIP_BUILD=1` skips every build step (the suite sets it).
+- The controls editor's default places in Java (`TouchDefaults.java`, for the Options screen with no engine running) are held equal to the engine by `TouchDefaultsTest`, against the golden file `app/src/test/resources/touch-defaults-golden.txt`. `scripts/touch-defaults-golden.sh` writes that file from the host engine (one run per argument set, under the heavy lock). Re-run it when `hedgewars/uWorld.pas`'s touch placement changes.

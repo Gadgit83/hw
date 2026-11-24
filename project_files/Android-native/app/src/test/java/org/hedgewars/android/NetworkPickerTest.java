@@ -58,6 +58,58 @@ public class NetworkPickerTest {
     }
 
     @Test
+    public void theVpnHintSaysSoOnlyWhenTheVpnCannotBeBypassed() {
+        // not bypassable: network games do go through the VPN, so the hint says that
+        assertEquals("A VPN is on that cannot be bypassed, so network games go through it. They work when the VPN reaches this Wi-Fi.",
+                NetworkPicker.vpnHint(true, false));
+        // bypassable: a join can take the Wi-Fi, so today's hint stays
+        assertEquals(NetworkPicker.VPN_HINT, NetworkPicker.vpnHint(true, true));
+        // unknown (API 33 and below, or no VPN network reported): today's hint stays
+        assertEquals(NetworkPicker.VPN_HINT, NetworkPicker.vpnHint(true, null));
+        // no VPN: the hint is hidden, and its text is today's
+        assertEquals(NetworkPicker.VPN_HINT, NetworkPicker.vpnHint(false, false));
+    }
+
+    @Test
+    public void theConnectedLineNamesTheInterfaceAndSaysWhenAVpnCarriesAWifiJoin() {
+        assertEquals("join 192.168.1.164: connected from 192.168.1.62 on wlan0",
+                NetworkPicker.connectedLine("192.168.1.164", "192.168.1.62", "wlan0", false, false));
+        // the owner's case: bound to the Wi-Fi, but the tunnel carried it
+        assertEquals("join 192.168.1.164: connected from 100.64.0.4 on tun0: the VPN carries it (this VPN cannot be bypassed)",
+                NetworkPicker.connectedLine("192.168.1.164", "100.64.0.4", "tun0", true, true));
+        // on the default network (not bound to the Wi-Fi), a VPN carrying it is what was asked for: no note
+        assertEquals("join 192.168.1.164: connected from 100.64.0.4 on tun0",
+                NetworkPicker.connectedLine("192.168.1.164", "100.64.0.4", "tun0", false, true));
+        // bound to the Wi-Fi and it went out on the Wi-Fi: no note
+        assertEquals("join 192.168.1.164: connected from 192.168.1.62 on wlan0",
+                NetworkPicker.connectedLine("192.168.1.164", "192.168.1.62", "wlan0", true, false));
+        // no interface found for the local address
+        assertEquals("join 192.168.1.164: connected from 192.168.1.62 on an unknown interface",
+                NetworkPicker.connectedLine("192.168.1.164", "192.168.1.62", null, false, false));
+    }
+
+    @Test
+    public void aJoinSocketConnectsLikeAPlainSocket() throws Exception {
+        // the log after the connect must not change the connection (on the JVM there is no Android log: the line is skipped)
+        try (java.net.ServerSocket server = new java.net.ServerSocket(0, 8, java.net.InetAddress.getByName("127.0.0.1"))) {
+            java.net.Socket s = new NetworkPicker.JoinSocket("127.0.0.1", false);
+            s.connect(new java.net.InetSocketAddress("127.0.0.1", server.getLocalPort()), 2000);
+            assertTrue(s.isConnected());
+            try (java.net.Socket accepted = server.accept()) {
+                assertTrue(accepted.isConnected());
+            }
+            s.close();
+        }
+    }
+
+    @Test
+    public void anIpv4MappedAddressIsPrintedPlainly() throws Exception {
+        java.net.InetAddress mapped = java.net.InetAddress.getByName("::ffff:100.64.0.4");
+        assertEquals("100.64.0.4", NetworkPicker.plainAddress(mapped));
+        assertEquals("192.168.1.62", NetworkPicker.plainAddress(java.net.InetAddress.getByName("192.168.1.62")));
+    }
+
+    @Test
     public void theSubnetSearchProbesTheWifiThenEthernetNeverAVpnOrHotspot() {
         NetworkPicker.Iface vpn = new NetworkPicker.Iface("tun0", "10.8.0.2", "VPN", 24);
         NetworkPicker.Iface hotspot = new NetworkPicker.Iface("swlan0", "192.168.43.1", "Hotspot", 24);

@@ -40,7 +40,7 @@ final class NetworkChoice {
         int sel = values.indexOf(saved);
         if (sel < 0) sel = 0;                // none chosen, or the chosen interface is gone: Automatic
         final boolean vpn = NetworkPicker.vpnActive(c, ifaces);
-        final TextView hint = ui.hint(NetworkPicker.VPN_HINT);
+        final TextView hint = ui.hint(NetworkPicker.vpnHint(vpn, NetworkPicker.vpnBypassable(c)));
         hint.setVisibility(vpn && sel == 0 ? View.VISIBLE : View.GONE);
         box.addView(ui.choice("Network to use", shorts, longs, sel, which -> {
             NetworkPicker.save(c, values.get(which));

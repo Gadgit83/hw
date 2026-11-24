@@ -47,6 +47,41 @@ final class NetworkPicker {
     static final String PREF_KEY = "netiface";
     static final String AUTO_LABEL = "Automatic (Wi-Fi first)";
     static final String VPN_HINT = "A VPN is on; this phone uses the Wi-Fi for network games";
+    /** The hint when the VPN cannot be bypassed: network games then go through it, whatever network is chosen. */
+    static final String VPN_HINT_NOT_BYPASSABLE = "A VPN is on that cannot be bypassed, so network games go through it. "
+            + "They work when the VPN reaches this Wi-Fi.";
+
+    /**
+     * The hint under "Network to use" when Automatic is shown. It names the Wi-Fi only when a VPN is on and can be bypassed (or it is
+     * not known whether it can): then the join can take the Wi-Fi. A VPN that cannot be bypassed carries every join, so the hint says so.
+     * {@code bypassable} is null when unknown.
+     */
+    static String vpnHint(boolean vpnOn, Boolean bypassable) {
+        return vpnOn && bypassable != null && !bypassable ? VPN_HINT_NOT_BYPASSABLE : VPN_HINT;
+    }
+
+    /**
+     * Whether the VPN that is up can be bypassed: true or false from API 34 (VpnTransportInfo.isBypassable), null when it is not known
+     * (API 33 and below, no VPN network reports its transport, or the method cannot be read). Not for the UI thread.
+     * VpnTransportInfo is not in the public SDK, so the method is read by reflection: a failure is "not known", which keeps today's hint.
+     */
+    static Boolean vpnBypassable(Context c) {
+        if (Build.VERSION.SDK_INT < 34) return null;
+        ConnectivityManager cm = connectivity(c);
+        if (cm == null) return null;
+        try {
+            for (Network n : cm.getAllNetworks()) {
+                NetworkCapabilities caps = cm.getNetworkCapabilities(n);
+                if (caps == null || !caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) continue;
+                Object info = caps.getTransportInfo();
+                if (info == null || !"android.net.VpnTransportInfo".equals(info.getClass().getName())) continue;
+                Object v = info.getClass().getMethod("isBypassable").invoke(info);
+                if (v instanceof Boolean) return (Boolean) v;
+            }
+        } catch (Exception | LinkageError ignored) {
+        }
+        return null;
+    }
 
     /** One IPv4 address of one interface of this phone, offered on the Network screen and used for routing. */
     static final class Iface {
@@ -401,14 +436,19 @@ final class NetworkPicker {
      */
     static String describe(Context c, Network n) {
         String id = String.valueOf(n).replaceAll("\\D", "");
-        String iface = "?";
+        String iface = ifaceOf(c, n);
+        return "network " + (id.isEmpty() ? String.valueOf(n) : id) + " (" + (iface == null ? "?" : iface) + ")";
+    }
+
+    /** The name of the interface a network runs on (its LinkProperties), or null. Not for the UI thread. */
+    static String ifaceOf(Context c, Network n) {
         try {
             ConnectivityManager cm = connectivity(c);
             LinkProperties lp = cm == null ? null : cm.getLinkProperties(n);
-            if (lp != null && lp.getInterfaceName() != null) iface = lp.getInterfaceName();
-        } catch (RuntimeException ignored) {
+            return lp == null ? null : lp.getInterfaceName();
+        } catch (RuntimeException e) {
+            return null;
         }
-        return "network " + (id.isEmpty() ? String.valueOf(n) : id) + " (" + iface + ")";
     }
 
     /** Why a join to {@code host} uses the default route, for the log: this phone, a VPN that covers the LAN, or no Wi-Fi or Ethernet. */
@@ -468,18 +508,87 @@ final class NetworkPicker {
      * network instead, so the join or probe still goes out (a VPN that routes the LAN carries it); the refusal is logged once.
      */
     static <T> Socket openSocket(T network, Binder<T> bind) throws java.io.IOException {
-        if (network == null) return new Socket();
+        return openSocket(network, bind, Socket::new);
+    }
+
+    /** As {@link #openSocket(Object, Binder)}, with the socket made when there is no network or the binding is refused by {@code plain}. */
+    static <T> Socket openSocket(T network, Binder<T> bind, java.util.function.Supplier<Socket> plain) throws java.io.IOException {
+        if (network == null) return plain.get();
         try {
             return bind.bind(network);
         } catch (java.io.IOException | SecurityException e) {
             noteOnce("network: the chosen network refused the socket (" + e.getMessage() + "), using the default network");
-            return new Socket();
+            return plain.get();
+        }
+    }
+
+    /**
+     * The local address as the log prints it: an IPv4-mapped IPv6 address (the form a dual-stack socket reports) as its IPv4 address.
+     */
+    static String plainAddress(java.net.InetAddress a) {
+        if (a instanceof java.net.Inet6Address) {
+            byte[] b = a.getAddress();
+            boolean mapped = b.length == 16;
+            for (int i = 0; mapped && i < 10; i++) mapped = b[i] == 0;
+            mapped = mapped && b[10] == (byte) 0xff && b[11] == (byte) 0xff;
+            if (mapped) return (b[12] & 0xff) + "." + (b[13] & 0xff) + "." + (b[14] & 0xff) + "." + (b[15] & 0xff);
+        }
+        return a.getHostAddress();
+    }
+
+    /**
+     * The line logged once a join's socket is connected: the address and interface it went out on. A socket bound to the Wi-Fi (or
+     * Ethernet) network that went out on a VPN's interface is noted: the VPN carries it whatever was chosen, when it cannot be bypassed.
+     * {@code iface} is null when no interface was found for the address.
+     */
+    static String connectedLine(String host, String local, String iface, boolean boundToLan, boolean ifaceIsVpn) {
+        String line = "join " + host + ": connected from " + local + " on " + (iface == null ? "an unknown interface" : iface);
+        return boundToLan && ifaceIsVpn ? line + ": the VPN carries it (this VPN cannot be bypassed)" : line;
+    }
+
+    /**
+     * A join's socket. Once it is connected it logs the path the connection really took ({@link #connectedLine}): the socket is bound
+     * to a network before the connect, and Android may still send it through a VPN, so the log names the interface it used.
+     */
+    static final class JoinSocket extends Socket {
+        private final String host;
+        private final boolean boundToLan;
+
+        /** {@code boundToLan}: the socket was bound to a Wi-Fi or Ethernet network (not to the default network, nor a VPN). */
+        JoinSocket(String host, boolean boundToLan) {
+            this.host = host;
+            this.boundToLan = boundToLan;
+        }
+
+        @Override public void connect(java.net.SocketAddress endpoint, int timeout) throws java.io.IOException {
+            super.connect(endpoint, timeout);
+            logPath();
+        }
+
+        private void logPath() {
+            try {
+                java.net.InetAddress local = getLocalAddress();
+                java.net.InetAddress v4 = local instanceof java.net.Inet6Address ? plainV4(local) : local;
+                NetworkInterface ni = NetworkInterface.getByInetAddress(v4);
+                String iface = ni == null ? null : ni.getName();
+                String line = connectedLine(host, plainAddress(local), iface, boundToLan, "VPN".equals(kindOf(iface)));
+                android.util.Log.i(Diag.TAG, line);
+            } catch (java.io.IOException | RuntimeException | LinkageError ignored) {
+                // the log is no reason to fail a join
+            }
+        }
+
+        /** The IPv4 address of an IPv4-mapped IPv6 address, else the address itself. */
+        private static java.net.InetAddress plainV4(java.net.InetAddress a) throws java.net.UnknownHostException {
+            String s = plainAddress(a);
+            return s.equals(a.getHostAddress()) ? a : java.net.InetAddress.getByName(s);
         }
     }
 
     /**
      * The factory a join uses: each socket is opened on the network {@link #networkFor} picks at that moment (so a retry follows
-     * a network that came back). With no such network the plain default socket is made, as before.
+     * a network that came back). With no such network the plain default socket is made, as before. Each socket logs its real path
+     * once it is connected ({@link JoinSocket}).
      */
     static SocketFactory socketFactory(final Context c, final String host) {
         return new SocketFactory() {
@@ -487,10 +596,16 @@ final class NetworkPicker {
                 Network n = networkFor(c, host);
                 if (n == null) {
                     android.util.Log.i(Diag.TAG, "join " + host + ": default route (" + defaultRouteWhy(c, host) + ")");
-                    return new Socket();
+                    return new JoinSocket(host, false);
                 }
                 android.util.Log.i(Diag.TAG, "join " + host + ": bound to " + describe(c, n));
-                return openSocket(n, x -> x.getSocketFactory().createSocket());
+                String iface = ifaceOf(c, n);
+                final boolean lan = "Wi-Fi".equals(kindOf(iface)) || "Ethernet".equals(kindOf(iface));
+                return openSocket(n, x -> {
+                    JoinSocket s = new JoinSocket(host, lan);
+                    x.bindSocket(s);
+                    return s;
+                }, () -> new JoinSocket(host, false));
             }
 
             @Override public Socket createSocket(String h, int port) throws java.io.IOException {

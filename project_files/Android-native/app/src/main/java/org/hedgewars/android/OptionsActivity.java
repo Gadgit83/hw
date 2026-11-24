@@ -14,11 +14,14 @@ import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Button;
+import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.Switch;
 import android.widget.TextView;
 import android.widget.Toast;
+
+import org.hedgewars.android.net.Relay;
 
 import java.io.File;
 import java.util.Arrays;
@@ -316,6 +319,12 @@ public class OptionsActivity extends SetupActivity {
     // Advanced ------------------------------------------------------------------------------------
 
     private void advancedTab() {
+        LinearLayout network = ui.card();
+        network.addView(ui.heading("Network"));
+        network.addView(ui.text("Join a game on another phone on this Wi-Fi by typing its address. The game is joined at once.", 14, Color.WHITE));
+        network.addView(ui.button("Join by address", false, v -> joinByAddress()),
+                ui.margins(Ui.lp(ViewGroup.LayoutParams.WRAP_CONTENT, ui.dp(Ui.TOUCH_DP)), 0, 2, 0, 0));
+
         LinearLayout tools = ui.card();
         tools.addView(ui.heading("Diagnostics"));
         tools.addView(ui.text("If a game stops or something looks wrong, share the log so it can be looked at.", 14, Color.WHITE));
@@ -357,7 +366,63 @@ public class OptionsActivity extends SetupActivity {
         lic.addView(ui.button("Credits", false, v -> showFile("CREDITS", "Credits")), ui.margins(ui.weight(1f), 8, 0, 0, 0));
         links.addView(lic, ui.margins(full(), 0, 0, 0, 0));
         about.addView(links, ui.margins(full(), 0, 8, 0, 0));
-        twoColumns(tools, about);
+        LinearLayout side = new LinearLayout(this);
+        side.setOrientation(LinearLayout.VERTICAL);
+        side.addView(network);
+        side.addView(tools, ui.margins(full(), 0, 8, 0, 0));
+        twoColumns(side, about);
+    }
+
+    /**
+     * Join by address: a box with the address the Network screen would start with (the address used before, else this phone's Wi-Fi
+     * prefix). Join starts that screen with the address, which joins at once; an address it cannot join shows its message here.
+     */
+    private void joinByAddress() {
+        final String saved = NetLobbyActivity.lastAddress(this);
+        final String start = NetLobbyActivity.prefilledAddress(saved, "");
+        LinearLayout body = new LinearLayout(this);
+        body.setOrientation(LinearLayout.VERTICAL);
+        body.setPadding(ui.dp(16), ui.dp(8), ui.dp(16), 0);
+        final EditText box = ui.field(start, "Host address, for example 192.168.1.20:" + Relay.PHONE_PORT);
+        box.setInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
+        body.addView(ui.hint("The host's address. The port is " + Relay.PHONE_PORT + " unless you type another after a colon."));
+        body.addView(box);
+        final TextView error = ui.text("", 14, Ui.DANGER);
+        error.setVisibility(View.GONE);
+        body.addView(error, ui.margins(full(), 0, 6, 0, 0));
+
+        final AlertDialog d = Ui.dialog(this).setTitle("Join by address").setView(body)
+                .setPositiveButton("Join", null).setNegativeButton("Cancel", null).create();
+        d.show();
+        d.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+            String typed = box.getText().toString().trim();
+            NetLobbyActivity.Address to = NetLobbyActivity.Address.parse(typed);
+            String refusal = to.problem;
+            // A join leaves the network game this phone hosts or has joined, so it is not started while one runs.
+            if (refusal == null && (NetSession.hosting || NetSession.joined)) {
+                refusal = "This phone is already in a network game. Leave it on the Network screen first.";
+            }
+            if (refusal != null) {
+                error.setText(refusal);
+                error.setVisibility(View.VISIBLE);
+                return;
+            }
+            d.dismiss();
+            startActivity(new Intent(this, NetLobbyActivity.class).putExtra(NetLobbyActivity.EXTRA_JOIN_ADDRESS, typed));
+        });
+
+        // The Wi-Fi prefix is read off the UI thread, as the Network screen reads it: it fills the box unless the person has changed it.
+        new Thread(() -> {
+            final String prefix = NetLobbyActivity.findWifiPrefix();
+            runOnUiThread(() -> {
+                if (!d.isShowing()) return;
+                String now = NetLobbyActivity.prefilledAddress(saved, prefix);
+                if (box.getText().toString().equals(start) && !now.equals(start)) {
+                    box.setText(now);
+                    box.setSelection(now.length());
+                }
+            });
+        }, "own-address").start();
     }
 
     private View infoLine(String k, String v) {

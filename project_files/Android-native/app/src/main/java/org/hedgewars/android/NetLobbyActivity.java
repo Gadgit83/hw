@@ -2,6 +2,7 @@ package org.hedgewars.android;
 
 import android.Manifest;
 import android.app.Activity;
+import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
@@ -49,6 +50,8 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
     static volatile java.util.function.Supplier<List<String>> ownAddresses = NetSession::localAddresses;
     /** What the address field starts with when no address was used before and the phone's own address is not known. */
     static final String DEFAULT_PREFIX = "192.168.1.";
+    /** Intent extra (a string, "host" or "host:port"): the screen joins that address at once, as its Join by address does. */
+    static final String EXTRA_JOIN_ADDRESS = "joinAddress";
     /** A host or join connect is running. Shared by every Network screen, so a reopened screen cannot start a second one. */
     private static volatile boolean connecting;
     /** The address a join is connecting to ("host:port"), shown at once while it runs; empty for a host's own connect. */
@@ -99,8 +102,15 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
         Ui.edgeToEdge(this);
         android.content.SharedPreferences p = getSharedPreferences(Store.PREFS_NAME, MODE_PRIVATE);
         name = PlayerNames.current(this);
-        address = p.getString("netaddr", "");
+        address = lastAddress(this);
         lastHost = p.getString("lasthost", "");
+        // Opened by Join by address (Options): the address goes in the box, and the join starts once the screen is drawn. Only on a
+        // first start, so a screen recreated by a rotation does not join again.
+        final String asked = b == null && getIntent() != null ? getIntent().getStringExtra(EXTRA_JOIN_ADDRESS) : null;
+        if (asked != null && !asked.trim().isEmpty()) {
+            address = asked.trim();
+            addressTyped = true;
+        }
         root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(Ui.BG);
@@ -125,6 +135,13 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
         NetSession.listener = this;
         findOwnPrefix();
         render();
+        // Not while this phone hosts or has joined a game: the join would leave it (the Options dialog refuses too).
+        if (asked != null && !asked.trim().isEmpty() && !NetSession.hosting && !NetSession.joined) join(false);
+    }
+
+    /** The address used before (kept in the preferences), or "" until one was typed. Shared with Options' Join by address. */
+    static String lastAddress(Context c) {
+        return c.getSharedPreferences(Store.PREFS_NAME, MODE_PRIVATE).getString("netaddr", "");
     }
 
     /**
@@ -133,13 +150,7 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
      */
     private void findOwnPrefix() {
         new Thread(() -> {
-            String found;
-            try {
-                found = subnetPrefix(ownAddresses.get());
-            } catch (RuntimeException e) {
-                found = "";
-            }
-            final String prefix = found;
+            final String prefix = findWifiPrefix();
             runOnUiThread(() -> {
                 if (destroyed) return;
                 subnetPrefix = prefix;
@@ -160,8 +171,55 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
 
     /** What the address field starts with: the address used before, else this phone's Wi-Fi prefix, else the usual one. */
     private String addressToShow() {
-        if (!address.isEmpty()) return address;
-        return subnetPrefix.isEmpty() ? DEFAULT_PREFIX : subnetPrefix;
+        return prefilledAddress(address, subnetPrefix);
+    }
+
+    /** What an address box starts with before the person types: the address used before, else the Wi-Fi prefix, else the usual one. */
+    static String prefilledAddress(String savedAddress, String wifiPrefix) {
+        if (savedAddress != null && !savedAddress.isEmpty()) return savedAddress;
+        return wifiPrefix == null || wifiPrefix.isEmpty() ? DEFAULT_PREFIX : wifiPrefix;
+    }
+
+    /** This phone's Wi-Fi prefix from its own addresses, or "" when there is none. Reads the network: not for the UI thread. */
+    static String findWifiPrefix() {
+        try {
+            return subnetPrefix(ownAddresses.get());
+        } catch (RuntimeException e) {
+            return "";
+        }
+    }
+
+    /**
+     * A typed host address, split into the host and the port (the usual port when none is typed), or the message the screen shows when
+     * the address cannot be joined. Join by address here and in Options both use it, so they say the same.
+     */
+    static final class Address {
+        final String host;
+        final int port;
+        /** The message for an address that cannot be joined, or null. */
+        final String problem;
+
+        private Address(String host, int port, String problem) {
+            this.host = host;
+            this.port = port;
+            this.problem = problem;
+        }
+
+        static Address parse(String typed) {
+            String a = typed == null ? "" : typed.trim();
+            if (a.isEmpty()) {
+                return new Address("", 0, "Type the host's address first, for example " + DEFAULT_PREFIX + "20:" + Relay.PHONE_PORT + ".");
+            }
+            if (a.endsWith(".")) return new Address("", 0, "Add the last number of the host's address, for example " + a + "20.");
+            int colon = a.lastIndexOf(':');
+            try {
+                String host = colon > 0 ? a.substring(0, colon) : a;
+                int port = colon > 0 ? Integer.parseInt(a.substring(colon + 1).trim()) : Relay.PHONE_PORT;
+                return new Address(host, port, null);
+            } catch (NumberFormatException e) {
+                return new Address("", 0, "The port after the colon is not a number.");
+            }
+        }
     }
 
     private void fillAddress(String text) {
@@ -1226,29 +1284,13 @@ public class NetLobbyActivity extends Activity implements NetSession.Listener {
         problem = "";
         scrollToProblem = true;
         // What the field shows, which may be the phone's own prefix that the person has not finished.
-        String a = (addressField != null ? addressField.getText().toString() : address).trim();
-        if (a.isEmpty()) {
-            problem = "Type the host's address first, for example 192.168.1.20:" + Relay.PHONE_PORT + ".";
+        Address to = Address.parse(addressField != null ? addressField.getText().toString() : address);
+        if (to.problem != null) {
+            problem = to.problem;
             render();
             return;
         }
-        if (a.endsWith(".")) {
-            problem = "Add the last number of the host's address, for example " + a + "20.";
-            render();
-            return;
-        }
-        final String host;
-        final int port;
-        int colon = a.lastIndexOf(':');
-        try {
-            host = colon > 0 ? a.substring(0, colon) : a;
-            port = colon > 0 ? Integer.parseInt(a.substring(colon + 1).trim()) : Relay.PHONE_PORT;
-        } catch (NumberFormatException e) {
-            problem = "The port after the colon is not a number.";
-            render();
-            return;
-        }
-        connectTo(host, port, watch);
+        connectTo(to.host, to.port, watch);
     }
 
     private void connectTo(final String host, final int port, final boolean watch) {

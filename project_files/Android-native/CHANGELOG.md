@@ -4,6 +4,22 @@ All notable changes to the native Android app (`project_files/Android-native`), 
 
 Only some builds were put on a phone, so a version below is a build that was made, not necessarily one that was released. Releases are tags on `android-master` with the APK attached; there is none yet.
 
+## 0.3.0-tv27 (131): fixes from RESULT 34
+
+`HP_PROFILE=test`, versionName `0.3.0-tv27-test`. App changes only: no engine, relay or launcher change since tv25. Compat is unchanged (`hwnet-60-sim3`).
+
+### Fixed
+
+- **The controls editor from Options on a phone with a camera cut-out** (#26, RESULT 34 item 8b): on the FP4 its left-hand boxes sat about 70 px right of the game's buttons, beside an 80 px black strip. The editor's window was inset by the cut-out, while the places are fractions of the whole screen. It now gets the layout flags SDL gives the game's window, so both are laid out under the cut-out and the bars.
+- **What the app says about a VPN that cannot be bypassed** (#14, RESULT 34 item 1c): Android sends every socket of an app through such a VPN, whatever network the socket is bound to, so Network to use = Wi-Fi cannot take effect while one is up. The join still worked through the VPN, but the log said "bound to … (wlan0)" and the Network screen said the phone uses the Wi-Fi.
+  - Each join now logs the path it really took: `join <host>: connected from <address> on <interface>`. When a join bound to the Wi-Fi or Ethernet went out on a VPN interface, it adds ": the VPN carries it (this VPN cannot be bypassed)".
+  - On Android 14 and later, where the app can tell, the hint reads "A VPN is on that cannot be bypassed, so network games go through it. They work when the VPN reaches this Wi-Fi." Otherwise it is unchanged.
+  - How a join connects is unchanged.
+
+### Decisions (24 Nov, recorded on #1)
+
+- #21: text that can be a host name (for example "abc") is tried as one, and a failure is reported on the Network screen. The Options box shows only errors for text that cannot be an address.
+
 ## 0.3.0-tv26 (130): Join by address and the controls editor from Options
 
 `HP_PROFILE=test`, versionName `0.3.0-tv26-test`. App changes only: no engine, relay or launcher change since tv25. Compat is unchanged (`hwnet-60-sim3`).

@@ -30,7 +30,7 @@ while [ $# -gt 0 ]; do
   esac
   shift
 done
-if ps -o args= -p "$PPID" 2>/dev/null | grep -qF -- "flock $HP_HEAVY_LOCK"; then
+if ps -o args= -p "$PPID" 2>/dev/null | grep -F -- "$HP_HEAVY_LOCK" | grep -q "^flock "; then
   echo "release-check.sh is running under flock on the heavy lock: its steps would wait for that lock for ever." >&2
   echo "Run it without flock; it takes the lock for each heavy step." >&2
   exit 2

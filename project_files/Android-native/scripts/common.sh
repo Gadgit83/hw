@@ -34,11 +34,12 @@ export HP_PROFILE
 log() { printf '\n==> %s\n' "$*"; }
 
 # The machine's heavy lock, shared with the other workers (docs/TESTING.md). heavy CMD... runs a heavy step under it. A
-# caller that already holds the lock (HP_HEAVY_HELD=1) runs the command directly.
+# caller that already holds the lock (HP_HEAVY_HELD=1) runs the command directly. flock -o: the lock stays with the flock process
+# and is not handed down, so a background child that outlives the step (an Xvfb left by a killed host test) cannot keep it.
 HP_HEAVY_LOCK="${HP_HEAVY_LOCK:-/tmp/claude-0/-home-user/ac142ab0-1bea-5b6c-a7cb-3a9f55df2846/scratchpad/heavy.lock}"
 heavy() {
   if [ -n "${HP_HEAVY_HELD:-}" ]; then "$@"; return; fi
-  flock "$HP_HEAVY_LOCK" env HP_HEAVY_HELD=1 "$@"
+  flock -o "$HP_HEAVY_LOCK" env HP_HEAVY_HELD=1 "$@"
 }
 
 # One hash of what git knows about some paths of a checkout: the blob id of every tracked file, the content of each file that
